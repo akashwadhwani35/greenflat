@@ -100,6 +100,19 @@ export interface UserActivityLimits {
   last_reset_at: Date;
 }
 
+export interface UserAIProfile {
+  id: number;
+  user_id: number;
+  self_summary?: string;
+  ideal_partner_prompt?: string;
+  connection_preferences?: string;
+  dealbreakers?: string;
+  growth_journey?: string;
+  persona_embedding?: number[];
+  updated_at: Date;
+  created_at: Date;
+}
+
 export interface SearchFilters {
   minAge?: number;
   maxAge?: number;

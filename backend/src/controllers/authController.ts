@@ -61,11 +61,11 @@ export const signup = async (req: Request, res: Response) => {
     await client.query('COMMIT');
 
     // Generate JWT token
-    const jwtSecret: Secret = JWT_CONFIG.secret;
-    const jwtOptions: SignOptions = {
-      expiresIn: JWT_CONFIG.expiresIn as unknown as SignOptions['expiresIn'],
-    };
-    const token = jwt.sign({ userId: user.id }, jwtSecret, jwtOptions);
+    const token = jwt.sign(
+      { userId: user.id },
+      JWT_CONFIG.secret,
+      { expiresIn: JWT_CONFIG.expiresIn } as any
+    );
 
     res.status(201).json({
       message: 'User created successfully',
@@ -119,11 +119,11 @@ export const login = async (req: Request, res: Response) => {
     }
 
     // Generate JWT token
-    const jwtSecret: Secret = JWT_CONFIG.secret;
-    const jwtOptions: SignOptions = {
-      expiresIn: JWT_CONFIG.expiresIn as unknown as SignOptions['expiresIn'],
-    };
-    const token = jwt.sign({ userId: user.id }, jwtSecret, jwtOptions);
+    const token = jwt.sign(
+      { userId: user.id },
+      JWT_CONFIG.secret,
+      { expiresIn: JWT_CONFIG.expiresIn } as any
+    );
 
     res.json({
       message: 'Login successful',

@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { PERSONALITY_TRAITS_MAP } from '../utils/constants';
-import { analyzePersonality } from '../services/openai.service';
+import { analyzePersonality, generateProfileEmbedding } from '../services/openai.service';
 
 export const completeProfile = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
@@ -29,6 +29,12 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       spiritual,
       open_minded,
       career_focused,
+      // AI persona prompts
+      self_summary,
+      ideal_partner_prompt,
+      connection_preferences,
+      dealbreakers,
+      growth_journey,
       // Personality quiz answers
       question1_answer,
       question2_answer,
@@ -134,6 +140,56 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       ]
     );
 
+    const personaSegments = [
+      bio,
+      prompt1,
+      prompt2,
+      prompt3,
+      self_summary,
+      ideal_partner_prompt,
+      connection_preferences,
+      dealbreakers,
+      growth_journey,
+      uniqueTraits.join(', '),
+    ]
+      .filter((segment): segment is string => Boolean(segment && segment.length > 0))
+      .join('\n');
+
+    let personaEmbedding: number[] | null = null;
+    if (process.env.OPENAI_API_KEY && personaSegments.trim().length > 0) {
+      try {
+        personaEmbedding = await generateProfileEmbedding(personaSegments);
+      } catch (error) {
+        console.error('Error generating persona embedding:', error);
+      }
+    }
+
+    const personaResult = await client.query(
+      `INSERT INTO user_ai_profiles (
+        user_id, self_summary, ideal_partner_prompt, connection_preferences,
+        dealbreakers, growth_journey, persona_embedding, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+      ON CONFLICT (user_id)
+      DO UPDATE SET
+        self_summary = $2,
+        ideal_partner_prompt = $3,
+        connection_preferences = $4,
+        dealbreakers = $5,
+        growth_journey = $6,
+        persona_embedding = $7,
+        updated_at = NOW()
+      RETURNING *`,
+      [
+        userId,
+        self_summary || null,
+        ideal_partner_prompt || null,
+        connection_preferences || null,
+        dealbreakers || null,
+        growth_journey || null,
+        personaEmbedding ? JSON.stringify(personaEmbedding) : null,
+      ]
+    );
+
     await client.query('COMMIT');
 
     res.json({
@@ -141,6 +197,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       profile: profileResult.rows[0],
       personality_traits: uniqueTraits,
       ai_insights: aiPersonalityInsights,
+      ai_persona: personaResult.rows[0] || null,
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -177,6 +234,12 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       [userId]
     );
 
+    // Get AI persona data
+    const aiProfileResult = await pool.query(
+      'SELECT user_id, self_summary, ideal_partner_prompt, connection_preferences, dealbreakers, growth_journey, persona_embedding, updated_at FROM user_ai_profiles WHERE user_id = $1',
+      [userId]
+    );
+
     // Get photos
     const photosResult = await pool.query(
       'SELECT id, photo_url, is_primary, order_index FROM photos WHERE user_id = $1 ORDER BY order_index',
@@ -187,6 +250,10 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
       user: userResult.rows[0],
       profile: profileResult.rows[0] || null,
       personality: personalityResult.rows[0] || null,
+      ai_persona: aiProfileResult.rows[0] ? {
+        ...aiProfileResult.rows[0],
+        persona_embedding: aiProfileResult.rows[0].persona_embedding || [],
+      } : null,
       photos: photosResult.rows,
     });
   } catch (error) {

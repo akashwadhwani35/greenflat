@@ -479,6 +479,111 @@ const femaleProfiles: DemoProfile[] = [
   },
 ];
 
+
+const femaleFirstNames = ['Aanya', 'Ishita', 'Meera', 'Lara', 'Tanya', 'Radhika', 'Suhani', 'Devika', 'Maira', 'Kimaya'];
+const maleFirstNames = ['Arnav', 'Vihaan', 'Ishan', 'Reyansh', 'Dhruv', 'Kabir', 'Aarav', 'Vivaan', 'Advait', 'Neil'];
+const lastNames = ['Rao', 'Malik', 'Iyer', 'Kapadia', 'Fernandes', 'Das', 'Chowdhury', 'Singhal', 'Menon', 'Bhagat'];
+const cities = ['Delhi', 'Mumbai', 'Bengaluru', 'Hyderabad', 'Pune', 'Chennai', 'Goa', 'Jaipur', 'Ahmedabad', 'Kochi', 'Lucknow', 'Indore'];
+const interestPool = ['slow travel', 'yoga', 'indie music', 'culinary experiments', 'climate action', 'board games', 'street photography', 'trail running', 'coffee brewing', 'podcasts', 'gardening', 'ceramics', 'community work'];
+const occupations = ['Product Designer', 'Climate Analyst', 'Research Lead', 'Psychologist', 'Founder', 'Engineer', 'Policy Researcher', 'Storyteller', 'Creative Producer', 'Wellness Coach'];
+const educations = ['Masters in Design', 'MBA', 'B.Tech', 'Masters in Data Science', 'BA in Psychology', 'Masters in Sustainability', 'B.Des', 'Masters in Communications'];
+const bios = [
+  'Human-centered {occupation} guiding thoughtful experiences.',
+  '{occupation} crafting calm spaces online and offline.',
+  '{occupation} building kinder futures with curiosity and intention.',
+  '{occupation} who thrives on shared playlists and long-form conversations.',
+];
+const promptOpeners = [
+  'Currently exploring {interest} in {city}.',
+  'Favourite ritual: {interest} before sunrise.',
+  'Green flag alert: someone who appreciates {interest}.',
+  'Ask me about my latest experiment with {interest}.',
+  'You’ll usually find me hosting mini-salons on {interest}.',
+];
+const drinkHabits = ['never', 'rarely', 'social'];
+const diets = ['vegetarian', 'vegan', 'pescatarian', 'flexitarian', 'non-vegetarian'];
+const fitnessLevels = ['gentle', 'moderate', 'active', 'intense'];
+const relationshipGoals = ['long-term', 'serious', 'open to possibilities', 'friendship first'];
+const bodyTypes = ['athletic', 'fit', 'average', 'curvy', 'slim'];
+const quizOptions = ['A', 'B', 'C', 'D'];
+const orientations: InterestedIn[] = ['male', 'female', 'both'];
+
+const pickCycle = <T,>(items: T[], offset: number, count = 1): T[] =>
+  Array.from({ length: count }, (_, index) => items[(offset + index) % items.length]);
+
+const createGeneratedProfiles = (targetCount: number): DemoProfile[] => {
+  const generated: DemoProfile[] = [];
+
+  for (let i = 0; i < targetCount; i += 1) {
+    const gender: Gender = i % 2 === 0 ? 'female' : 'male';
+    const firstNames = gender === 'female' ? femaleFirstNames : maleFirstNames;
+    const firstName = firstNames[i % firstNames.length];
+    const lastName = lastNames[(i + 3) % lastNames.length];
+    const name = `${firstName} ${lastName}`;
+    const emailSlug = `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z]+/g, '.');
+    const email = `${emailSlug}.${i + 100}@example.com`;
+    const city = cities[(i * 5) % cities.length];
+    const birthYear = 1988 + (i % 12);
+    const birthMonth = (i % 12) + 1;
+    const birthDay = (i % 20) + 8;
+    const date_of_birth = `${birthYear}-${String(birthMonth).padStart(2, '0')}-${String(birthDay).padStart(2, '0')}`;
+    const heightBase = gender === 'female' ? 158 : 172;
+    const height = heightBase + (i % 10);
+    const body_type = bodyTypes[(i + 2) % bodyTypes.length];
+    const interests = pickCycle(interestPool, i, 4);
+    const occupation = occupations[(i + 4) % occupations.length];
+    const education = educations[(i + 2) % educations.length];
+    const template = bios[i % bios.length];
+    const bio = template.replace('{occupation}', occupation.toLowerCase());
+    const prompts = pickCycle(promptOpeners, i, 3).map((prompt, idx) =>
+      prompt
+        .replace('{interest}', interests[idx % interests.length])
+        .replace('{city}', city)
+    );
+    const [prompt1, prompt2, prompt3] = prompts;
+    const quizAnswers = Array.from({ length: 8 }, (_, index) => quizOptions[(i + index) % quizOptions.length]);
+    const photoFolder = gender === 'female' ? 'women' : 'men';
+    const photoIndexBase = (i * 7) % 90;
+    const photos = [
+      `https://randomuser.me/api/portraits/${photoFolder}/${photoIndexBase + 1}.jpg`,
+      `https://randomuser.me/api/portraits/${photoFolder}/${(photoIndexBase + 12) % 90 + 1}.jpg`,
+    ];
+
+    generated.push({
+      email,
+      password: DEFAULT_PASSWORD,
+      name,
+      gender,
+      interested_in: orientations[(i + 1) % orientations.length],
+      date_of_birth,
+      city,
+      cooldown_enabled: gender === 'female',
+      height,
+      body_type,
+      interests,
+      bio,
+      prompt1,
+      prompt2,
+      prompt3,
+      smoker: i % 11 === 0 ? true : false,
+      drinker: drinkHabits[i % drinkHabits.length],
+      diet: diets[i % diets.length],
+      fitness_level: fitnessLevels[(i + 1) % fitnessLevels.length],
+      education,
+      occupation,
+      relationship_goal: relationshipGoals[(i + 2) % relationshipGoals.length],
+      family_oriented: i % 3 !== 0,
+      spiritual: i % 4 === 0,
+      open_minded: true,
+      career_focused: i % 5 !== 0,
+      quizAnswers,
+      photos,
+    });
+  }
+
+  return generated;
+};
+
 const maleProfiles: DemoProfile[] = [
   {
     email: 'arjun.singh@example.com',
@@ -868,7 +973,9 @@ const maleProfiles: DemoProfile[] = [
   },
 ];
 
-const demoProfiles: DemoProfile[] = [...femaleProfiles, ...maleProfiles];
+const baseProfiles: DemoProfile[] = [...femaleProfiles, ...maleProfiles];
+const generatedProfiles = createGeneratedProfiles(Math.max(0, 100 - baseProfiles.length));
+const demoProfiles: DemoProfile[] = [...baseProfiles, ...generatedProfiles];
 
 const deriveTraitsFromQuiz = (answers: string[]): string[] => {
   const traits = answers.map(answer => PERSONALITY_TRAITS_MAP[answer] || []).flat();
@@ -876,7 +983,7 @@ const deriveTraitsFromQuiz = (answers: string[]): string[] => {
 };
 
 const seedDemoProfiles = async () => {
-  console.log('🚀 Seeding demo profiles (25 users)...');
+  console.log(`🚀 Seeding demo profiles (${demoProfiles.length} users)...`);
   let createdCount = 0;
 
   for (const profile of demoProfiles) {

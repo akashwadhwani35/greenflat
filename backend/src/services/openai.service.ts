@@ -137,6 +137,65 @@ export const cosineSimilarity = (a: number[], b: number[]): number => {
 /**
  * Generate match reasoning - why these two users are a good match
  */
+
+/**
+ * Generate a rich explanation for why two users align
+ */
+export const generateMatchNarrative = async (
+  seekerProfile: string,
+  candidateProfile: string,
+  matchPercentage: number
+): Promise<{
+  summary: string;
+  highlights: string[];
+  suggested_openers: string[];
+}> => {
+  const prompt = `You are Greenflag, an emotionally intelligent dating coach. Explain why two people (User A and User B) could be a meaningful match.
+
+User A Persona:
+${seekerProfile}
+
+User B Persona:
+${candidateProfile}
+
+They have a compatibility score of ${matchPercentage}%.
+
+Return JSON with keys summary (2 sentences max), highlights (array of 2-3 bullet points describing alignment), and suggested_openers (array of 2 gentle conversation starters tied to their common ground). Keep language warm, human, and specific.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.6,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0].message.content;
+    if (!content) {
+      throw new Error('No response from OpenAI');
+    }
+
+    const parsed = JSON.parse(content);
+    return {
+      summary: parsed.summary || 'You share relatable energy.',
+      highlights: parsed.highlights || [],
+      suggested_openers: parsed.suggested_openers || [],
+    };
+  } catch (error) {
+    console.error('Error generating match narrative:', error);
+    return {
+      summary: 'You share similar intentions and would likely enjoy a thoughtful first chat.',
+      highlights: [
+        'Shared interests suggest easy conversation',
+        'Values appear aligned from your profiles',
+      ],
+      suggested_openers: [
+        'Ask about a recent moment that made them feel alive',
+        'Share a story that reflects your common interest',
+      ],
+    };
+  }
+};
 export const generateMatchReason = async (
   userProfile: string,
   matchProfile: string,
@@ -272,6 +331,7 @@ export default {
   generateProfileEmbedding,
   cosineSimilarity,
   generateMatchReason,
+  generateMatchNarrative,
   analyzePersonality,
   generateBioSuggestions,
 };

@@ -121,6 +121,20 @@ CREATE TABLE IF NOT EXISTS user_activity_limits (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- AI Persona Table
+CREATE TABLE IF NOT EXISTS user_ai_profiles (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    self_summary TEXT,
+    ideal_partner_prompt TEXT,
+    connection_preferences TEXT,
+    dealbreakers TEXT,
+    growth_journey TEXT,
+    persona_embedding JSONB,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Bookmarks Table (Premium feature)
 CREATE TABLE IF NOT EXISTS bookmarks (
     id SERIAL PRIMARY KEY,

@@ -3,7 +3,49 @@ import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS } from '../utils/constants';
 import { SearchFilters } from '../types';
-import { parseSearchQuery, generateMatchReason } from '../services/openai.service';
+import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
+
+const parseEmbedding = (value: any): number[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((num) => Number(num)).filter((num) => Number.isFinite(num));
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed.map((num) => Number(num)).filter((num) => Number.isFinite(num)) : [];
+    } catch {
+      return [];
+    }
+  }
+  if (typeof value === 'object') {
+    const maybeArray = Object.values(value);
+    if (maybeArray.every((num) => typeof num === 'number')) {
+      return maybeArray as number[];
+    }
+  }
+  return [];
+};
+
+const buildPersonaSummary = (persona: any, profile: any): string => {
+  const sections = [
+    persona?.self_summary,
+    persona?.connection_preferences,
+    persona?.ideal_partner_prompt,
+    persona?.growth_journey,
+    persona?.dealbreakers ? `Dealbreakers: ${persona.dealbreakers}` : undefined,
+    profile?.bio,
+    profile?.prompt1,
+    profile?.prompt2,
+    profile?.prompt3,
+    Array.isArray(profile?.interests) ? `Interests: ${(profile.interests as string[]).join(', ')}` : undefined,
+  ];
+
+  return sections
+    .filter((value): value is string => Boolean(value && value.trim().length > 0))
+    .join('\n');
+};
+
 
 // Helper function to calculate age from date of birth
 const calculateAge = (dateOfBirth: Date): number => {
@@ -30,7 +72,9 @@ const calculateMatchPercentage = (
   userInterests: string[],
   userPersonality: string[],
   targetInterests: string[],
-  targetPersonality: string[]
+  targetPersonality: string[],
+  userPersonaEmbedding: number[],
+  targetPersonaEmbedding: number[]
 ): number => {
   let matchScore = 0;
   let totalFactors = 0;
@@ -119,6 +163,12 @@ const calculateMatchPercentage = (
     }
   }
 
+  if (userPersonaEmbedding.length > 0 && targetPersonaEmbedding.length > 0) {
+    const embeddingScore = Math.max(0, cosineSimilarity(userPersonaEmbedding, targetPersonaEmbedding));
+    matchScore += embeddingScore * 15;
+    totalFactors += 15;
+  }
+
   return Math.min(Math.round((matchScore / totalFactors) * 100), 99);
 };
 
@@ -155,10 +205,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
     // Get current user data
     const currentUserResult = await pool.query(
-      `SELECT u.*, p.interests as user_interests, pr.personality_traits as user_personality
+      `SELECT u.*, p.interests as user_interests, pr.personality_traits as user_personality,
+              uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
+              uap.dealbreakers, uap.growth_journey, uap.persona_embedding
        FROM users u
        LEFT JOIN user_profiles p ON u.id = p.user_id
        LEFT JOIN personality_responses pr ON u.id = pr.user_id
+       LEFT JOIN user_ai_profiles uap ON u.id = uap.user_id
        WHERE u.id = $1`,
       [userId]
     );
@@ -169,6 +222,24 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
     const currentUser = currentUserResult.rows[0];
     const userAge = calculateAge(currentUser.date_of_birth);
+    const currentUserPersonaEmbedding = parseEmbedding((currentUser as any).persona_embedding);
+
+    const seekerPersonaSummary = buildPersonaSummary(
+      {
+        self_summary: (currentUser as any).self_summary,
+        connection_preferences: (currentUser as any).connection_preferences,
+        ideal_partner_prompt: (currentUser as any).ideal_partner_prompt,
+        dealbreakers: (currentUser as any).dealbreakers,
+        growth_journey: (currentUser as any).growth_journey,
+      },
+      {
+        bio: (currentUser as any).bio,
+        prompt1: (currentUser as any).prompt1,
+        prompt2: (currentUser as any).prompt2,
+        prompt3: (currentUser as any).prompt3,
+        interests: currentUser.user_interests || [],
+      }
+    );
 
     // Determine on-grid and off-grid result counts based on gender
     const limits = currentUser.gender === 'male' ? DAILY_LIMITS.male : DAILY_LIMITS.female;
@@ -180,20 +251,23 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     let paramIndex = 3;
 
     let baseQuery = `
-      SELECT DISTINCT
+      SELECT
         u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified,
         p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
         p.smoker, p.drinker, p.relationship_goal,
         pr.personality_traits,
-        (SELECT photo_url FROM photos WHERE user_id = u.id AND is_primary = TRUE LIMIT 1) as primary_photo
+        uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
+        uap.dealbreakers, uap.growth_journey, uap.persona_embedding,
+        primary_photo.photo_url as primary_photo
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
       LEFT JOIN personality_responses pr ON u.id = pr.user_id
+      LEFT JOIN user_ai_profiles uap ON u.id = uap.user_id
+      LEFT JOIN photos primary_photo ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
+      LEFT JOIN likes existing_like ON existing_like.liker_id = $1 AND existing_like.liked_id = u.id
       WHERE u.id != $1
         AND u.gender = $2
-        AND NOT EXISTS (
-          SELECT 1 FROM likes WHERE liker_id = $1 AND liked_id = u.id
-        )
+        AND existing_like.id IS NULL
     `;
 
     // Apply age filters
@@ -267,19 +341,23 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
     // Calculate match percentages for all candidates
     const scoredCandidates = candidates.map((candidate: any) => {
+      const candidateEmbedding = parseEmbedding(candidate.persona_embedding);
       const matchPercentage = calculateMatchPercentage(
         search_query || '',
         aiParsedQuery?.preferences || null,
         currentUser.user_interests || [],
         currentUser.user_personality || [],
         candidate.interests || [],
-        candidate.personality_traits || []
+        candidate.personality_traits || [],
+        currentUserPersonaEmbedding,
+        candidateEmbedding
       );
 
       return {
         ...candidate,
         match_percentage: matchPercentage,
         age: calculateAge(candidate.date_of_birth),
+        persona_embedding: candidateEmbedding,
       };
     });
 
@@ -295,39 +373,53 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const offGridMatches = shuffledOffGrid.slice(0, offGridCount);
 
     // Generate AI match reasons for on-grid matches (top matches only)
-    let onGridWithReasons = onGridMatches;
-    if (isAIEnabled && onGridMatches.length > 0) {
-      const currentProfileSummary = [
-        currentUser.name,
-        currentUser.city,
-        ...(currentUser.user_interests || []),
-        ...(currentUser.user_personality || []),
-      ]
-        .filter(Boolean)
-        .join(', ');
+    let onGridWithReasons = onGridMatches.map((match: any) => ({
+      ...match,
+      match_reason: 'You might enjoy a thoughtful conversation together.',
+      match_highlights: [],
+      suggested_openers: [],
+    }));
 
+    if (isAIEnabled && onGridMatches.length > 0) {
       onGridWithReasons = await Promise.all(
         onGridMatches.map(async (match: any) => {
+          const candidateSummary = buildPersonaSummary(match, match);
           try {
-            const matchProfileText = [
-              match.name,
-              match.city,
-              ...(match.interests || []),
-              ...(match.personality_traits || []),
-            ]
-              .filter(Boolean)
-              .join(', ');
-
-            const matchReason = await generateMatchReason(
-              currentProfileSummary,
-              matchProfileText,
+            const narrative = await generateMatchNarrative(
+              seekerPersonaSummary,
+              candidateSummary,
               match.match_percentage
             );
 
-            return { ...match, match_reason: matchReason };
+            return {
+              ...match,
+              match_reason: narrative.summary,
+              match_highlights: narrative.highlights || [],
+              suggested_openers: narrative.suggested_openers || [],
+            };
           } catch (error) {
-            console.error('Error generating match reason:', error);
-            return { ...match, match_reason: 'You share common interests' };
+            console.error('Error generating match narrative:', error);
+            try {
+              const fallbackReason = await generateMatchReason(
+                seekerPersonaSummary,
+                candidateSummary,
+                match.match_percentage
+              );
+              return {
+                ...match,
+                match_reason: fallbackReason,
+                match_highlights: [],
+                suggested_openers: [],
+              };
+            } catch (fallbackError) {
+              console.error('Fallback match reason failed:', fallbackError);
+              return {
+                ...match,
+                match_reason: 'You have overlapping interests and compatible energy.',
+                match_highlights: [],
+                suggested_openers: [],
+              };
+            }
           }
         })
       );

@@ -7,8 +7,9 @@
     "dev": "nodemon src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "seed:demo": "ts-node src/scripts/seedDemoProfiles.ts"
+    "test": "NODE_ENV=test jest --runInBand",
+    "test:watch": "NODE_ENV=test jest --watch",
+    "seed:demo": "ts-node --transpile-only src/scripts/seedDemoProfiles.ts"
   },
   "keywords": [],
   "author": "",
@@ -28,9 +29,16 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.3",
+    "@types/jest": "^29.5.12",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.9.1",
+    "@types/pg": "^8.11.10",
+    "@types/supertest": "^2.0.16",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.10",
+    "pg-mem": "^3.0.5",
+    "supertest": "^7.0.0",
+    "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
   }

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "ai-dating-app",
-    "slug": "ai-dating-app",
+    "name": "Greenflag",
+    "slug": "greenflag",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -10,7 +10,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#FAFAFB"
     },
     "ios": {
       "supportsTablet": true
@@ -18,13 +18,14 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#FAFAFB"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "description": "An empathic, AI-guided dating experience focused on meaningful green flags."
   }
 }
