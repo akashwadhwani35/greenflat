@@ -43,23 +43,47 @@ interface DemoProfile {
 }
 
 const DEFAULT_PASSWORD = process.env.DEMO_USER_PASSWORD || 'Passw0rd!';
+const TARGET_TOTAL_USERS = Number(process.env.DEMO_TARGET_USERS || 300);
+const MAIN_DEMO_EMAILS = (process.env.DEMO_MAIN_EMAILS || 'emma.johnson@example.com,sophia.williams@example.com,olivia.davis@example.com,ava.martinez@example.com,isabella.anderson@example.com')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean)
+  .slice(0, 5);
+
+const cityCoordinates: Record<string, { lat: number; lng: number }> = {
+  'New York': { lat: 40.7128, lng: -74.006 },
+  'Los Angeles': { lat: 34.0522, lng: -118.2437 },
+  'Chicago': { lat: 41.8781, lng: -87.6298 },
+  'Houston': { lat: 29.7604, lng: -95.3698 },
+  'Phoenix': { lat: 33.4484, lng: -112.074 },
+  'San Francisco': { lat: 37.7749, lng: -122.4194 },
+  'Seattle': { lat: 47.6062, lng: -122.3321 },
+  'Miami': { lat: 25.7617, lng: -80.1918 },
+  'Austin': { lat: 30.2672, lng: -97.7431 },
+  'Denver': { lat: 39.7392, lng: -104.9903 },
+  'Boston': { lat: 42.3601, lng: -71.0589 },
+  'San Diego': { lat: 32.7157, lng: -117.1611 },
+  'Nashville': { lat: 36.1627, lng: -86.7816 },
+  'Portland': { lat: 45.5152, lng: -122.6784 },
+  'Atlanta': { lat: 33.749, lng: -84.388 },
+};
 
 const femaleProfiles: DemoProfile[] = [
   {
-    email: 'aisha.kapoor@example.com',
-    name: 'Aisha Kapoor',
+    email: 'emma.johnson@example.com',
+    name: 'Emma Johnson',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1994-05-18',
-    city: 'Delhi',
+    city: 'New York',
     is_verified: true,
     cooldown_enabled: true,
     height: 165,
     body_type: 'athletic',
-    interests: ['travel', 'yoga', 'street food', 'photography'],
-    bio: 'Product designer who loves sunrise hikes and masala chai conversations.',
-    prompt1: 'Perfect Sunday: yoga at Lodhi Garden and a slow brunch.',
+    interests: ['travel', 'yoga', 'coffee shops', 'photography'],
+    bio: 'Product designer who loves sunrise hikes and great coffee conversations.',
+    prompt1: 'Perfect Sunday: yoga in Central Park and a slow brunch.',
     prompt2: 'Green flag: someone who plans spontaneous getaways.',
     prompt3: 'I get irrationally excited about new photo spots.',
     smoker: false,
@@ -80,22 +104,22 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'neha.sharma@example.com',
-    name: 'Neha Sharma',
+    email: 'sophia.williams@example.com',
+    name: 'Sophia Williams',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1992-11-02',
-    city: 'Mumbai',
+    city: 'Los Angeles',
     is_verified: true,
     cooldown_enabled: true,
     height: 160,
     body_type: 'slim',
     interests: ['cinema', 'running', 'coffee', 'sustainability'],
-    bio: 'Film marketer chasing monsoon runs and meaningful stories.',
-    prompt1: 'I light up when the city smells like first rain.',
-    prompt2: 'Let’s debate which movie has the best soundtrack.',
-    prompt3: 'Teach me your favourite pour-over technique.',
+    bio: 'Film marketer chasing sunset runs and meaningful stories.',
+    prompt1: 'I light up when the city feels alive after rain.',
+    prompt2: 'Let's debate which movie has the best soundtrack.',
+    prompt3: 'Teach me your favorite pour-over technique.',
     smoker: false,
     drinker: 'social',
     diet: 'flexitarian',
@@ -114,18 +138,18 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'kavya.menon@example.com',
-    name: 'Kavya Menon',
+    email: 'olivia.davis@example.com',
+    name: 'Olivia Davis',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1995-03-12',
-    city: 'Bengaluru',
+    city: 'San Francisco',
     cooldown_enabled: true,
     height: 168,
     body_type: 'fit',
-    interests: ['startups', 'board games', 'classical music', 'gardening'],
-    bio: 'Product manager who code-switches between Carnatic ragas and stand-ups.',
+    interests: ['startups', 'board games', 'jazz music', 'gardening'],
+    bio: 'Product manager who switches between coding sprints and jazz clubs.',
     prompt1: 'I geek out over efficient city design.',
     prompt2: 'Looking for a co-op partner—board games or business ideas.',
     prompt3: 'My love language is playlists and post-it reminders.',
@@ -133,7 +157,7 @@ const femaleProfiles: DemoProfile[] = [
     drinker: 'rarely',
     diet: 'vegetarian',
     fitness_level: 'moderate',
-    education: 'B.Tech in Computer Science',
+    education: 'B.S. in Computer Science',
     occupation: 'Product Manager',
     relationship_goal: 'long-term',
     family_oriented: true,
@@ -147,13 +171,13 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'priya.desai@example.com',
-    name: 'Priya Desai',
+    email: 'ava.martinez@example.com',
+    name: 'Ava Martinez',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1990-07-28',
-    city: 'Pune',
+    city: 'Austin',
     cooldown_enabled: true,
     is_premium: true,
     height: 170,
@@ -161,7 +185,7 @@ const femaleProfiles: DemoProfile[] = [
     interests: ['trail running', 'baking', 'travel', 'podcasts'],
     bio: 'Civil engineer who builds bridges by day and sourdough starters by night.',
     prompt1: 'Currently learning how to make the perfect croissant.',
-    prompt2: 'We’ll get along if you love early hikes.',
+    prompt2: 'We'll get along if you love early hikes.',
     prompt3: 'My comfort show is Parks and Recreation.',
     smoker: false,
     drinker: 'rarely',
@@ -181,20 +205,20 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'riya.malhotra@example.com',
-    name: 'Riya Malhotra',
+    email: 'isabella.anderson@example.com',
+    name: 'Isabella Anderson',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1996-12-05',
-    city: 'Hyderabad',
+    city: 'Chicago',
     cooldown_enabled: true,
     height: 162,
     body_type: 'average',
     interests: ['dance', 'poetry', 'fusion food', 'community work'],
-    bio: 'UX researcher, kathak dancer, and chai evangelist.',
-    prompt1: 'On weekends you’ll find me hosting poetry circles.',
-    prompt2: 'We’ll get along if you love experimenting in the kitchen.',
+    bio: 'UX researcher, contemporary dancer, and coffee enthusiast.',
+    prompt1: 'On weekends you'll find me hosting poetry circles.',
+    prompt2: 'We'll get along if you love experimenting in the kitchen.',
     prompt3: 'I can never say no to live music.',
     smoker: false,
     drinker: 'never',
@@ -214,19 +238,19 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'simran.kaur@example.com',
-    name: 'Simran Kaur',
+    email: 'mia.taylor@example.com',
+    name: 'Mia Taylor',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1993-01-16',
-    city: 'Chandigarh',
+    city: 'Denver',
     cooldown_enabled: true,
     height: 167,
     body_type: 'fit',
-    interests: ['photography', 'road trips', 'bollywood trivia', 'running'],
+    interests: ['photography', 'road trips', 'film trivia', 'running'],
     bio: 'Architect who documents cities and sunsets.',
-    prompt1: 'I’m happiest on a highway with a killer playlist.',
+    prompt1: 'I'm happiest on a highway with a killer playlist.',
     prompt2: 'Great relationships need curiosity and kindness.',
     prompt3: 'I collect postcards from every city I visit.',
     smoker: false,
@@ -247,21 +271,21 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'ananya.gupta@example.com',
-    name: 'Ananya Gupta',
+    email: 'charlotte.brown@example.com',
+    name: 'Charlotte Brown',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1991-04-21',
-    city: 'Kolkata',
+    city: 'Boston',
     cooldown_enabled: true,
     height: 158,
     body_type: 'petite',
     interests: ['literature', 'theatre', 'vegan cooking', 'yoga'],
     bio: 'Publisher building inclusive narratives and brewing kombucha.',
     prompt1: 'Currently staging a community theatre project.',
-    prompt2: 'We’ll get along if you love slow mornings and long reads.',
-    prompt3: 'Let’s exchange favourite independent bookstores.',
+    prompt2: 'We'll get along if you love slow mornings and long reads.',
+    prompt3: 'Let's exchange favorite independent bookstores.',
     smoker: false,
     drinker: 'rarely',
     diet: 'vegan',
@@ -280,20 +304,20 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'meera.joshi@example.com',
-    name: 'Meera Joshi',
+    email: 'amelia.garcia@example.com',
+    name: 'Amelia Garcia',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1997-09-09',
-    city: 'Goa',
+    city: 'Miami',
     cooldown_enabled: true,
     height: 163,
     body_type: 'fit',
     interests: ['marine conservation', 'surfing', 'culinary experiments', 'photography'],
     bio: 'Marine biologist who surfs at dawn and cooks at dusk.',
     prompt1: 'Best compliment: I make people feel calm.',
-    prompt2: 'We’ll get along if you love the ocean.',
+    prompt2: 'We'll get along if you love the ocean.',
     prompt3: 'Currently learning how to ferment everything.',
     smoker: false,
     drinker: 'social',
@@ -313,21 +337,21 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'tara.iyer@example.com',
-    name: 'Tara Iyer',
+    email: 'harper.wilson@example.com',
+    name: 'Harper Wilson',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1998-08-14',
-    city: 'Chennai',
+    city: 'Seattle',
     cooldown_enabled: true,
     height: 169,
     body_type: 'athletic',
-    interests: ['bharatanatyam', 'tech policy', 'coffee brewing', 'travel'],
-    bio: 'Tech policy analyst and classical dancer balancing rhythm and reform.',
-    prompt1: 'Currently obsessed with filter coffee techniques.',
-    prompt2: 'We’ll get along if you enjoy live performances.',
-    prompt3: 'Let’s swap policy podcasts.',
+    interests: ['contemporary dance', 'tech policy', 'coffee brewing', 'travel'],
+    bio: 'Tech policy analyst and modern dancer balancing rhythm and reform.',
+    prompt1: 'Currently obsessed with specialty coffee techniques.',
+    prompt2: 'We'll get along if you enjoy live performances.',
+    prompt3: 'Let's swap policy podcasts.',
     smoker: false,
     drinker: 'rarely',
     diet: 'vegetarian',
@@ -346,20 +370,20 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'ishita.nair@example.com',
-    name: 'Ishita Nair',
+    email: 'evelyn.moore@example.com',
+    name: 'Evelyn Moore',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1993-06-30',
-    city: 'Kochi',
+    city: 'Portland',
     cooldown_enabled: true,
     height: 161,
     body_type: 'average',
-    interests: ['ayurveda', 'classical music', 'kayaking', 'reading'],
-    bio: 'Wellness entrepreneur grounding modern life with traditional wisdom.',
-    prompt1: 'Morning routine involves pranayama and Malayalam poetry.',
-    prompt2: 'We’ll get along if you value balance.',
+    interests: ['wellness', 'classical music', 'kayaking', 'reading'],
+    bio: 'Wellness entrepreneur grounding modern life with mindful practices.',
+    prompt1: 'Morning routine involves meditation and poetry.',
+    prompt2: 'We'll get along if you value balance.',
     prompt3: 'I cook to celebrate every small win.',
     smoker: false,
     drinker: 'never',
@@ -379,20 +403,20 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'sanya.bhatia@example.com',
-    name: 'Sanya Bhatia',
+    email: 'abigail.thomas@example.com',
+    name: 'Abigail Thomas',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1995-01-27',
-    city: 'Jaipur',
+    city: 'Nashville',
     cooldown_enabled: true,
     height: 164,
     body_type: 'fit',
     interests: ['handicrafts', 'cycling', 'history walks', 'sustainability'],
     bio: 'Museum curator reviving heritage through storytelling.',
-    prompt1: 'I give the best Pink City food tours.',
-    prompt2: 'We’ll get along if you love curious conversations.',
+    prompt1: 'I give the best Nashville food tours.',
+    prompt2: 'We'll get along if you love curious conversations.',
     prompt3: 'Currently designing a zero-waste wardrobe.',
     smoker: false,
     drinker: 'rarely',
@@ -412,26 +436,26 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'pooja.reddy@example.com',
-    name: 'Pooja Reddy',
+    email: 'ella.jackson@example.com',
+    name: 'Ella Jackson',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1992-03-08',
-    city: 'Hyderabad',
+    city: 'Houston',
     cooldown_enabled: true,
     height: 172,
     body_type: 'athletic',
     interests: ['triathlons', 'tech conferences', 'podcasts', 'coffee'],
     bio: 'Cloud architect racing triathlons and redesigning infrastructure.',
-    prompt1: 'Let’s trade training hacks and productivity tips.',
-    prompt2: 'We’ll get along if you enjoy learning loops.',
+    prompt1: 'Let's trade training hacks and productivity tips.',
+    prompt2: 'We'll get along if you enjoy learning loops.',
     prompt3: 'I love mapping the best coffee spots.',
     smoker: false,
     drinker: 'social',
     diet: 'non-vegetarian',
     fitness_level: 'intense',
-    education: 'B.Tech in Electronics',
+    education: 'B.S. in Electronics',
     occupation: 'Cloud Architect',
     relationship_goal: 'long-term',
     family_oriented: true,
@@ -445,26 +469,26 @@ const femaleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'diya.banerjee@example.com',
-    name: 'Diya Banerjee',
+    email: 'scarlett.white@example.com',
+    name: 'Scarlett White',
     password: DEFAULT_PASSWORD,
     gender: 'female',
     interested_in: 'male',
     date_of_birth: '1999-10-11',
-    city: 'Kolkata',
+    city: 'Atlanta',
     cooldown_enabled: true,
     height: 159,
     body_type: 'petite',
     interests: ['stand-up comedy', 'indie music', 'astronomy', 'art'],
     bio: 'Data analyst moonlighting as an open mic comic.',
-    prompt1: 'I’ll make you laugh even on tough days.',
-    prompt2: 'We’ll get along if you embrace curiosity.',
-    prompt3: 'Teach me your favourite constellation story.',
+    prompt1: 'I'll make you laugh even on tough days.',
+    prompt2: 'We'll get along if you embrace curiosity.',
+    prompt3: 'Teach me your favorite constellation story.',
     smoker: false,
     drinker: 'social',
     diet: 'non-vegetarian',
     fitness_level: 'moderate',
-    education: 'B.Sc in Statistics',
+    education: 'B.S. in Statistics',
     occupation: 'Data Analyst',
     relationship_goal: 'friendship first',
     family_oriented: true,
@@ -480,10 +504,26 @@ const femaleProfiles: DemoProfile[] = [
 ];
 
 
-const femaleFirstNames = ['Aanya', 'Ishita', 'Meera', 'Lara', 'Tanya', 'Radhika', 'Suhani', 'Devika', 'Maira', 'Kimaya'];
-const maleFirstNames = ['Arnav', 'Vihaan', 'Ishan', 'Reyansh', 'Dhruv', 'Kabir', 'Aarav', 'Vivaan', 'Advait', 'Neil'];
-const lastNames = ['Rao', 'Malik', 'Iyer', 'Kapadia', 'Fernandes', 'Das', 'Chowdhury', 'Singhal', 'Menon', 'Bhagat'];
-const cities = ['Delhi', 'Mumbai', 'Bengaluru', 'Hyderabad', 'Pune', 'Chennai', 'Goa', 'Jaipur', 'Ahmedabad', 'Kochi', 'Lucknow', 'Indore'];
+const femaleFirstNames = ['Emma', 'Olivia', 'Ava', 'Isabella', 'Sophia', 'Mia', 'Charlotte', 'Amelia', 'Harper', 'Evelyn'];
+const maleFirstNames = ['Liam', 'Noah', 'Oliver', 'James', 'Elijah', 'William', 'Henry', 'Lucas', 'Benjamin', 'Theodore'];
+const lastNames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Miller', 'Davis', 'Rodriguez', 'Martinez'];
+const cities = [
+  'New York',
+  'Los Angeles',
+  'Chicago',
+  'Houston',
+  'Phoenix',
+  'San Francisco',
+  'Seattle',
+  'Miami',
+  'Austin',
+  'Denver',
+  'Boston',
+  'San Diego',
+  'Nashville',
+  'Portland',
+  'Atlanta',
+];
 const interestPool = ['slow travel', 'yoga', 'indie music', 'culinary experiments', 'climate action', 'board games', 'street photography', 'trail running', 'coffee brewing', 'podcasts', 'gardening', 'ceramics', 'community work'];
 const occupations = ['Product Designer', 'Climate Analyst', 'Research Lead', 'Psychologist', 'Founder', 'Engineer', 'Policy Researcher', 'Storyteller', 'Creative Producer', 'Wellness Coach'];
 const educations = ['Masters in Design', 'MBA', 'B.Tech', 'Masters in Data Science', 'BA in Psychology', 'Masters in Sustainability', 'B.Des', 'Masters in Communications'];
@@ -513,6 +553,19 @@ const pickCycle = <T,>(items: T[], offset: number, count = 1): T[] =>
 
 const createGeneratedProfiles = (targetCount: number): DemoProfile[] => {
   const generated: DemoProfile[] = [];
+  // Bias male profiles to New York so the demo account (Emma in New York) has a rich on-grid feed,
+  // while still keeping overall city diversity for filter testing.
+  const maleCityCycle = [
+    'New York', 'New York', 'New York', 'New York', 'New York', 'New York',
+    'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'San Francisco',
+    'Seattle', 'Miami', 'Austin', 'Denver', 'Boston', 'San Diego',
+    'Nashville', 'Portland', 'Atlanta',
+  ];
+  const femaleCityCycle = [
+    'New York', 'Los Angeles', 'Chicago', 'Houston', 'Phoenix', 'San Francisco',
+    'Seattle', 'Miami', 'Austin', 'Denver', 'Boston', 'San Diego',
+    'Nashville', 'Portland', 'Atlanta',
+  ];
 
   for (let i = 0; i < targetCount; i += 1) {
     const gender: Gender = i % 2 === 0 ? 'female' : 'male';
@@ -522,7 +575,8 @@ const createGeneratedProfiles = (targetCount: number): DemoProfile[] => {
     const name = `${firstName} ${lastName}`;
     const emailSlug = `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z]+/g, '.');
     const email = `${emailSlug}.${i + 100}@example.com`;
-    const city = cities[(i * 5) % cities.length];
+    const cityPool = gender === 'male' ? maleCityCycle : femaleCityCycle;
+    const city = cityPool[i % cityPool.length];
     const birthYear = 1988 + (i % 12);
     const birthMonth = (i % 12) + 1;
     const birthDay = (i % 20) + 8;
@@ -557,6 +611,8 @@ const createGeneratedProfiles = (targetCount: number): DemoProfile[] => {
       interested_in: orientations[(i + 1) % orientations.length],
       date_of_birth,
       city,
+      is_verified: i % 3 !== 0,
+      is_premium: i % 17 === 0,
       cooldown_enabled: gender === 'female',
       height,
       body_type,
@@ -586,20 +642,20 @@ const createGeneratedProfiles = (targetCount: number): DemoProfile[] => {
 
 const maleProfiles: DemoProfile[] = [
   {
-    email: 'arjun.singh@example.com',
-    name: 'Arjun Singh',
+    email: 'james.wilson@example.com',
+    name: 'James Wilson',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1991-02-14',
-    city: 'Delhi',
+    city: 'New York',
     is_verified: true,
     height: 180,
     body_type: 'athletic',
     interests: ['football', 'street food', 'mentoring', 'travel'],
     bio: 'Growth marketer who plans spontaneous weekend getaways.',
     prompt1: 'Friends describe me as reliable and up for adventure.',
-    prompt2: 'Favourite debate: hills vs beaches.',
+    prompt2: 'Favorite debate: mountains vs beaches.',
     prompt3: 'Currently building a mentorship community.',
     smoker: false,
     drinker: 'social',
@@ -619,18 +675,18 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'rohan.mehta@example.com',
-    name: 'Rohan Mehta',
+    email: 'michael.chen@example.com',
+    name: 'Michael Chen',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1992-09-03',
-    city: 'Mumbai',
+    city: 'Los Angeles',
     height: 182,
     body_type: 'athletic',
     interests: ['music festivals', 'startups', 'cycling', 'mixology'],
     bio: 'Strategy consultant who curates playlists for every mood.',
-    prompt1: 'Let’s find the coziest jazz bar in the city.',
+    prompt1: 'Let's find the coziest jazz bar in the city.',
     prompt2: 'My superpower is optimizing weekend mini-getaways.',
     prompt3: 'I host monthly founder jams—join us?',
     smoker: false,
@@ -651,25 +707,25 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'karan.malhotra@example.com',
-    name: 'Karan Malhotra',
+    email: 'david.miller@example.com',
+    name: 'David Miller',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1994-04-19',
-    city: 'Bengaluru',
+    city: 'San Francisco',
     height: 176,
     body_type: 'fit',
     interests: ['gaming', 'trail running', 'craft coffee', 'investing'],
     bio: 'Lead engineer building fintech products and analog playlists.',
     prompt1: 'Currently training for my first marathon.',
-    prompt2: 'Teach me your favourite board game strategy.',
+    prompt2: 'Teach me your favorite board game strategy.',
     prompt3: 'I run a tiny coffee tasting club—ask me about beans.',
     smoker: false,
     drinker: 'rarely',
     diet: 'non-vegetarian',
     fitness_level: 'active',
-    education: 'B.Tech in Computer Science',
+    education: 'B.S. in Computer Science',
     occupation: 'Software Lead',
     relationship_goal: 'long-term',
     family_oriented: true,
@@ -683,19 +739,19 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'rahul.iyer@example.com',
-    name: 'Rahul Iyer',
+    email: 'ryan.taylor@example.com',
+    name: 'Ryan Taylor',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1993-12-22',
-    city: 'Chennai',
+    city: 'Seattle',
     height: 174,
     body_type: 'lean',
-    interests: ['classical music', 'coding', 'badminton', 'vegan cooking'],
-    bio: 'Full-stack engineer with a soft spot for Carnatic concerts.',
-    prompt1: 'Weekends mean badminton at dawn and coffee after.',
-    prompt2: 'I cook elaborate Onam spreads for friends.',
+    interests: ['classical music', 'coding', 'tennis', 'vegan cooking'],
+    bio: 'Full-stack engineer with a soft spot for jazz concerts.',
+    prompt1: 'Weekends mean tennis at dawn and coffee after.',
+    prompt2: 'I cook elaborate brunches for friends.',
     prompt3: 'Currently learning lo-fi music production.',
     smoker: false,
     drinker: 'rarely',
@@ -715,25 +771,25 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'varun.desai@example.com',
-    name: 'Varun Desai',
+    email: 'chris.anderson@example.com',
+    name: 'Chris Anderson',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1989-08-30',
-    city: 'Ahmedabad',
+    city: 'Austin',
     height: 178,
     body_type: 'average',
-    interests: ['entrepreneurship', 'cricket', 'photography', 'street food'],
-    bio: 'Startup founder building SaaS products and Ahmedabad food trails.',
+    interests: ['entrepreneurship', 'basketball', 'photography', 'BBQ'],
+    bio: 'Startup founder building SaaS products and Austin food trails.',
     prompt1: 'I plan quarterly road trips for my friends.',
     prompt2: 'Pitch your dream side project to me.',
-    prompt3: 'Let’s photograph the old city at sunrise.',
+    prompt3: 'Let's photograph the city at golden hour.',
     smoker: false,
     drinker: 'social',
     diet: 'non-vegetarian',
     fitness_level: 'active',
-    education: 'B.Com',
+    education: 'B.S. in Business',
     occupation: 'Startup Founder',
     relationship_goal: 'serious',
     family_oriented: true,
@@ -747,20 +803,20 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'aman.kapoor@example.com',
-    name: 'Aman Kapoor',
+    email: 'alex.thompson@example.com',
+    name: 'Alex Thompson',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1995-06-17',
-    city: 'Pune',
+    city: 'Denver',
     is_premium: true,
     height: 181,
     body_type: 'athletic',
     interests: ['product design', 'mentorship', 'travel', 'baking'],
     bio: 'Design lead baking sourdough and mentoring young founders.',
     prompt1: 'Currently sketching a travel app for slow explorers.',
-    prompt2: 'We’ll get along if you love design museums.',
+    prompt2: 'We'll get along if you love design museums.',
     prompt3: 'I bake bread every Saturday—taste tester wanted.',
     smoker: false,
     drinker: 'social',
@@ -780,19 +836,19 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'siddharth.rao@example.com',
-    name: 'Siddharth Rao',
+    email: 'brandon.garcia@example.com',
+    name: 'Brandon Garcia',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1993-03-05',
-    city: 'Hyderabad',
+    city: 'Chicago',
     height: 177,
     body_type: 'fit',
-    interests: ['data science', 'trekking', 'board games', 'brewing'],
+    interests: ['data science', 'hiking', 'board games', 'brewing'],
     bio: 'Data scientist who measures life in coffee ratios.',
     prompt1: 'Most proud of: building a community data lab.',
-    prompt2: 'I plan at least two treks a year.',
+    prompt2: 'I plan at least two hiking trips a year.',
     prompt3: 'Currently perfecting my cold brew recipe.',
     smoker: false,
     drinker: 'social',
@@ -812,20 +868,20 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'vivek.sharma@example.com',
-    name: 'Vivek Sharma',
+    email: 'tyler.martinez@example.com',
+    name: 'Tyler Martinez',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1990-10-10',
-    city: 'Gurgaon',
+    city: 'Houston',
     height: 183,
     body_type: 'athletic',
     interests: ['fitness', 'podcasts', 'angel investing', 'volunteering'],
-    bio: 'Ops director balancing HIIT workouts and NGO weekends.',
+    bio: 'Ops director balancing HIIT workouts and nonprofit weekends.',
     prompt1: 'I volunteer with an education nonprofit every Sunday.',
     prompt2: 'Podcast recommendations always welcome.',
-    prompt3: 'Life goal: run the Comrades Marathon.',
+    prompt3: 'Life goal: run the Boston Marathon.',
     smoker: false,
     drinker: 'rarely',
     diet: 'high-protein',
@@ -844,19 +900,19 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'nikhil.patel@example.com',
-    name: 'Nikhil Patel',
+    email: 'nathan.davis@example.com',
+    name: 'Nathan Davis',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1996-01-29',
-    city: 'Surat',
+    city: 'Portland',
     height: 175,
     body_type: 'fit',
-    interests: ['garba', 'yoga', 'vegan cooking', 'travel'],
+    interests: ['hiking', 'yoga', 'vegan cooking', 'travel'],
     bio: 'Sustainability consultant bringing zero-waste ideas to life.',
-    prompt1: 'Favourite time of year: Navratri nights.',
-    prompt2: 'Let’s trade plant-based recipes.',
+    prompt1: 'Favorite time of year: fall foliage season.',
+    prompt2: 'Let's trade plant-based recipes.',
     prompt3: 'I shoot film photos on every trip.',
     smoker: false,
     drinker: 'never',
@@ -876,20 +932,20 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'aditya.verma@example.com',
-    name: 'Aditya Verma',
+    email: 'justin.lee@example.com',
+    name: 'Justin Lee',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1993-05-07',
-    city: 'Noida',
+    city: 'Boston',
     height: 179,
     body_type: 'average',
     interests: ['stand-up comedy', 'filmmaking', 'basketball', 'podcasts'],
     bio: 'Product marketer who moonlights as an open mic host.',
     prompt1: 'I write sketches about everyday absurdities.',
-    prompt2: 'You’ll win me over with witty banter.',
-    prompt3: 'Curating a list of the city’s best food trucks.',
+    prompt2: 'You'll win me over with witty banter.',
+    prompt3: 'Curating a list of the city's best food trucks.',
     smoker: false,
     drinker: 'social',
     diet: 'non-vegetarian',
@@ -908,19 +964,19 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'harsh.gupta@example.com',
-    name: 'Harsh Gupta',
+    email: 'ethan.wright@example.com',
+    name: 'Ethan Wright',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1990-03-16',
-    city: 'Bhopal',
+    city: 'Nashville',
     height: 184,
     body_type: 'athletic',
     interests: ['architecture', 'cycling', 'birding', 'photography'],
     bio: 'Urban planner reimagining inclusive public spaces.',
     prompt1: 'I map sunrise cycling routes in every city I visit.',
-    prompt2: 'We’ll get along if you love design museums.',
+    prompt2: 'We'll get along if you love design museums.',
     prompt3: 'Currently obsessed with bird photography.',
     smoker: false,
     drinker: 'rarely',
@@ -940,19 +996,19 @@ const maleProfiles: DemoProfile[] = [
     ],
   },
   {
-    email: 'manish.kulkarni@example.com',
-    name: 'Manish Kulkarni',
+    email: 'matt.robinson@example.com',
+    name: 'Matt Robinson',
     password: DEFAULT_PASSWORD,
     gender: 'male',
     interested_in: 'female',
     date_of_birth: '1988-11-25',
-    city: 'Nagpur',
+    city: 'Atlanta',
     height: 177,
     body_type: 'average',
-    interests: ['music production', 'spirituality', 'running', 'tech'],
+    interests: ['music production', 'mindfulness', 'running', 'tech'],
     bio: 'Product ops lead producing ambient music on weekends.',
-    prompt1: 'Morning routine: 5k run + raga practice.',
-    prompt2: 'Let’s exchange mindfulness practices.',
+    prompt1: 'Morning routine: 5k run + meditation.',
+    prompt2: 'Let's exchange mindfulness practices.',
     prompt3: 'I experiment with modular synths—happy to teach.',
     smoker: false,
     drinker: 'rarely',
@@ -974,7 +1030,7 @@ const maleProfiles: DemoProfile[] = [
 ];
 
 const baseProfiles: DemoProfile[] = [...femaleProfiles, ...maleProfiles];
-const generatedProfiles = createGeneratedProfiles(Math.max(0, 100 - baseProfiles.length));
+const generatedProfiles = createGeneratedProfiles(Math.max(0, TARGET_TOTAL_USERS - baseProfiles.length));
 const demoProfiles: DemoProfile[] = [...baseProfiles, ...generatedProfiles];
 
 const deriveTraitsFromQuiz = (answers: string[]): string[] => {
@@ -983,7 +1039,7 @@ const deriveTraitsFromQuiz = (answers: string[]): string[] => {
 };
 
 const seedDemoProfiles = async () => {
-  console.log(`🚀 Seeding demo profiles (${demoProfiles.length} users)...`);
+  console.log(`🚀 Seeding demo profiles (${demoProfiles.length} users, target=${TARGET_TOTAL_USERS})...`);
   let createdCount = 0;
 
   for (const profile of demoProfiles) {
@@ -1001,12 +1057,13 @@ const seedDemoProfiles = async () => {
 
         const passwordHash = await bcrypt.hash(profile.password ?? DEFAULT_PASSWORD, 10);
         const cooldownEnabled = profile.cooldown_enabled ?? (profile.gender === 'female');
+        const coords = cityCoordinates[profile.city] || null;
 
         const userResult = await client.query(
           `INSERT INTO users (
             email, password_hash, name, gender, interested_in, date_of_birth,
-            city, is_verified, is_premium, cooldown_enabled
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            city, latitude, longitude, is_verified, is_premium, cooldown_enabled
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           RETURNING id`,
           [
             profile.email,
@@ -1016,6 +1073,8 @@ const seedDemoProfiles = async () => {
             profile.interested_in,
             profile.date_of_birth,
             profile.city,
+            coords ? coords.lat : null,
+            coords ? coords.lng : null,
             profile.is_verified ?? false,
             profile.is_premium ?? false,
             cooldownEnabled,
@@ -1142,6 +1201,115 @@ const seedDemoProfiles = async () => {
   }
 
   console.log(`🎉 Created ${createdCount} new demo users.`);
+
+  // Seed demo likes + matches + messages so Likes/Chats screens have data.
+  const seedSocialGraph = async () => {
+    const getUserId = async (email: string): Promise<number | null> => {
+      const r = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
+      return r.rows[0]?.id ?? null;
+    };
+
+    const getUserCore = async (userId: number): Promise<{ id: number; name: string; city: string; interested_in: 'male' | 'female' | 'both' }> => {
+      const r = await pool.query('SELECT id, name, city, interested_in FROM users WHERE id = $1', [userId]);
+      const row = r.rows[0];
+      return {
+        id: row.id,
+        name: row.name,
+        city: row.city,
+        interested_in: row.interested_in,
+      };
+    };
+
+    const ensureLike = async (likerId: number, likedId: number, isOnGrid: boolean) => {
+      await pool.query(
+        `INSERT INTO likes (liker_id, liked_id, is_on_grid)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (liker_id, liked_id) DO NOTHING`,
+        [likerId, likedId, isOnGrid]
+      );
+    };
+
+    const ensureMatch = async (a: number, b: number): Promise<number> => {
+      const user1 = Math.min(a, b);
+      const user2 = Math.max(a, b);
+      const inserted = await pool.query(
+        `INSERT INTO matches (user1_id, user2_id, matched_at)
+         VALUES ($1, $2, NOW())
+         ON CONFLICT (user1_id, user2_id) DO UPDATE SET matched_at = matches.matched_at
+         RETURNING id`,
+        [user1, user2]
+      );
+      return inserted.rows[0].id as number;
+    };
+
+    const insertMessage = async (matchId: number, senderId: number, recipientId: number, content: string, isRead: boolean) => {
+      await pool.query(
+        `INSERT INTO messages (match_id, sender_id, recipient_id, content, is_read, created_at)
+         VALUES ($1, $2, $3, $4, $5, NOW())`,
+        [matchId, senderId, recipientId, content, isRead]
+      );
+      await pool.query('UPDATE matches SET last_message_at = NOW() WHERE id = $1', [matchId]);
+    };
+
+    const mainUserIds: Array<{ email: string; id: number }> = [];
+    for (const email of MAIN_DEMO_EMAILS) {
+      const id = await getUserId(email);
+      if (id) mainUserIds.push({ email, id });
+    }
+
+    if (mainUserIds.length === 0) {
+      console.log(`⚠️  Could not seed social graph: none of main demo accounts exist (${MAIN_DEMO_EMAILS.join(', ')}).`);
+      return;
+    }
+
+    for (const main of mainUserIds) {
+      const u = await getUserCore(main.id);
+      const lookingForGender = u.interested_in === 'both' ? 'male' : u.interested_in;
+      const candidates = await pool.query(
+        `SELECT id
+         FROM users
+         WHERE city = $1 AND gender = $2 AND id != $3
+         ORDER BY created_at DESC
+         LIMIT 220`,
+        [u.city, lookingForGender, u.id]
+      );
+
+      const candidateIds = candidates.rows.map((r: { id: number }) => r.id);
+      if (candidateIds.length === 0) {
+        console.log(`⚠️  No candidates found for ${u.name} in ${u.city}.`);
+        continue;
+      }
+
+      // Likes inbox: incoming likes.
+      for (const likerId of candidateIds.slice(0, 120)) {
+        await ensureLike(likerId, u.id, true);
+      }
+
+      // Chats: mutual matches with message history.
+      const matchPartnerIds = candidateIds.slice(0, 50);
+      for (const partnerId of matchPartnerIds) {
+        await ensureLike(u.id, partnerId, true);
+        await ensureLike(partnerId, u.id, true);
+        const matchId = await ensureMatch(u.id, partnerId);
+
+        const existingMessages = await pool.query('SELECT COUNT(*)::int as c FROM messages WHERE match_id = $1', [matchId]);
+        if ((existingMessages.rows[0]?.c ?? 0) > 0) continue;
+
+        await insertMessage(matchId, partnerId, u.id, `Hey ${u.name.split(' ')[0]} — what are you craving right now: calm, playful, or deep?`, false);
+        await insertMessage(matchId, u.id, partnerId, `A mix of calm + fun. I want consistency without it feeling boring.`, true);
+        await insertMessage(matchId, partnerId, u.id, `Green flag. Any dealbreakers I should know before we plan a first date?`, false);
+        await insertMessage(matchId, u.id, partnerId, `Low effort communication and rudeness. Everything else we can talk through.`, true);
+      }
+
+      console.log(`✅ Seeded likes + matches + messages (${u.name}, ${u.city}).`);
+    }
+  };
+
+  try {
+    await seedSocialGraph();
+  } catch (error) {
+    console.error('⚠️  Failed to seed demo likes/matches/messages:', error);
+  }
 };
 
 seedDemoProfiles()

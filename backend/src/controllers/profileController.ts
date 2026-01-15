@@ -293,3 +293,92 @@ export const uploadPhoto = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to upload photo' });
   }
 };
+
+export const deletePhoto = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { photoId } = req.params;
+
+    const result = await pool.query(
+      'DELETE FROM photos WHERE id = $1 AND user_id = $2 RETURNING id',
+      [photoId, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    res.json({ message: 'Photo deleted' });
+  } catch (error) {
+    console.error('Delete photo error:', error);
+    res.status(500).json({ error: 'Failed to delete photo' });
+  }
+};
+
+export const setPrimaryPhoto = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { photo_id } = req.body;
+    if (!photo_id) {
+      return res.status(400).json({ error: 'photo_id is required' });
+    }
+
+    await pool.query('UPDATE photos SET is_primary = FALSE WHERE user_id = $1', [userId]);
+    await pool.query('UPDATE photos SET is_primary = TRUE WHERE id = $1 AND user_id = $2', [photo_id, userId]);
+
+    res.json({ message: 'Primary photo updated' });
+  } catch (error) {
+    console.error('Set primary photo error:', error);
+    res.status(500).json({ error: 'Failed to set primary photo' });
+  }
+};
+
+export const reorderPhoto = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { photo_id, order_index } = req.body;
+    if (!photo_id || typeof order_index !== 'number') {
+      return res.status(400).json({ error: 'photo_id and order_index are required' });
+    }
+
+    const result = await pool.query(
+      'UPDATE photos SET order_index = $1 WHERE id = $2 AND user_id = $3 RETURNING *',
+      [order_index, photo_id, userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Photo not found' });
+    }
+
+    res.json({ message: 'Photo reordered', photo: result.rows[0] });
+  } catch (error) {
+    console.error('Reorder photo error:', error);
+    res.status(500).json({ error: 'Failed to reorder photo' });
+  }
+};
+
+export const updateUserBasics = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId;
+    const { name, city } = req.body;
+
+    if (!name && !city) {
+      return res.status(400).json({ error: 'Nothing to update' });
+    }
+
+    const result = await pool.query(
+      `UPDATE users
+       SET name = COALESCE($1, name),
+           city = COALESCE($2, city),
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING id, name, city`,
+      [name || null, city || null, userId]
+    );
+
+    res.json({ user: result.rows[0] });
+  } catch (error) {
+    console.error('Update user basics error:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+};

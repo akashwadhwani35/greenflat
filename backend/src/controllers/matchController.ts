@@ -5,6 +5,19 @@ import { DAILY_LIMITS } from '../utils/constants';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
 
+const haversineDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const toRad = (value: number) => (value * Math.PI) / 180;
+  const R = 6371; // Earth radius in km
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
 const parseEmbedding = (value: any): number[] => {
   if (!value) return [];
   if (Array.isArray(value)) {
@@ -175,7 +188,13 @@ const calculateMatchPercentage = (
 export const searchMatches = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
-    const { search_query, filters = {} } = req.body as { search_query: string; filters: SearchFilters };
+    const { search_query, filters = {}, exclude_ids = [], is_on_grid, limit } = req.body as {
+      search_query: string;
+      filters: SearchFilters;
+      exclude_ids?: number[];
+      is_on_grid?: boolean;
+      limit?: number;
+    };
     const isAIEnabled = Boolean(process.env.OPENAI_API_KEY);
 
     // Use AI to parse natural language search query
@@ -223,6 +242,12 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const currentUser = currentUserResult.rows[0];
     const userAge = calculateAge(currentUser.date_of_birth);
     const currentUserPersonaEmbedding = parseEmbedding((currentUser as any).persona_embedding);
+    const currentUserLat = Number((currentUser as any).latitude);
+    const currentUserLng = Number((currentUser as any).longitude);
+    const hasUserLocation = Number.isFinite(currentUserLat) && Number.isFinite(currentUserLng);
+    const maxDistanceKm = typeof enhancedFilters.distance_km === 'number'
+      ? enhancedFilters.distance_km
+      : (Number.isFinite((currentUser as any).distance_radius) ? Number((currentUser as any).distance_radius) : null);
 
     const seekerPersonaSummary = buildPersonaSummary(
       {
@@ -252,7 +277,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
     let baseQuery = `
       SELECT
-        u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified,
+        u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude,
         p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
         p.smoker, p.drinker, p.relationship_goal,
         pr.personality_traits,
@@ -298,22 +323,25 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       paramIndex++;
     }
 
-    // Apply city filter
+    // Apply city filter only if explicitly specified
     if (enhancedFilters.city) {
       baseQuery += ` AND u.city = $${paramIndex}`;
       queryParams.push(enhancedFilters.city);
       paramIndex++;
-    } else {
-      // Default to same city as current user
-      baseQuery += ` AND u.city = $${paramIndex}`;
-      queryParams.push(currentUser.city);
-      paramIndex++;
     }
+    // Note: City filtering is now optional - profiles from all cities will show if no city filter is specified
 
     // Apply smoker filter
     if (enhancedFilters.smoker !== undefined) {
       baseQuery += ` AND p.smoker = $${paramIndex}`;
       queryParams.push(enhancedFilters.smoker);
+      paramIndex++;
+    }
+
+    // Apply drinker filter
+    if (enhancedFilters.drinker) {
+      baseQuery += ` AND LOWER(p.drinker) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.drinker);
       paramIndex++;
     }
 
@@ -326,6 +354,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
     // Check cooldown status - exclude users in cooldown
     baseQuery += ` AND (u.cooldown_until IS NULL OR u.cooldown_until < NOW())`;
+
+    // Exclude already viewed/swiped profiles (for off-grid refresh)
+    if (exclude_ids && exclude_ids.length > 0) {
+      baseQuery += ` AND u.id NOT IN (${exclude_ids.map((_, i) => `$${paramIndex + i}`).join(', ')})`;
+      queryParams.push(...exclude_ids);
+      paramIndex += exclude_ids.length;
+    }
 
     // Execute query
     const candidatesResult = await pool.query(baseQuery, queryParams);
@@ -340,37 +375,68 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     }
 
     // Calculate match percentages for all candidates
-    const scoredCandidates = candidates.map((candidate: any) => {
-      const candidateEmbedding = parseEmbedding(candidate.persona_embedding);
-      const matchPercentage = calculateMatchPercentage(
-        search_query || '',
-        aiParsedQuery?.preferences || null,
-        currentUser.user_interests || [],
-        currentUser.user_personality || [],
-        candidate.interests || [],
-        candidate.personality_traits || [],
-        currentUserPersonaEmbedding,
-        candidateEmbedding
-      );
+    const scoredCandidates = candidates
+      .map((candidate: any) => {
+        let distance_km: number | null = null;
+        if (hasUserLocation) {
+          const candLat = Number(candidate.latitude);
+          const candLng = Number(candidate.longitude);
+          if (Number.isFinite(candLat) && Number.isFinite(candLng)) {
+            distance_km = haversineDistanceKm(currentUserLat, currentUserLng, candLat, candLng);
+          }
+        }
 
-      return {
-        ...candidate,
-        match_percentage: matchPercentage,
-        age: calculateAge(candidate.date_of_birth),
-        persona_embedding: candidateEmbedding,
-      };
-    });
+        if (maxDistanceKm && Number.isFinite(distance_km) && (distance_km as number) > maxDistanceKm) {
+          return null;
+        }
+
+        const candidateEmbedding = parseEmbedding(candidate.persona_embedding);
+        const matchPercentage = calculateMatchPercentage(
+          search_query || '',
+          aiParsedQuery?.preferences || null,
+          currentUser.user_interests || [],
+          currentUser.user_personality || [],
+          candidate.interests || [],
+          candidate.personality_traits || [],
+          currentUserPersonaEmbedding,
+          candidateEmbedding
+        );
+
+        return {
+          ...candidate,
+          match_percentage: matchPercentage,
+          age: calculateAge(candidate.date_of_birth),
+          persona_embedding: candidateEmbedding,
+          distance_km: distance_km ?? undefined,
+        };
+      })
+      .filter((candidate: any): candidate is any => Boolean(candidate));
 
     // Sort by match percentage
     scoredCandidates.sort((a: any, b: any) => b.match_percentage - a.match_percentage);
 
-    // Split into on-grid (high match) and off-grid (broader discovery)
-    const onGridMatches = scoredCandidates.slice(0, onGridCount);
-    const offGridCandidates = scoredCandidates.slice(onGridCount);
+    // If specific type requested (for refresh), return only that type
+    let onGridMatches: any[];
+    let offGridMatches: any[];
 
-    // Randomize off-grid a bit to encourage exploration
-    const shuffledOffGrid = offGridCandidates.sort(() => Math.random() - 0.5);
-    const offGridMatches = shuffledOffGrid.slice(0, offGridCount);
+    if (is_on_grid === true) {
+      // Only return on-grid matches
+      const requestedLimit = limit || onGridCount;
+      onGridMatches = scoredCandidates.slice(0, requestedLimit);
+      offGridMatches = [];
+    } else if (is_on_grid === false) {
+      // Only return off-grid matches (randomized for exploration)
+      const shuffledCandidates = scoredCandidates.sort(() => Math.random() - 0.5);
+      const requestedLimit = limit || offGridCount;
+      offGridMatches = shuffledCandidates.slice(0, requestedLimit);
+      onGridMatches = [];
+    } else {
+      // Return both types (default behavior)
+      onGridMatches = scoredCandidates.slice(0, onGridCount);
+      const offGridCandidates = scoredCandidates.slice(onGridCount);
+      const shuffledOffGrid = offGridCandidates.sort(() => Math.random() - 0.5);
+      offGridMatches = shuffledOffGrid.slice(0, offGridCount);
+    }
 
     // Generate AI match reasons for on-grid matches (top matches only)
     let onGridWithReasons = onGridMatches.map((match: any) => ({
@@ -431,17 +497,45 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       [userId, search_query || '', JSON.stringify(enhancedFilters)]
     );
 
-    res.json({
-      on_grid_matches: onGridWithReasons,
-      off_grid_matches: offGridMatches,
-      ai_context: aiParsedQuery
-        ? {
-            search_intent: aiParsedQuery.search_intent,
-            preferences: aiParsedQuery.preferences,
-            filters_inferred: aiParsedQuery.filters,
-          }
-        : null,
-    });
+    // Return response based on request type
+    if (is_on_grid === true) {
+      // Return only on-grid matches
+      res.json({
+        matches: onGridWithReasons,
+        ai_context: aiParsedQuery
+          ? {
+              search_intent: aiParsedQuery.search_intent,
+              preferences: aiParsedQuery.preferences,
+              filters_inferred: aiParsedQuery.filters,
+            }
+          : null,
+      });
+    } else if (is_on_grid === false) {
+      // Return only off-grid matches
+      res.json({
+        matches: offGridMatches,
+        ai_context: aiParsedQuery
+          ? {
+              search_intent: aiParsedQuery.search_intent,
+              preferences: aiParsedQuery.preferences,
+              filters_inferred: aiParsedQuery.filters,
+            }
+          : null,
+      });
+    } else {
+      // Return both types (default)
+      res.json({
+        on_grid_matches: onGridWithReasons,
+        off_grid_matches: offGridMatches,
+        ai_context: aiParsedQuery
+          ? {
+              search_intent: aiParsedQuery.search_intent,
+              preferences: aiParsedQuery.preferences,
+              filters_inferred: aiParsedQuery.filters,
+            }
+          : null,
+      });
+    }
   } catch (error) {
     console.error('Search matches error:', error);
     res.status(500).json({ error: 'Failed to search matches' });

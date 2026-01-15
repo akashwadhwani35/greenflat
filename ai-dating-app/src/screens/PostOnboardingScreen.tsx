@@ -1,37 +1,120 @@
-import React, { useRef, useState } from 'react';
-import { Dimensions, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Dimensions, Platform, StatusBar, StyleSheet, TouchableOpacity, View, Animated, ScrollView } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Button } from '../components/Button';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { PixelFlag } from '../components/PixelFlag';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 type PostOnboardingScreenProps = {
   onComplete: () => void;
 };
 
+// AI-powered flag component with animations
+const AIFlagIcon: React.FC<{ color: string; animate?: boolean }> = ({ color, animate = true }) => {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (animate) {
+      // Pulse animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.1,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1,
+            duration: 1500,
+            useNativeDriver: true,
+          }),
+        ])
+      ).start();
+
+      // Glow animation
+      Animated.loop(
+        Animated.sequence([
+          Animated.timing(glowAnim, {
+            toValue: 1,
+            duration: 2000,
+            useNativeDriver: false,
+          }),
+          Animated.timing(glowAnim, {
+            toValue: 0,
+            duration: 2000,
+            useNativeDriver: false,
+          }),
+        ])
+      ).start();
+    }
+  }, [animate]);
+
+  const glowOpacity = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0.8],
+  });
+
+  return (
+    <Animated.View
+      style={[
+        styles.flagContainer,
+        {
+          transform: [{ scale: pulseAnim }],
+        },
+      ]}
+    >
+      {/* Glow effect */}
+      <Animated.View
+        style={[
+          styles.flagGlow,
+          {
+            backgroundColor: color,
+            opacity: glowOpacity,
+          },
+        ]}
+      />
+
+      {/* Flag icon using SVG */}
+      <View style={[styles.flagIcon, { backgroundColor: color }]}>
+        <PixelFlag size={55} color="#000000" />
+        {/* AI spark indicator */}
+        <View style={styles.aiSparkContainer}>
+          <Feather name="zap" size={24} color="#000" />
+        </View>
+      </View>
+    </Animated.View>
+  );
+};
+
 const slides = [
   {
-    icon: 'heart',
-    title: 'Find Matches That Actually Get You',
-    description: 'Our AI analyzes personality, values, and communication style to find people who truly align with you — not just swipe-worthy photos.',
+    key: 'ai-matching',
+    title: 'AI That Actually Understands You',
+    description: 'Our AI analyzes personality, values, and communication style—not just photos. We find people who truly get you.',
+    highlight: 'Real compatibility, not just attraction',
   },
   {
-    icon: 'search',
-    title: 'Search How You Actually Think',
-    description: 'Type traits and values like "loves deep conversations" or "values emotional intelligence". GreenFlag finds matches based on what really matters.',
-    example: 'Try: "mindful", "adventurous", "kind"',
+    key: 'smart-search',
+    title: 'Search Like You Think',
+    description: 'Type "emotionally intelligent" or "loves deep conversations". Our AI finds matches based on what actually matters.',
+    highlight: 'No more endless swiping',
   },
   {
-    icon: 'arrow-right-circle',
-    title: 'See Someone You Like?',
-    description: 'Swipe right if you\'re interested, left to pass. When it\'s mutual, start a conversation with our AI-suggested openers.',
+    key: 'green-flags',
+    title: 'We Spot the Green Flags',
+    description: 'Our AI identifies positive traits and healthy relationship patterns. We help you find someone who\'s genuinely good for you.',
+    highlight: 'AI-powered red flag detection',
   },
   {
-    icon: 'star',
-    title: 'The More You Share, The Better',
-    description: 'Add details to your profile so our AI can find more compatible matches. Better profile = Better connections.',
+    key: 'smarter-matching',
+    title: 'Gets Smarter Over Time',
+    description: 'The more you interact, the better we understand your preferences. Our AI learns what makes a great match for you.',
+    highlight: 'Personalized just for you',
   },
 ];
 
@@ -63,8 +146,16 @@ export const PostOnboardingScreen: React.FC<PostOnboardingScreenProps> = ({ onCo
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <StatusBar barStyle="dark-content" />
+    <View style={[styles.container, { backgroundColor: theme.colors.deepBlack }]}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+      {/* Background gradient */}
+      <LinearGradient
+        colors={[theme.colors.deepBlack, theme.colors.darkBlack, theme.colors.charcoal]}
+        style={styles.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      />
 
       {/* Skip button */}
       <TouchableOpacity style={styles.skipButton} onPress={handleSkip} activeOpacity={0.7}>
@@ -82,34 +173,24 @@ export const PostOnboardingScreen: React.FC<PostOnboardingScreenProps> = ({ onCo
         onScroll={handleScroll}
         scrollEventThrottle={16}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
       >
         {slides.map((slide, index) => (
-          <View key={index} style={[styles.slide, { width }]}>
+          <View key={slide.key} style={[styles.slide, { width }]}>
             <View style={styles.slideContent}>
-              {/* Icon */}
-              <View style={[styles.iconCircle, { backgroundColor: theme.colors.successTint }]}>
-                <Feather name={slide.icon as any} size={48} color={theme.colors.brand} />
+              {/* AI Flag Icon */}
+              <View style={styles.iconSection}>
+                <AIFlagIcon color={theme.colors.neonGreen} />
               </View>
 
               {/* Title */}
-              <Typography variant="display" align="center" style={styles.title}>
+              <Typography variant="display" style={[styles.title, { color: theme.colors.text }]}>
                 {slide.title}
               </Typography>
 
               {/* Description */}
-              <Typography variant="body" align="center" muted style={styles.description}>
+              <Typography variant="body" style={[styles.description, { color: theme.colors.muted }]}>
                 {slide.description}
               </Typography>
-
-              {/* Example (if exists) */}
-              {slide.example && (
-                <View style={[styles.exampleBox, { backgroundColor: theme.colors.accentTint, borderColor: theme.colors.accent }]}>
-                  <Typography variant="small" style={{ color: theme.colors.text }}>
-                    {slide.example}
-                  </Typography>
-                </View>
-              )}
             </View>
           </View>
         ))}
@@ -123,8 +204,8 @@ export const PostOnboardingScreen: React.FC<PostOnboardingScreenProps> = ({ onCo
             style={[
               styles.dot,
               {
-                backgroundColor: index === currentIndex ? theme.colors.brand : theme.colors.border,
-                width: index === currentIndex ? 24 : 8,
+                backgroundColor: index === currentIndex ? theme.colors.neonGreen : theme.colors.border,
+                width: index === currentIndex ? 32 : 8,
               },
             ]}
           />
@@ -134,7 +215,7 @@ export const PostOnboardingScreen: React.FC<PostOnboardingScreenProps> = ({ onCo
       {/* Continue button */}
       <View style={styles.footer}>
         <Button
-          label={currentIndex === slides.length - 1 ? "Start exploring" : "Continue"}
+          label={currentIndex === slides.length - 1 ? "Let's find your match" : 'Continue'}
           onPress={handleNext}
           fullWidth
         />
@@ -143,23 +224,32 @@ export const PostOnboardingScreen: React.FC<PostOnboardingScreenProps> = ({ onCo
   );
 };
 
+const FeatureBullet: React.FC<{ text: string; theme: any }> = ({ text, theme }) => (
+  <View style={styles.featureBullet}>
+    <Feather name="check" size={16} color={theme.colors.neonGreen} />
+    <Typography variant="small" style={{ color: theme.colors.textDark, marginLeft: 12 }}>
+      {text}
+    </Typography>
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  gradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
   skipButton: {
     position: 'absolute',
-    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 16 : 50,
+    top: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 16 : 60,
     right: 24,
     zIndex: 10,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
   },
   scrollView: {
     flex: 1,
-  },
-  scrollContent: {
-    alignItems: 'center',
   },
   slide: {
     flex: 1,
@@ -168,41 +258,118 @@ const styles = StyleSheet.create({
   },
   slideContent: {
     alignItems: 'center',
-    gap: 24,
+    justifyContent: 'center',
   },
-  iconCircle: {
+  iconSection: {
+    alignItems: 'center',
+    marginBottom: 48,
+  },
+  flagContainer: {
+    position: 'relative',
+    marginBottom: 24,
+  },
+  flagGlow: {
+    position: 'absolute',
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    top: -30,
+    left: -30,
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 40,
+    elevation: 20,
+  },
+  flagIcon: {
     width: 120,
     height: 120,
     borderRadius: 60,
-    alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    alignItems: 'center',
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  aiSparkContainer: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: '#ADFF1A',
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  aiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
   },
   title: {
-    paddingHorizontal: 16,
+    fontSize: 36,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 44,
+    letterSpacing: -0.5,
   },
   description: {
-    paddingHorizontal: 8,
+    fontSize: 17,
+    textAlign: 'center',
     lineHeight: 26,
+    paddingHorizontal: 16,
   },
-  exampleBox: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+  highlightBox: {
     borderRadius: 16,
-    borderWidth: 1,
-    marginTop: 8,
+    borderWidth: 2,
+    padding: 20,
+    marginBottom: 32,
+  },
+  highlightContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  highlightDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.6,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  featuresContainer: {
+    gap: 16,
+  },
+  featureBullet: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: 8,
   },
   progressDots: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 24,
+    paddingVertical: 32,
   },
   dot: {
     height: 8,
     borderRadius: 4,
-    transition: 'all 0.3s ease',
   },
   footer: {
     paddingHorizontal: 32,

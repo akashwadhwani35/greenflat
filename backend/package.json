@@ -19,11 +19,13 @@
     "bcryptjs": "^3.0.2",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
+    "expo-server-sdk": "4.0.0",
     "express": "^5.1.0",
     "express-validator": "^7.3.0",
     "jsonwebtoken": "^9.0.2",
     "openai": "^6.6.0",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "yoti": "4.12.1"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

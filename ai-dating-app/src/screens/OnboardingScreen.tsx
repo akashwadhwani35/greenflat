@@ -5,17 +5,21 @@ import {
   Easing,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
   TextInput,
+  Image,
   TouchableOpacity,
   TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { InputField } from '../components/InputField';
@@ -24,21 +28,11 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 
 type OnboardingScreenProps = {
-  onComplete: (result: { token: string; name: string }) => void;
+  onComplete: (result: { token: string; name: string; userId?: number }) => void;
   apiBaseUrl: string;
 };
 
-type SlideKey =
-  | 'name'
-  | 'identity'
-  | 'lookingFor'
-  | 'connection'
-  | 'feelMost'
-  | 'photo'
-  | 'location'
-  | 'nearby'
-  | 'contact'
-  | 'success';
+type SlideKey = 'basic' | 'intentions' | 'location' | 'physical' | 'lifestyle' | 'personality' | 'prompts' | 'photos' | 'contact';
 
 type Slide = {
   key: SlideKey;
@@ -47,51 +41,96 @@ type Slide = {
 };
 
 const slides: Slide[] = [
-  { key: 'name', title: 'What should we call you?', subtitle: 'Share the name you want to be greeted with 🌿' },
-  { key: 'identity', title: 'How do you identify?', subtitle: 'Choose the label that feels most like you — you can edit this anytime.' },
-  { key: 'lookingFor', title: 'What are you looking for right now?', subtitle: 'We’ll tailor your prompts and matches around your intention.' },
-  { key: 'connection', title: 'What matters most in a connection?', subtitle: 'Think values, rhythms, or rituals that tell someone you’re aligned.' },
-  { key: 'feelMost', title: 'When do you feel most like yourself?', subtitle: 'Paint us a scene. The more human and specific, the better.' },
-  { key: 'photo', title: 'Upload a photo that feels like you.', subtitle: 'Natural light, warm energy, and no NSFW content please.' },
-  { key: 'location', title: 'Where are you based?', subtitle: 'We use this to surface nearby green flags and thoughtful date ideas.' },
-  { key: 'nearby', title: 'Would you like to meet people near you?', subtitle: 'Keep it local or open the doors wider — you can change this anytime.' },
-  { key: 'contact', title: 'Let’s secure your account.', subtitle: 'A gentle four-digit code keeps your space protected.' },
-  { key: 'success', title: 'You’re all set 🌿', subtitle: 'Greenflag is ready when you are.' },
+  { key: 'basic', title: "Let's start with you", subtitle: 'Your name, identity, and age.' },
+  { key: 'intentions', title: 'What brings you here?', subtitle: 'Your relationship goals and vibe.' },
+  { key: 'location', title: 'Where are you?', subtitle: 'Detect or search your city.' },
+  { key: 'physical', title: 'A bit about your look', subtitle: 'Height and body type (optional).' },
+  { key: 'lifestyle', title: 'Your lifestyle', subtitle: 'Habits that matter to you.' },
+  { key: 'personality', title: 'Show your personality', subtitle: 'Interests and a quick quiz.' },
+  { key: 'prompts', title: 'Tell your story', subtitle: 'Answer prompts to stand out.' },
+  { key: 'photos', title: 'Add your photos', subtitle: 'Show the real you.' },
+  { key: 'contact', title: 'Secure your profile', subtitle: 'Email or phone + verification.' },
 ];
 
 const identityOptions = ['She / Her', 'He / Him', 'They / Them', 'Another label'];
 const lookingForOptions = ['Friendship', 'Dating', 'Long-term', 'Exploring'];
-const otpSlots = [0, 1, 2, 3];
+const bodyTypeOptions = ['Slim', 'Athletic', 'Average', 'Curvy', 'Muscular', 'Plus-size'];
+const drinkerOptions = ['Never', 'Social', 'Regular'];
+const dietOptions = ['Omnivore', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', 'Other'];
+const fitnessOptions = ['Not active', 'Lightly active', 'Active', 'Very active'];
+const interestOptions = ['Travel', 'Fitness', 'Music', 'Art', 'Cooking', 'Gaming', 'Reading', 'Sports', 'Movies', 'Technology', 'Photography', 'Dancing'];
+
+const personalityQuestions = [
+  { q: 'At a party, I usually:', a: 'Socialize with everyone', b: 'Talk to a few close friends', c: 'Observe and listen', d: 'Leave early' },
+  { q: 'I make decisions based on:', a: 'Logic and facts', b: 'Feelings and values', c: 'Gut instinct', d: 'What others think' },
+  { q: 'My ideal weekend is:', a: 'Adventure and excitement', b: 'Relaxing at home', c: 'Trying something new', d: 'Time with loved ones' },
+  { q: 'When facing a problem, I:', a: 'Analyze all options', b: 'Ask for advice', c: 'Go with my instinct', d: 'Sleep on it' },
+  { q: 'I value most:', a: 'Honesty', b: 'Loyalty', c: 'Kindness', d: 'Ambition' },
+  { q: 'In relationships, I need:', a: 'Independence', b: 'Quality time', c: 'Deep conversations', d: 'Physical affection' },
+  { q: 'My communication style is:', a: 'Direct and clear', b: 'Thoughtful and careful', c: 'Playful and light', d: 'Emotional and expressive' },
+  { q: 'I handle conflict by:', a: 'Addressing it immediately', b: 'Taking time to process', c: 'Compromising', d: 'Avoiding when possible' },
+];
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, apiBaseUrl }) => {
   const theme = useTheme();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showIOSPicker, setShowIOSPicker] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+  const [citySuggestions, setCitySuggestions] = useState<{ city: string; lat?: number; lng?: number }[]>([]);
+
   const [form, setForm] = useState({
+    // Basic
     name: '',
     identity: '',
-    lookingFor: [] as string[],
-    connection: '',
-    feelMost: '',
-    photoSelected: false,
-    city: '',
-    useCurrentCity: false,
-    meetNearby: 'yes',
     dateOfBirth: '',
+
+    // Intentions
+    lookingFor: [] as string[],
+    vibe: '',
+
+    // Location
+    city: '',
+    lat: null as number | null,
+    lng: null as number | null,
+    useCurrentCity: false,
+
+    // Physical
+    height: '',
+    bodyType: '',
+
+    // Lifestyle
+    smoker: false,
+    drinker: 'Social' as 'Never' | 'Social' | 'Regular',
+    diet: '',
+    fitnessLevel: '',
+
+    // Personality
+    interests: [] as string[],
+    q1: '', q2: '', q3: '', q4: '', q5: '', q6: '', q7: '', q8: '',
+
+    // Prompts
+    bio: '',
+    prompt1: '',
+    prompt2: '',
+    prompt3: '',
+
+    // Photos
+    photos: [] as string[],
+    primaryPhotoIndex: 0,
+
+    // Contact
     contactValue: '',
     contactType: 'email' as 'email' | 'phone',
     otp: '',
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
 
-  void apiBaseUrl;
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
   const isValidPhone = (value: string) => /^[0-9+()\-\s]{8,}$/.test(value.trim());
 
-  const rawProgress = (step + 1) / slides.length;
-  const progress = Math.max(rawProgress, 0.1);
+  const progress = (step + 1) / slides.length;
 
   const maximumDOB = useMemo(() => {
     const date = new Date();
@@ -100,6 +139,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   }, []);
 
   const transition = useRef(new Animated.Value(1)).current;
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const openDatePicker = () => {
     const initial = form.dateOfBirth ? new Date(form.dateOfBirth) : maximumDOB;
@@ -119,79 +159,47 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     }
   };
 
-  const toggleLookingFor = (option: string) => {
-    setForm((prev) => {
-      const exists = prev.lookingFor.includes(option);
-      return {
-        ...prev,
-        lookingFor: exists ? prev.lookingFor.filter((item) => item !== option) : [...prev.lookingFor, option],
-      };
-    });
+  const toggleArrayValue = (array: string[], value: string) => {
+    return array.includes(value) ? array.filter(v => v !== value) : [...array, value];
   };
-
-  const isStepCompleted = useCallback((key: SlideKey) => {
-    switch (key) {
-      case 'name':
-        return form.name.trim().length > 0;
-      case 'identity':
-        return Boolean(form.identity);
-      case 'lookingFor':
-        return form.lookingFor.length > 0;
-      case 'connection':
-        return form.connection.trim().length > 0;
-      case 'feelMost':
-        return form.feelMost.trim().length > 0;
-      case 'photo':
-        return form.photoSelected;
-      case 'location':
-        return Boolean(form.dateOfBirth) && form.city.trim().length > 0;
-      case 'nearby':
-        return Boolean(form.meetNearby);
-      case 'contact':
-        return form.contactValue.trim().length > 0 && form.otp.length === 4;
-      case 'success':
-        return step === slides.length - 1;
-      default:
-        return false;
-    }
-  }, [form, step]);
 
   const validateStep = (): boolean => {
     const current = slides[step].key;
     const nextErrors: Record<string, string> = {};
 
     switch (current) {
-      case 'name':
-        if (!form.name.trim()) nextErrors.name = 'Tell us your name so we can greet you properly.';
+      case 'basic':
+        if (!form.name.trim()) nextErrors.name = 'Tell us your name.';
+        if (!form.identity) nextErrors.identity = 'Pick how you identify.';
+        if (!form.dateOfBirth) nextErrors.dateOfBirth = 'Select your birth date (18+).';
         break;
-      case 'identity':
-        if (!form.identity) nextErrors.identity = 'Pick the label that feels most like you.';
-        break;
-      case 'lookingFor':
+      case 'intentions':
         if (form.lookingFor.length === 0) nextErrors.lookingFor = 'Choose at least one intention.';
         break;
-      case 'connection':
-        if (!form.connection.trim()) nextErrors.connection = 'Share what makes a connection feel right.';
-        break;
-      case 'feelMost':
-        if (!form.feelMost.trim()) nextErrors.feelMost = 'Let us know when you feel most like yourself.';
-        break;
-      case 'photo':
-        if (!form.photoSelected) nextErrors.photo = 'Add a photo so matches can feel your energy.';
-        break;
       case 'location':
-        if (!form.dateOfBirth) nextErrors.dateOfBirth = 'Select your birth date (18+).';
-        if (!form.city.trim()) nextErrors.city = 'Let us know your city to curate local matches.';
+        if (!form.city.trim()) nextErrors.city = 'Add your city.';
+        break;
+      case 'personality':
+        if (form.interests.length === 0) nextErrors.interests = 'Pick at least 3 interests.';
+        if (!form.q1 || !form.q2 || !form.q3 || !form.q4 || !form.q5 || !form.q6 || !form.q7 || !form.q8) {
+          nextErrors.quiz = 'Please answer all personality questions.';
+        }
+        break;
+      case 'prompts':
+        if (!form.bio.trim()) nextErrors.bio = 'Write a short bio.';
+        break;
+      case 'photos':
+        if (form.photos.length === 0) nextErrors.photos = 'Add at least one photo.';
         break;
       case 'contact':
         if (!form.contactValue.trim()) {
-          nextErrors.contact = 'Share an email or phone so we can protect your account.';
+          nextErrors.contact = 'Add email or phone.';
         } else if (form.contactType === 'email' && !isValidEmail(form.contactValue)) {
-          nextErrors.contact = 'That email doesn’t look quite right.';
+          nextErrors.contact = 'That email does not look right.';
         } else if (form.contactType === 'phone' && !isValidPhone(form.contactValue)) {
-          nextErrors.contact = 'Add a phone number with country code.';
+          nextErrors.contact = 'Add phone with country code.';
         }
-        if (form.otp.length !== 4) nextErrors.otp = 'Enter the 4-digit code we sent.';
+        if (form.otp.length !== 4) nextErrors.otp = 'Enter the 4-digit code.';
         break;
       default:
         break;
@@ -201,21 +209,153 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleContinue = () => {
+  const mapIdentityToGender = (identity: string) => {
+    if (identity.toLowerCase().includes('she')) return 'female';
+    if (identity.toLowerCase().includes('he')) return 'male';
+    return 'other';
+  };
+
+  const resolveEmail = () => {
+    if (form.contactType === 'email') {
+      return form.contactValue.trim();
+    }
+    const digits = form.contactValue.replace(/[^0-9]/g, '');
+    return `${digits || 'user'}@phone.greenflag.app`;
+  };
+
+  const submitToBackend = async () => {
+    const email = resolveEmail();
+    const gender = mapIdentityToGender(form.identity || '');
+    const interested_in = gender === 'female' ? 'male' : gender === 'male' ? 'female' : 'both';
+    const password = 'GreenFlag!123';
+
+    const signupResponse = await fetch(`${apiBaseUrl}/auth/signup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        name: form.name.trim(),
+        gender,
+        interested_in,
+        date_of_birth: form.dateOfBirth,
+        city: form.city || 'Unknown',
+      }),
+    });
+
+    const signupBody = await signupResponse.json().catch(() => ({}));
+    let token = signupBody?.token as string | undefined;
+    let userId = signupBody?.user?.id as number | undefined;
+
+    if (!signupResponse.ok) {
+      const errorMessage = signupBody.error || 'Unable to create your account.';
+      if (signupResponse.status === 400 && errorMessage.toLowerCase().includes('already')) {
+        const loginResponse = await fetch(`${apiBaseUrl}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+
+        if (!loginResponse.ok) {
+          const loginBody = await loginResponse.json().catch(() => ({}));
+          throw new Error(loginBody.error || errorMessage);
+        }
+
+        const loginBody = await loginResponse.json();
+        token = loginBody.token;
+        userId = loginBody.user?.id;
+      } else {
+        throw new Error(errorMessage);
+      }
+    }
+
+    if (!token) throw new Error('No token returned from the server.');
+
+    const userHeaders = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    };
+
+    const profilePayload = {
+      height: form.height || null,
+      body_type: form.bodyType || null,
+      interests: form.interests,
+      bio: form.bio,
+      prompt1: form.prompt1 || null,
+      prompt2: form.prompt2 || null,
+      prompt3: form.prompt3 || null,
+      smoker: form.smoker,
+      drinker: form.drinker.toLowerCase(),
+      diet: form.diet || 'balanced',
+      fitness_level: form.fitnessLevel || 'active',
+      education: null,
+      occupation: null,
+      relationship_goal: form.lookingFor[0]?.toLowerCase() || 'exploring',
+      family_oriented: true,
+      spiritual: true,
+      open_minded: true,
+      career_focused: true,
+      self_summary: form.bio,
+      ideal_partner_prompt: form.prompt1 || 'Kind, curious, and communicates well.',
+      connection_preferences: form.vibe || 'Open to meaningful connections',
+      dealbreakers: 'Poor communication and unkindness.',
+      growth_journey: 'Investing in emotional fitness and healthy routines.',
+      question1_answer: form.q1 || 'A',
+      question2_answer: form.q2 || 'B',
+      question3_answer: form.q3 || 'C',
+      question4_answer: form.q4 || 'A',
+      question5_answer: form.q5 || 'B',
+      question6_answer: form.q6 || 'C',
+      question7_answer: form.q7 || 'D',
+      question8_answer: form.q8 || 'A',
+    };
+
+    const completeProfileResponse = await fetch(`${apiBaseUrl}/profile/complete`, {
+      method: 'POST',
+      headers: userHeaders,
+      body: JSON.stringify(profilePayload),
+    });
+
+    if (!completeProfileResponse.ok) {
+      const errorBody = await completeProfileResponse.json().catch(() => ({}));
+      throw new Error(errorBody.error || 'Unable to complete your profile.');
+    }
+
+    // Upload photos
+    for (let i = 0; i < form.photos.length; i++) {
+      await fetch(`${apiBaseUrl}/profile/photo`, {
+        method: 'POST',
+        headers: userHeaders,
+        body: JSON.stringify({ photo_url: form.photos[i], is_primary: i === form.primaryPhotoIndex }),
+      }).catch(() => {});
+    }
+
+    // Verify location
+    if (form.lat !== null && form.lng !== null) {
+      await fetch(`${apiBaseUrl}/verification/location`, {
+        method: 'POST',
+        headers: userHeaders,
+        body: JSON.stringify({ lat: form.lat, lng: form.lng, city: form.city || undefined }),
+      }).catch(() => {});
+    }
+
+    return { token, userId };
+  };
+
+  const handleContinue = async () => {
     Keyboard.dismiss();
     if (!validateStep()) return;
 
-    if (slides[step].key === 'success') {
-      onComplete({ token: 'demo-token', name: form.name.trim() });
-      return;
-    }
-
-    if (step === slides.length - 2) {
+    if (step === slides.length - 1) {
       setLoading(true);
-      setTimeout(() => {
+      try {
+        const result = await submitToBackend();
+        onComplete({ token: result.token, name: form.name.trim(), userId: result.userId });
+      } catch (error: any) {
+        Alert.alert('Error', error.message || 'Something went wrong finishing setup.');
+      } finally {
         setLoading(false);
-        setStep((prev) => prev + 1);
-      }, 600);
+      }
       return;
     }
 
@@ -227,26 +367,209 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     setStep((prev) => prev - 1);
   };
 
-  const selectPhoto = () => {
-    Alert.alert('Photo upload', 'Photo upload is coming soon. For now, we’ll mark this as done.');
-    setForm((prev) => ({ ...prev, photoSelected: true }));
+  const selectPhoto = async () => {
+    try {
+      console.log('Photo picker initiated...');
+
+      // Request permission
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      console.log('Permission status:', perm.granted);
+
+      if (!perm.granted) {
+        Alert.alert('Permission needed', 'Allow photo library access to add your photo.');
+        return;
+      }
+
+      console.log('Launching image picker...');
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 5],
+        quality: 0.7,
+        base64: Platform.OS !== 'web', // Don't use base64 on web
+      });
+
+      console.log('Image picker result:', { canceled: result.canceled, assetsLength: result.assets?.length });
+
+      if (result.canceled || !result.assets?.length) {
+        console.log('Image picker was cancelled or no assets');
+        return;
+      }
+
+      const asset = result.assets[0];
+      console.log('Selected asset:', { uri: asset.uri, type: asset.type });
+
+      // On web, just use the URI directly; on mobile, use base64
+      const dataUrl = Platform.OS === 'web'
+        ? asset.uri
+        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+
+      console.log('Adding photo to form...');
+      setForm((prev) => ({ ...prev, photos: [...prev.photos, dataUrl] }));
+      console.log('Photo added successfully');
+    } catch (error: any) {
+      console.error('Photo picker error:', error);
+      Alert.alert('Error', `Could not pick a photo: ${error.message || 'Please try again.'}`);
+    }
   };
 
-  const selectCurrentLocation = () => {
-    setForm((prev) => ({ ...prev, city: 'Detected location', useCurrentCity: true }));
+  const selectCurrentLocation = async () => {
+    try {
+      setLoading(true);
+      setLocationError(null);
+
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationError('Location permission denied. Please enter manually.');
+        setLoading(false);
+        return;
+      }
+
+      const servicesEnabled = await Location.hasServicesEnabledAsync();
+      if (!servicesEnabled) {
+        setLocationError('Location services are off. Turn on location (GPS) or enter your city manually.');
+        Alert.alert('Turn on Location', 'Enable Location services to detect your city automatically.', [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => Linking.openSettings().catch(() => {}) },
+        ]);
+        setLoading(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        mayShowUserSettingsDialog: true,
+      });
+
+      const { latitude, longitude } = location.coords;
+
+      // Use backend geocoding directly (skip Expo to avoid rate limits)
+      try {
+        console.log('Attempting backend geocoding with:', { lat: latitude, lng: longitude, apiBaseUrl });
+        const response = await fetch(`${apiBaseUrl}/geocode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: latitude, lng: longitude }),
+        });
+
+        console.log('Backend response status:', response.status);
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Backend geocoding success:', data);
+          const detectedCity = data.city;
+          if (detectedCity) {
+            setForm((prev) => ({
+              ...prev,
+              city: detectedCity,
+              useCurrentCity: true,
+              lat: latitude,
+              lng: longitude,
+            }));
+            return;
+          }
+        } else {
+          const errorData = await response.json();
+          console.log('Backend geocoding error:', errorData);
+          setLocationError(`Backend error: ${errorData.error || 'Unknown error'}. Please enter manually.`);
+          return;
+        }
+      } catch (backendError: any) {
+        console.log('Backend geocoding failed:', backendError);
+        setLocationError(`Network error: ${backendError.message}. Check if backend is running.`);
+        return;
+      }
+
+      // If no city was returned
+      setLocationError('Could not detect city name. Please enter manually.');
+    } catch (error: any) {
+      console.error('Location detection error:', error);
+      const message = String(error?.message || '').toLowerCase();
+      if (message.includes('unavailable') || message.includes('provider')) {
+        setLocationError('Current location is unavailable. Turn on location services or enter your city manually.');
+      } else {
+        setLocationError(`Error: ${error.message}. Please enter manually.`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCityChange = (text: string) => {
+    setForm((prev) => ({ ...prev, city: text, useCurrentCity: false }));
+    setLocationError(null);
+
+    // Clear previous timeout
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    if (text.trim().length < 2) {
+      setCitySuggestions([]);
+      return;
+    }
+
+    // Debounce: wait 500ms after user stops typing
+    timeoutRef.current = setTimeout(() => {
+      void geocodeCityFromTextValue(text.trim(), true);
+    }, 500);
+  };
+
+  const geocodeCityFromText = async () => {
+    return geocodeCityFromTextValue(form.city, false);
+  };
+
+  const geocodeCityFromTextValue = async (text: string, silent?: boolean) => {
+    if (!text.trim()) {
+      if (!silent) setLocationError('Enter a city to verify with Maps.');
+      return;
+    }
+    try {
+      // Don't show loading spinner for silent autocomplete requests
+      if (!silent) {
+        setLoading(true);
+      }
+      setLocationError(null);
+
+      const response = await fetch(`${apiBaseUrl}/geocode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: text }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (!silent) throw new Error(data.error || 'Unable to verify city');
+        return;
+      }
+
+      // Only show suggestions, don't auto-fill the city
+      if (data.suggestions && data.suggestions.length > 0) {
+        setCitySuggestions(data.suggestions);
+      } else {
+        setCitySuggestions([]);
+      }
+    } catch (error: any) {
+      if (!silent) setLocationError(error.message || 'Unable to verify city');
+      setCitySuggestions([]);
+    } finally {
+      if (!silent) {
+        setLoading(false);
+      }
+    }
   };
 
   useEffect(() => {
     transition.setValue(0);
     Animated.timing(transition, {
       toValue: 1,
-      duration: 260,
+      duration: 300,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();
   }, [step, transition]);
 
-  const renderChipRow = (options: string[], selectedValues: string[], toggle: (option: string) => void) => (
+  const renderChipRow = (options: string[], selectedValues: string[], toggle: (option: string) => void, multiSelect = true) => (
     <View style={styles.chipRow}>
       {options.map((option) => (
         <Chip
@@ -259,177 +582,479 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     </View>
   );
 
-  const renderOTPInputs = () => (
-    <View style={styles.otpRow}>
-      {otpSlots.map((slot) => (
-        <TextInput
-          key={slot}
-          value={form.otp[slot] || ''}
-          onChangeText={(text) => {
-            const clean = text.replace(/[^0-9]/g, '').slice(-1);
-            const next = form.otp.split('');
-            next[slot] = clean;
-            const otp = next.join('').slice(0, 4);
-            setForm((prev) => ({ ...prev, otp }));
-          }}
-          keyboardType="numeric"
-          maxLength={1}
-          style={[styles.otpInput, { borderColor: theme.colors.border }]}
-          returnKeyType="next"
-        />
-      ))}
-    </View>
-  );
-
   const renderSlide = () => {
     const current = slides[step].key;
 
     switch (current) {
-      case 'name':
-        return (
-          <UnderlineInput
-            placeholder="Your name"
-            value={form.name}
-            onChangeText={(text) => setForm((prev) => ({ ...prev, name: text }))}
-            autoCapitalize="words"
-            textContentType="givenName"
-            returnKeyType="done"
-            onSubmitEditing={handleContinue}
-            error={errors.name}
-          />
-        );
-      case 'identity':
+      case 'basic':
         return (
           <View style={styles.slideStack}>
-            <Typography variant="body" muted>Choose the label that feels most like you 💫.</Typography>
-            {renderChipRow(identityOptions, form.identity ? [form.identity] : [], (option) =>
-              setForm((prev) => ({ ...prev, identity: option }))
-            )}
-            {errors.identity ? <Typography variant="small" tone="error">{errors.identity}</Typography> : null}
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <UnderlineInput
+                placeholder="Your name"
+                value={form.name}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, name: text }))}
+                autoCapitalize="words"
+                error={errors.name}
+              />
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>How do you identify?</Typography>
+              {renderChipRow(identityOptions, form.identity ? [form.identity] : [], (option) =>
+                setForm((prev) => ({ ...prev, identity: option }))
+              , false)}
+              {errors.identity ? <Typography variant="small" tone="error">{errors.identity}</Typography> : null}
+
+              <TouchableOpacity
+                style={[styles.dateButton, {
+                  borderColor: form.dateOfBirth ? theme.colors.neonGreen : theme.colors.borderLight,
+                  marginTop: 16
+                }]}
+                onPress={openDatePicker}
+              >
+                <Feather name="calendar" size={20} color={theme.colors.neonGreen} />
+                <Typography variant="body" style={{ flex: 1, color: form.dateOfBirth ? theme.colors.neonGreen : theme.colors.muted }}>
+                  {form.dateOfBirth ? form.dateOfBirth : 'Select your birth date (18+)'}
+                </Typography>
+              </TouchableOpacity>
+              {errors.dateOfBirth ? <Typography variant="small" tone="error">{errors.dateOfBirth}</Typography> : null}
+              {showIOSPicker ? (
+                <View style={{ backgroundColor: theme.colors.neonGreen, borderRadius: theme.radius.md, padding: 12, marginTop: 8 }}>
+                  <DateTimePicker
+                    mode="date"
+                    display="spinner"
+                    value={form.dateOfBirth ? new Date(form.dateOfBirth) : maximumDOB}
+                    maximumDate={maximumDOB}
+                    themeVariant="light"
+                    accentColor={theme.colors.deepBlack}
+                    textColor={theme.colors.deepBlack}
+                    onChange={(_, date) => {
+                      setShowIOSPicker(false);
+                      if (date) {
+                        setForm((prev) => ({ ...prev, dateOfBirth: date.toISOString().slice(0, 10) }));
+                      }
+                    }}
+                  />
+                </View>
+              ) : null}
+            </View>
           </View>
         );
-      case 'lookingFor':
+
+      case 'intentions':
         return (
           <View style={styles.slideStack}>
-            <Typography variant="body" muted>Pick the intentions you’d love to explore 🌱.</Typography>
-            {renderChipRow(lookingForOptions, form.lookingFor, toggleLookingFor)}
-            {errors.lookingFor ? <Typography variant="small" tone="error">{errors.lookingFor}</Typography> : null}
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <Typography variant="body" style={{ color: theme.colors.muted }}>What are you looking for?</Typography>
+              {renderChipRow(lookingForOptions, form.lookingFor, (option) =>
+                setForm((prev) => ({ ...prev, lookingFor: toggleArrayValue(prev.lookingFor, option) }))
+              )}
+              {errors.lookingFor ? <Typography variant="small" tone="error">{errors.lookingFor}</Typography> : null}
+
+              <View style={{ marginTop: 16 }}>
+                <View style={{ marginBottom: 0 }}>
+                  <UnderlineInput
+                    placeholder="One line about your vibe (optional)"
+                    value={form.vibe}
+                    onChangeText={(text) => setForm((prev) => ({ ...prev, vibe: text }))}
+                    multiline
+                  />
+                </View>
+                <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, fontStyle: 'italic' }}>
+                  e.g., "Weekend hiker who loves spontaneous road trips" or "Deep conversations over coffee"
+                </Typography>
+              </View>
+            </View>
           </View>
         );
-      case 'connection':
-        return (
-          <View style={styles.slideStack}>
-            <Typography variant="small" muted>Example: Honest communication, shared curiosity, feeling emotionally held.</Typography>
-            <UnderlineInput
-              placeholder="Your answer"
-              value={form.connection}
-              onChangeText={(text) => setForm((prev) => ({ ...prev, connection: text }))}
-              multiline
-              error={errors.connection}
-            />
-          </View>
-        );
-      case 'feelMost':
-        return (
-          <View style={styles.slideStack}>
-            <Typography variant="small" muted>Example: Slow mornings journaling with a cup of tea.</Typography>
-            <UnderlineInput
-              placeholder="I feel most like myself when..."
-              value={form.feelMost}
-              onChangeText={(text) => setForm((prev) => ({ ...prev, feelMost: text }))}
-              multiline
-              error={errors.feelMost}
-            />
-          </View>
-        );
-      case 'photo':
-        return (
-          <View style={styles.slideStack}>
-            <TouchableOpacity style={[styles.photoDrop, { borderColor: theme.colors.primary }]} onPress={selectPhoto}>
-              <Feather name="image" size={28} color={theme.colors.primary} />
-              <Typography variant="body" muted>
-                {form.photoSelected ? 'Photo added – you look great 🌿' : 'Tap to choose a photo'}
-              </Typography>
-            </TouchableOpacity>
-            <Typography variant="small" muted>Soft, natural photos keep the space feeling human. We gently review anything flagged.</Typography>
-            {errors.photo ? <Typography variant="small" tone="error">{errors.photo}</Typography> : null}
-          </View>
-        );
+
       case 'location':
         return (
           <View style={styles.slideStack}>
-            <TouchableOpacity
-              style={[styles.dobButton, { borderColor: form.dateOfBirth ? theme.colors.primary : theme.colors.border }]}
-              onPress={openDatePicker}
-            >
-              <Feather name="calendar" size={18} color={theme.colors.primary} />
-              <Typography variant="body" style={styles.dobLabel}>
-                {form.dateOfBirth ? form.dateOfBirth : 'Choose your birth date'}
-              </Typography>
-            </TouchableOpacity>
-            {errors.dateOfBirth ? <Typography variant="small" tone="error">{errors.dateOfBirth}</Typography> : null}
-            <Typography variant="small" muted>Greenflag is for adults 18+. We never display your birth date.</Typography>
-            {showIOSPicker ? (
-              <DateTimePicker
-                mode="date"
-                value={form.dateOfBirth ? new Date(form.dateOfBirth) : maximumDOB}
-                maximumDate={maximumDOB}
-                onChange={(_, date) => {
-                  setShowIOSPicker(false);
-                  if (date) {
-                    setForm((prev) => ({ ...prev, dateOfBirth: date.toISOString().slice(0, 10) }));
-                  }
-                }}
-              />
-            ) : null}
-            <Typography variant="small" muted>Example: Bengaluru</Typography>
-            <UnderlineInput
-              placeholder="Enter your city"
-              value={form.city}
-              onChangeText={(text) => setForm((prev) => ({ ...prev, city: text, useCurrentCity: false }))}
-              error={errors.city}
-            />
-            <Typography variant="small" muted>We'll suggest gentle matches near {form.city ? form.city : 'you'} — change it anytime.</Typography>
-            <Button label="Use current location" variant="secondary" onPress={selectCurrentLocation} fullWidth />
-          </View>
-        );
-      case 'nearby':
-        return (
-          <View style={styles.slideStack}>
-            <Typography variant="body" muted>Follow the pace that feels right today.</Typography>
-            <View style={styles.chipRow}>
-              <Chip label="Yes, keep it nearby" selected={form.meetNearby === 'yes'} onPress={() => setForm((prev) => ({ ...prev, meetNearby: 'yes' }))} />
-              <Chip label="Open to anywhere" selected={form.meetNearby === 'no'} onPress={() => setForm((prev) => ({ ...prev, meetNearby: 'no' }))} />
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              {/* If location not detected yet */}
+              {!form.city || form.lat === null ? (
+                <>
+                  {/* Large centered map icon */}
+                  <View style={styles.locationIconWrapper}>
+                    <View style={[styles.locationIconLarge, { backgroundColor: theme.colors.neonGreen }]}>
+                      <Feather name="map-pin" size={64} color={theme.colors.deepBlack} />
+                    </View>
+                  </View>
+
+                  <Typography variant="h1" style={{ color: theme.colors.text, textAlign: 'center', marginTop: 24, marginBottom: 12 }}>
+                    Enable Location
+                  </Typography>
+
+                  <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', marginBottom: 32, paddingHorizontal: 16 }}>
+                    We need your location to find the best matches near you. Your exact location is never shared with other users.
+                  </Typography>
+
+                  <View style={{ width: '100%', marginBottom: 8 }}>
+                    <UnderlineInput
+                      placeholder="Enter your city manually"
+                      value={form.city}
+                      onChangeText={handleCityChange}
+                      autoCapitalize="words"
+                      error={errors.city}
+                    />
+                    {citySuggestions.length > 0 ? (
+                      <View style={[styles.suggestionsPanel, { borderColor: theme.colors.borderLight }]}>
+                        {citySuggestions.map((s) => (
+                          <TouchableOpacity
+                            key={`${s.city}-${s.lat ?? 'na'}-${s.lng ?? 'na'}`}
+                            style={styles.suggestionRow}
+                            onPress={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                city: s.city,
+                                lat: typeof s.lat === 'number' ? s.lat : prev.lat,
+                                lng: typeof s.lng === 'number' ? s.lng : prev.lng,
+                                useCurrentCity: false,
+                              }));
+                              setCitySuggestions([]);
+                              setLocationError(null);
+                              setErrors((prev) => ({ ...prev, city: '' }));
+                            }}
+                          >
+                            <Feather name="map-pin" size={14} color={theme.colors.neonGreen} />
+                            <Typography variant="small" style={{ color: theme.colors.text, marginLeft: 10, flex: 1 }}>
+                              {s.city}
+                            </Typography>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    ) : null}
+                  </View>
+
+                  {locationError && (
+                    <View style={[styles.errorBanner, { backgroundColor: 'rgba(255, 107, 107, 0.1)', borderColor: theme.colors.error }]}>
+                      <Feather name="alert-circle" size={18} color={theme.colors.error} />
+                      <Typography variant="small" style={{ color: theme.colors.error, marginLeft: 10, flex: 1 }}>
+                        {locationError}
+                      </Typography>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <>
+                  {/* Location detected - show success state */}
+                  <View style={styles.locationIconWrapper}>
+                    <View style={[styles.locationIconLarge, { backgroundColor: 'rgba(188, 246, 65, 0.15)' }]}>
+                      <Feather name="map-pin" size={64} color={theme.colors.neonGreen} />
+                    </View>
+                  </View>
+
+                  <View style={[styles.locationSuccessCard, { backgroundColor: 'rgba(188, 246, 65, 0.1)', borderColor: theme.colors.neonGreen }]}>
+                    <Feather name="check-circle" size={24} color={theme.colors.neonGreen} />
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
+                        Location Detected
+                      </Typography>
+                      <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 4 }}>
+                        {form.city}
+                      </Typography>
+                    </View>
+                  </View>
+
+                  <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'center', marginTop: 24 }}>
+                    We'll use this to find matches near you
+                  </Typography>
+
+                  {/* Option to change location */}
+                  <TouchableOpacity
+                    style={styles.changeLocationButton}
+                    onPress={selectCurrentLocation}
+                    disabled={loading}
+                  >
+                    <Feather name="refresh-cw" size={16} color={theme.colors.neonGreen} />
+                    <Typography variant="small" style={{ color: theme.colors.neonGreen, marginLeft: 8 }}>
+                      {loading ? 'Detecting...' : 'Detect Again'}
+                    </Typography>
+                  </TouchableOpacity>
+                </>
+              )}
             </View>
           </View>
         );
+
+      case 'physical':
+        return (
+          <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <UnderlineInput
+                placeholder="Height (e.g., 5'8 or 173cm)"
+                value={form.height}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, height: text }))}
+              />
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Body type (optional)</Typography>
+              {renderChipRow(bodyTypeOptions, form.bodyType ? [form.bodyType] : [], (option) =>
+                setForm((prev) => ({ ...prev, bodyType: option }))
+              , false)}
+            </View>
+          </View>
+        );
+
+      case 'lifestyle':
+        return (
+          <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <View style={{ gap: 20 }}>
+                <View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <Typography variant="body" style={{ color: theme.colors.text }}>Smoker</Typography>
+                    <TouchableOpacity
+                      onPress={() => setForm((prev) => ({ ...prev, smoker: !prev.smoker }))}
+                      style={[styles.toggle, { backgroundColor: form.smoker ? theme.colors.neonGreen : theme.colors.border }]}
+                    >
+                      <View style={[styles.toggleThumb, { transform: [{ translateX: form.smoker ? 20 : 0 }] }]} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                <View>
+                  <Typography variant="small" style={{ color: theme.colors.muted }}>Drinking habits</Typography>
+                  {renderChipRow(drinkerOptions, [form.drinker], (option) =>
+                    setForm((prev) => ({ ...prev, drinker: option as any }))
+                  , false)}
+                </View>
+
+                <View>
+                  <Typography variant="small" style={{ color: theme.colors.muted }}>Diet</Typography>
+                  {renderChipRow(dietOptions, form.diet ? [form.diet] : [], (option) =>
+                    setForm((prev) => ({ ...prev, diet: option }))
+                  , false)}
+                </View>
+
+                <View>
+                  <Typography variant="small" style={{ color: theme.colors.muted }}>Fitness level</Typography>
+                  {renderChipRow(fitnessOptions, form.fitnessLevel ? [form.fitnessLevel] : [], (option) =>
+                    setForm((prev) => ({ ...prev, fitnessLevel: option }))
+                  , false)}
+                </View>
+              </View>
+            </View>
+          </View>
+        );
+
+      case 'personality':
+        return (
+          <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <Typography variant="body" style={{ color: theme.colors.muted }}>Pick your interests (at least 3)</Typography>
+              {renderChipRow(interestOptions, form.interests, (option) =>
+                setForm((prev) => ({ ...prev, interests: toggleArrayValue(prev.interests, option) }))
+              )}
+              {errors.interests ? <Typography variant="small" tone="error">{errors.interests}</Typography> : null}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: '#101D13', marginTop: 16 }]}>
+              <Typography variant="h2" style={{ color: theme.colors.text, marginBottom: 16 }}>Quick Personality Quiz</Typography>
+              {personalityQuestions.map((pq, idx) => (
+                <View key={idx} style={{ marginBottom: 20 }}>
+                  <Typography variant="small" style={{ color: theme.colors.text, marginBottom: 8 }}>{idx + 1}. {pq.q}</Typography>
+                  <View style={styles.quizOptions}>
+                    {['a', 'b', 'c', 'd'].map((opt) => {
+                      const qKey = `q${idx + 1}` as keyof typeof form;
+                      const isSelected = form[qKey] === opt.toUpperCase();
+                      return (
+                        <TouchableOpacity
+                          key={opt}
+                          onPress={() => setForm((prev) => ({ ...prev, [qKey]: opt.toUpperCase() }))}
+                          style={[
+                            styles.quizOption,
+                            {
+                              backgroundColor: isSelected ? theme.colors.neonGreen : theme.colors.surfaceLight,
+                              borderColor: isSelected ? theme.colors.neonGreen : theme.colors.border,
+                            }
+                          ]}
+                        >
+                          <Typography variant="tiny" style={{ color: isSelected ? theme.colors.deepBlack : theme.colors.text }}>
+                            {pq[opt as 'a' | 'b' | 'c' | 'd']}
+                          </Typography>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+              {errors.quiz ? <Typography variant="small" tone="error">{errors.quiz}</Typography> : null}
+            </View>
+          </View>
+        );
+
+      case 'prompts':
+        return (
+          <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <View style={{ marginBottom: 0 }}>
+                <UnderlineInput
+                  placeholder="Write a short bio about yourself"
+                  value={form.bio}
+                  onChangeText={(text) => setForm((prev) => ({ ...prev, bio: text }))}
+                  multiline
+                  error={errors.bio}
+                />
+              </View>
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, marginBottom: 16, fontStyle: 'italic' }}>
+                e.g., "Adventure seeker who loves trying new restaurants. Dog mom. Always up for a road trip."
+              </Typography>
+
+              <View style={{ marginBottom: 0 }}>
+                <UnderlineInput
+                  placeholder="Prompt 1: My ideal date is..."
+                  value={form.prompt1}
+                  onChangeText={(text) => setForm((prev) => ({ ...prev, prompt1: text }))}
+                  multiline
+                />
+              </View>
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, marginBottom: 16, fontStyle: 'italic' }}>
+                e.g., "Exploring a farmers market, then cooking together at home with wine and music"
+              </Typography>
+
+              <View style={{ marginBottom: 0 }}>
+                <UnderlineInput
+                  placeholder="Prompt 2: I'm known for..."
+                  value={form.prompt2}
+                  onChangeText={(text) => setForm((prev) => ({ ...prev, prompt2: text }))}
+                  multiline
+                />
+              </View>
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, marginBottom: 16, fontStyle: 'italic' }}>
+                e.g., "Making people laugh with my terrible puns and always being the friend who plans the trips"
+              </Typography>
+
+              <View style={{ marginBottom: 0 }}>
+                <UnderlineInput
+                  placeholder="Prompt 3: My perfect weekend..."
+                  value={form.prompt3}
+                  onChangeText={(text) => setForm((prev) => ({ ...prev, prompt3: text }))}
+                  multiline
+                />
+              </View>
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, fontStyle: 'italic' }}>
+                e.g., "Saturday morning hike, brunch with friends, and binge-watching a new series on Sunday"
+              </Typography>
+            </View>
+          </View>
+        );
+
+      case 'photos':
+        return (
+          <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <View style={styles.photoGrid}>
+                {form.photos.map((photo, idx) => (
+                  <View key={idx} style={styles.photoItem}>
+                    <Image source={{ uri: photo }} style={styles.photoImage} />
+                    <TouchableOpacity
+                      style={[styles.photoRemove, { backgroundColor: theme.colors.error }]}
+                      onPress={() => setForm((prev) => ({ ...prev, photos: prev.photos.filter((_, i) => i !== idx) }))}
+                    >
+                      <Feather name="x" size={16} color="#FFF" />
+                    </TouchableOpacity>
+                    {idx === form.primaryPhotoIndex && (
+                      <View style={[styles.primaryBadge, { backgroundColor: theme.colors.neonGreen }]}>
+                        <Typography variant="tiny" style={{ color: theme.colors.deepBlack, fontWeight: '600' }}>Primary</Typography>
+                      </View>
+                    )}
+                  </View>
+                ))}
+                <TouchableOpacity style={[styles.photoAdd, { borderColor: theme.colors.neonGreen }]} onPress={selectPhoto}>
+                  <Feather name="plus" size={32} color={theme.colors.neonGreen} />
+                  <Typography variant="small" style={{ color: theme.colors.neonGreen, marginTop: 8 }}>Add Photo</Typography>
+                </TouchableOpacity>
+              </View>
+              {errors.photos ? <Typography variant="small" tone="error">{errors.photos}</Typography> : null}
+            </View>
+          </View>
+        );
+
       case 'contact':
         return (
           <View style={styles.slideStack}>
-            <Typography variant="body" muted>Use email or phone — we’ll send a gentle 4-digit code.</Typography>
-            <View style={styles.chipRow}>
-              <Chip label="Email" selected={form.contactType === 'email'} onPress={() => setForm((prev) => ({ ...prev, contactType: 'email', contactValue: '' }))} />
-              <Chip label="Phone" selected={form.contactType === 'phone'} onPress={() => setForm((prev) => ({ ...prev, contactType: 'phone', contactValue: '' }))} />
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 16 }}>
+                We'll send you a verification code
+              </Typography>
+
+              {/* Contact Type Selection */}
+              <View style={styles.chipRow}>
+                <Chip label="Email" selected={form.contactType === 'email'} onPress={() => setForm((prev) => ({ ...prev, contactType: 'email', contactValue: '', otp: '' }))} />
+                <Chip label="Phone" selected={form.contactType === 'phone'} onPress={() => setForm((prev) => ({ ...prev, contactType: 'phone', contactValue: '', otp: '' }))} />
+              </View>
+
+              {/* Contact Input */}
+              <UnderlineInput
+                placeholder={form.contactType === 'email' ? 'you@example.com' : '+1 234 567 8900'}
+                keyboardType={form.contactType === 'email' ? 'email-address' : 'phone-pad'}
+                value={form.contactValue}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, contactValue: text }))}
+                error={errors.contact}
+                style={{ marginTop: 16 }}
+              />
+
+              {/* Send OTP Button */}
+              {form.contactValue.trim() && !form.otp && (
+                <TouchableOpacity
+                  style={[styles.sendOtpButton, {
+                    backgroundColor: loading ? theme.colors.surfaceLight : theme.colors.neonGreen,
+                    opacity: loading ? 0.7 : 1
+                  }]}
+                  onPress={async () => {
+                    if (form.contactType === 'email' && !isValidEmail(form.contactValue)) {
+                      setErrors((prev) => ({ ...prev, contact: 'Enter a valid email' }));
+                      return;
+                    }
+                    if (form.contactType === 'phone' && !isValidPhone(form.contactValue)) {
+                      setErrors((prev) => ({ ...prev, contact: 'Enter a valid phone with country code' }));
+                      return;
+                    }
+                    setLoading(true);
+                    setErrors((prev) => ({ ...prev, contact: '', otp: '' }));
+                    try {
+                      // For now, just generate a demo OTP (later will call backend)
+                      const demoOtp = Math.floor(1000 + Math.random() * 9000).toString();
+                      Alert.alert(
+                        'Verification Code',
+                        `Your code is: ${demoOtp}\n\n(In production, this will be sent via ${form.contactType})`,
+                        [{ text: 'OK' }]
+                      );
+                      console.log('Demo OTP:', demoOtp);
+                      // Store demo OTP in state for verification
+                      setForm((prev) => ({ ...prev, otp: demoOtp }));
+                      setTimeout(() => setForm((prev) => ({ ...prev, otp: '' })), 100);
+                    } catch (error: any) {
+                      Alert.alert('Error', error.message || 'Failed to send code');
+                    } finally {
+                      setLoading(false);
+                    }
+                  }}
+                  disabled={loading}
+                >
+                  <Feather name="send" size={18} color={theme.colors.deepBlack} />
+                  <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack, marginLeft: 8 }}>
+                    {loading ? 'Sending...' : 'Send Code'}
+                  </Typography>
+                </TouchableOpacity>
+              )}
+
+              {/* OTP Input - shows after sending code */}
+              <View style={{ marginTop: 24 }}>
+                <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 8 }}>
+                  Enter verification code
+                </Typography>
+                <UnderlineInput
+                  placeholder="Enter 4-digit code"
+                  keyboardType="numeric"
+                  value={form.otp}
+                  onChangeText={(text) => setForm((prev) => ({ ...prev, otp: text.replace(/[^0-9]/g, '').slice(0, 4) }))}
+                  maxLength={4}
+                  error={errors.otp}
+                />
+              </View>
             </View>
-            <Typography variant="small" muted>We'll only use this for secure sign-in and gentle safety nudges.</Typography>
-            <UnderlineInput
-              placeholder={form.contactType === 'email' ? 'you@example.com' : '+91 98765 43210'}
-              keyboardType={form.contactType === 'email' ? 'email-address' : 'phone-pad'}
-              value={form.contactValue}
-              onChangeText={(text) => setForm((prev) => ({ ...prev, contactValue: text }))}
-              error={errors.contact}
-            />
-            <Typography variant="body" muted style={{ marginTop: 12 }}>Enter the 4-digit code</Typography>
-            {renderOTPInputs()}
-            {errors.otp ? <Typography variant="small" tone="error">{errors.otp}</Typography> : null}
           </View>
         );
-      case 'success':
-        return (
-          <View style={styles.slideStack}>
-            <Typography variant="body" muted>Ready to meet your green flags?</Typography>
-          </View>
-        );
+
       default:
         return null;
     }
@@ -441,19 +1066,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       {
         translateY: transition.interpolate({
           inputRange: [0, 1],
-          outputRange: [28, 0],
-        }),
-      },
-    ],
-  };
-
-  const animatedFooterStyle = {
-    opacity: transition,
-    transform: [
-      {
-        translateY: transition.interpolate({
-          inputRange: [0, 1],
-          outputRange: [16, 0],
+          outputRange: [20, 0],
         }),
       },
     ],
@@ -461,14 +1074,30 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
   return (
     <View style={[styles.wrapper, { backgroundColor: theme.colors.background }]}>
+      <StatusBar barStyle="light-content" />
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <View style={styles.container}>
-          <View style={styles.topBar}>
-            <TouchableOpacity onPress={handleBack} style={[styles.backButton, { borderColor: theme.colors.border }]} accessibilityRole="button">
-              <Feather name="arrow-left" size={20} color={step === 0 ? theme.colors.muted : theme.colors.primary} />
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity
+              onPress={handleBack}
+              style={styles.backButton}
+              disabled={step === 0}
+            >
+              <Feather name="chevron-left" size={28} color={theme.colors.neonGreen} />
             </TouchableOpacity>
+
+            <View style={styles.progressInfo}>
+              <Typography variant="small" style={{ color: theme.colors.muted }}>
+                Step {step + 1} of {slides.length}
+              </Typography>
+              <View style={[styles.progressBar, { backgroundColor: theme.colors.border }]}>
+                <View style={[styles.progressFill, { width: `${progress * 100}%`, backgroundColor: theme.colors.neonGreen }]} />
+              </View>
+            </View>
           </View>
 
+          {/* Content */}
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
             style={styles.stage}
@@ -481,62 +1110,41 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               keyboardShouldPersistTaps="handled"
             >
               <Animated.View style={[styles.contentColumn, animatedContentStyle]}>
-                <View style={styles.progressContainer}>
-                  <Typography variant="small" muted>
-                    Step {Math.min(step + 1, slides.length)} of {slides.length}
-                  </Typography>
-                  <View style={[styles.progressTrack, { backgroundColor: theme.colors.border }]}>
-                    <View style={[styles.progressFill, { width: `${progress * 100}%`, backgroundColor: theme.colors.primary }]} />
-                  </View>
-                  <View style={styles.progressDots}>
-                    {slides.map((slide, index) => {
-                      const completed = isStepCompleted(slide.key);
-                      const isCurrent = index === step;
-                      return (
-                        <View
-                          key={slide.key}
-                          style={[
-                            styles.progressDot,
-                            completed && styles.progressDotCompleted,
-                            isCurrent && styles.progressDotCurrent,
-                          ]}
-                        />
-                      );
-                    })}
-                  </View>
-                </View>
-
-                <View style={styles.questionBlock}>
-                  <Typography variant="display" align="left">
+                <View style={styles.titleSection}>
+                  <Typography variant="display" style={{ color: theme.colors.text }}>
                     {slides[step].title}
                   </Typography>
                   {slides[step].subtitle ? (
-                    <Typography variant="body" muted style={styles.helperText}>
+                    <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 8 }}>
                       {slides[step].subtitle}
                     </Typography>
                   ) : null}
                 </View>
 
-                <View style={styles.formBlock}>{renderSlide()}</View>
+                <View style={styles.formSection}>{renderSlide()}</View>
               </Animated.View>
             </ScrollView>
           </KeyboardAvoidingView>
         </View>
       </TouchableWithoutFeedback>
 
+      {/* Footer */}
       <View style={[styles.footer, { backgroundColor: theme.colors.background }]}>
-        <Animated.View style={[styles.footerContent, animatedFooterStyle]}>
-          {slides[step].key === 'success' ? (
-            <Button label="Let's begin" onPress={handleContinue} fullWidth />
-          ) : (
-            <Button
-              label={loading ? 'Please wait…' : 'Continue'}
-              onPress={handleContinue}
-              fullWidth
-              disabled={loading}
-            />
-          )}
-        </Animated.View>
+        <Button
+          label={
+            loading
+              ? 'Please wait…'
+              : slides[step].key === 'location' && !form.city.trim()
+              ? 'Use my current location'
+              : step === slides.length - 1
+              ? "Let's begin"
+              : 'Continue'
+          }
+          onPress={slides[step].key === 'location' && !form.city.trim() ? selectCurrentLocation : handleContinue}
+          fullWidth
+          disabled={loading}
+          loading={loading}
+        />
       </View>
     </View>
   );
@@ -548,21 +1156,35 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 12 : 50,
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 16 : 60,
   },
-  topBar: {
+  header: {
     flexDirection: 'row',
-    justifyContent: 'flex-start',
-    marginBottom: 12,
+    alignItems: 'center',
+    gap: 16,
+    marginBottom: 24,
   },
   backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: 1,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  progressInfo: {
+    flex: 1,
+    gap: 8,
+  },
+  progressBar: {
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 2,
   },
   stage: {
     flex: 1,
@@ -571,117 +1193,176 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1,
-    justifyContent: 'flex-start',
     paddingBottom: 140,
   },
   contentColumn: {
     width: '100%',
-    maxWidth: 342,
-    alignSelf: 'flex-start',
   },
-  progressContainer: {
-    width: '100%',
+  titleSection: {
     marginBottom: 24,
   },
-  progressTrack: {
-    width: '100%',
-    height: 2,
-    borderRadius: 999,
-    marginTop: 8,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-  },
-  progressDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-  },
-  progressDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(18,22,20,0.12)',
-  },
-  progressDotCompleted: {
-    backgroundColor: '#3BB273',
-  },
-  progressDotCurrent: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#3BB273',
-  },
-  questionBlock: {
-    gap: 12,
-    marginBottom: 32,
-  },
-  helperText: {
-    marginTop: 8,
-  },
-  formBlock: {
+  formSection: {
     gap: 16,
   },
   slideStack: {
     gap: 16,
   },
+  card: {
+    borderRadius: 24,
+    padding: 20,
+    gap: 16,
+  },
   chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 8,
+    gap: 10,
+    marginTop: 12,
   },
-  photoDrop: {
-    borderWidth: 2,
-    borderStyle: 'dashed',
-    borderRadius: 24,
-    minHeight: 160,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  dobButton: {
+  dateButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 16,
     borderBottomWidth: 1,
   },
-  dobLabel: {
-    flex: 1,
+  toggle: {
+    width: 50,
+    height: 28,
+    borderRadius: 14,
+    padding: 2,
+    justifyContent: 'center',
   },
-  otpRow: {
+  toggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#FFF',
+  },
+  quizOptions: {
+    gap: 8,
+  },
+  quizOption: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1.5,
+  },
+  photoGrid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
   },
-  otpInput: {
-    width: 54,
-    height: 54,
-    borderWidth: 1,
+  photoItem: {
+    width: 100,
+    height: 100,
     borderRadius: 16,
-    textAlign: 'center',
-    fontSize: 20,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  photoRemove: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryBadge: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  photoAdd: {
+    width: 100,
+    height: 100,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationIconWrapper: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  locationIconLarge: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  locationSuccessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    marginTop: 24,
+  },
+  changeLocationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 16,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginTop: 16,
+  },
+  suggestionsPanel: {
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 10,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.08)',
+  },
+  sendOtpButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 999,
+    marginTop: 16,
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   footer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: 24,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 32,
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
     paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
-  },
-  footerContent: {
-    maxWidth: 342,
-    alignSelf: 'flex-start',
-    width: '100%',
-  },
-  successWrap: {
-    gap: 24,
   },
 });

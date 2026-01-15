@@ -6,26 +6,48 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
+    "owner": "akashwadhwani",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#FAFAFB"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "app.gflag.greenflag",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "GreenFlag needs your location to suggest nearby matches and verify your city.",
+        "NSCameraUsageDescription": "GreenFlag needs camera access to take profile photos.",
+        "NSPhotoLibraryUsageDescription": "GreenFlag needs photo library access to select profile photos."
+      }
     },
     "android": {
+      "package": "app.gflag.greenflag",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#FAFAFB"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
-    "description": "An empathic, AI-guided dating experience focused on meaningful green flags."
+    "description": "An empathic, AI-guided dating experience focused on meaningful green flags.",
+    "extra": {
+      "eas": {
+        "projectId": "ed5ee7ff-6a2b-4105-8b4c-f727e1021b44"
+      }
+    }
   }
 }

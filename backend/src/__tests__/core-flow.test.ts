@@ -1,4 +1,5 @@
 import request from 'supertest';
+import type { Server } from 'http';
 import app from '../index';
 
 type SignupOverrides = Partial<{
@@ -12,6 +13,8 @@ type SignupOverrides = Partial<{
 }>;
 
 type ProfileOverrides = Partial<Record<string, any>>;
+
+let agent!: request.SuperTest<request.Test>;
 
 const signupAndCompleteProfile = async (
   signupOverrides: SignupOverrides,
@@ -28,7 +31,7 @@ const signupAndCompleteProfile = async (
     ...signupOverrides,
   };
 
-  const signupResponse = await request(app).post('/api/auth/signup').send(signupPayload);
+  const signupResponse = await agent.post('/api/auth/signup').send(signupPayload);
   expect(signupResponse.status).toBe(201);
   const token = signupResponse.body.token as string;
   expect(token).toBeTruthy();
@@ -68,7 +71,7 @@ const signupAndCompleteProfile = async (
     ...profileOverrides,
   };
 
-  const profileResponse = await request(app)
+  const profileResponse = await agent
     .post('/api/profile/complete')
     .set('Authorization', `Bearer ${token}`)
     .send(baseProfile);
@@ -80,8 +83,19 @@ const signupAndCompleteProfile = async (
 };
 
 describe('GreenFlag backend core flow', () => {
+  let server: Server;
+
+  beforeAll(() => {
+    server = app.listen(0, '127.0.0.1');
+    agent = request(server);
+  });
+
+  afterAll((done) => {
+    server.close(done);
+  });
+
   it('responds to health check', async () => {
-    const response = await request(app).get('/health');
+    const response = await agent.get('/health');
     expect(response.status).toBe(200);
     expect(response.body.status).toBe('ok');
   });
@@ -92,7 +106,7 @@ describe('GreenFlag backend core flow', () => {
 
     await signupAndCompleteProfile({ email });
 
-    const loginResponse = await request(app)
+    const loginResponse = await agent
       .post('/api/auth/login')
       .send({ email, password });
 
@@ -129,7 +143,7 @@ describe('GreenFlag backend core flow', () => {
       }
     );
 
-    const searchResponse = await request(app)
+    const searchResponse = await agent
       .post('/api/matches/search')
       .set('Authorization', `Bearer ${token}`)
       .send({ search_query: 'adventurous, loves travel, 30, Delhi' });

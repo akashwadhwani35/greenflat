@@ -2,6 +2,7 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS } from '../utils/constants';
+import { notifyLikeReceived, notifyMatch } from '../services/push.service';
 
 // Helper to reset activity limits if needed
 const checkAndResetLimits = async (userId: number, client: any) => {
@@ -145,6 +146,12 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    // Get user names for notifications
+    const likerNameResult = await client.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const targetNameResult = await client.query('SELECT name FROM users WHERE id = $1', [target_user_id]);
+    const likerName = likerNameResult.rows[0]?.name || 'Someone';
+    const targetName = targetNameResult.rows[0]?.name || 'Someone';
+
     // Check if it's a mutual like
     const mutualLikeResult = await client.query(
       'SELECT id FROM likes WHERE liker_id = $1 AND liked_id = $2',
@@ -167,7 +174,14 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       if (matchResult.rows.length > 0) {
         isMatch = true;
         matchId = matchResult.rows[0].id;
+
+        // Send match notifications to both users
+        notifyMatch(userId, targetName).catch(err => console.error('Failed to send match notification:', err));
+        notifyMatch(target_user_id, likerName).catch(err => console.error('Failed to send match notification:', err));
       }
+    } else {
+      // Not a match yet - notify the target user they received a like
+      notifyLikeReceived(target_user_id, likerName).catch(err => console.error('Failed to send like notification:', err));
     }
 
     // Check if current user should enter cooldown
@@ -247,6 +261,54 @@ export const getLikesRemaining = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Get likes remaining error:', error);
     res.status(500).json({ error: 'Failed to fetch limits' });
+  }
+};
+
+export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    const result = await pool.query(
+      `SELECT
+         l.id,
+         l.is_on_grid,
+         l.created_at,
+         liker.id as user_id,
+         liker.name,
+         liker.city,
+         liker.is_verified,
+         liker.gender,
+         liker.interested_in,
+         liker.date_of_birth,
+         (SELECT photo_url FROM photos WHERE user_id = liker.id AND is_primary = TRUE LIMIT 1) as primary_photo
+       FROM likes l
+       JOIN users liker ON liker.id = l.liker_id
+       WHERE l.liked_id = $1
+       ORDER BY l.created_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+
+    const likes = result.rows.map((row: any) => ({
+      id: row.id,
+      is_on_grid: row.is_on_grid,
+      created_at: row.created_at,
+      user: {
+        id: row.user_id,
+        name: row.name,
+        city: row.city,
+        is_verified: row.is_verified,
+        gender: row.gender,
+        interested_in: row.interested_in,
+        age: row.date_of_birth ? Math.floor((Date.now() - new Date(row.date_of_birth).getTime()) / (1000 * 60 * 60 * 24 * 365.25)) : null,
+        primary_photo: row.primary_photo,
+      },
+    }));
+
+    res.json({ likes });
+  } catch (error) {
+    console.error('Get incoming likes error:', error);
+    res.status(500).json({ error: 'Failed to fetch incoming likes' });
   }
 };
 

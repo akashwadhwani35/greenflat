@@ -120,10 +120,11 @@ export interface SearchFilters {
   maxHeight?: number;
   interests?: string[];
   city?: string;
-  maxDistance?: number;
+  distance_km?: number;
   smoker?: boolean;
   drinker?: string;
   relationship_goal?: string;
+  keywords?: string;
 }
 
 export interface MatchResult {

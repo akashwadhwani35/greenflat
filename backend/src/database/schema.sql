@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS users (
     premium_expires_at TIMESTAMP,
     cooldown_enabled BOOLEAN DEFAULT FALSE,
     cooldown_until TIMESTAMP,
+    push_token TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -94,6 +95,7 @@ CREATE TABLE IF NOT EXISTS matches (
     user1_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     user2_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     matched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_message_at TIMESTAMP,
     UNIQUE(user1_id, user2_id),
     CHECK (user1_id < user2_id) -- Ensure consistent ordering
 );
@@ -103,9 +105,11 @@ CREATE TABLE IF NOT EXISTS messages (
     id SERIAL PRIMARY KEY,
     match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
     sender_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
     content TEXT NOT NULL,
     message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'voice')),
     is_read BOOLEAN DEFAULT FALSE,
+    is_deleted BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -131,6 +135,14 @@ CREATE TABLE IF NOT EXISTS user_ai_profiles (
     dealbreakers TEXT,
     growth_journey TEXT,
     persona_embedding JSONB,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Sidekick Memory (persisted AI preference learning)
+CREATE TABLE IF NOT EXISTS user_sidekick_memory (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    memory JSONB NOT NULL DEFAULT '{}'::jsonb,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -170,6 +182,31 @@ CREATE TABLE IF NOT EXISTS reports (
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved')),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- OTP Codes (for phone verification)
+CREATE TABLE IF NOT EXISTS otp_codes (
+    id SERIAL PRIMARY KEY,
+    phone TEXT UNIQUE NOT NULL,
+    code CHAR(6) NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Verification Status (phone/otp, face/age, location)
+CREATE TABLE IF NOT EXISTS verification_status (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    phone TEXT,
+    otp_verified BOOLEAN DEFAULT FALSE,
+    face_status VARCHAR(12) DEFAULT 'unverified' CHECK (face_status IN ('unverified', 'pending', 'verified', 'failed')),
+    age_verified BOOLEAN DEFAULT FALSE,
+    location_verified BOOLEAN DEFAULT FALSE,
+    location_lat DECIMAL(10, 8),
+    location_lng DECIMAL(11, 8),
+    location_city TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Indexes for performance

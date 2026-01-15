@@ -44,7 +44,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 let server: Server | null = null;
 
 if (process.env.NODE_ENV !== 'test') {
-  server = app.listen(PORT, () => {
+  server = app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 Server is running on port ${PORT}`);
     console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
   });

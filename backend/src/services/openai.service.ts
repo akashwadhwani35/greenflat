@@ -9,6 +9,7 @@ const openai = new OpenAI({
 
 const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 const EMBEDDING_MODEL = process.env.OPENAI_EMBEDDING_MODEL || 'text-embedding-3-small';
+const VISION_MODEL = process.env.OPENAI_VISION_MODEL || OPENAI_MODEL;
 
 interface ParsedSearchQuery {
   preferences: {
@@ -326,6 +327,121 @@ Return as JSON array of strings: ["bio1", "bio2", "bio3"]`;
   }
 };
 
+export const sidekickChat = async (
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  userContext?: string
+): Promise<{
+  reply: string;
+  suggested_prompts: string[];
+  inferred_search_query: string | null;
+  should_refresh: boolean;
+  memory_update?: {
+    must_haves?: string[];
+    nice_to_haves?: string[];
+    dealbreakers?: string[];
+    vibe?: string | null;
+    age_min?: number | null;
+    age_max?: number | null;
+    city?: string | null;
+    relationship_goal?: string | null;
+  };
+}> => {
+  const system = `You are GreenFlag Sidekick — a warm, witty, emotionally intelligent dating coach inside a dating app.
+
+Goals:
+1) Be chatty, responsive, and supportive. Mirror the user's tone.
+2) Ask 1-2 smart follow-up questions to clarify what they want.
+3) When you have enough info to find matches, propose updating their AI Match feed.
+4) Learn over time: extract durable preferences and keep them consistent across sessions.
+
+Rules:
+- Keep replies concise (3-7 short lines max), but not robotic.
+- Do NOT list user profiles or show results inside this chat.
+- Prefer emotionally-aware language and actionable prompts.
+- Avoid explicit sexual content. Keep it PG-13.
+
+Return JSON with:
+{
+  "reply": "string",
+  "suggested_prompts": ["string", "string", "string"],
+  "inferred_search_query": "string or null",
+  "should_refresh": true/false,
+  "memory_update": {
+    "must_haves": ["string"],
+    "nice_to_haves": ["string"],
+    "dealbreakers": ["string"],
+    "vibe": "string or null",
+    "age_min": number or null,
+    "age_max": number or null,
+    "city": "string or null",
+    "relationship_goal": "string or null"
+  }
+}
+
+Interpretation:
+- inferred_search_query: a natural-language query we can send to match search.
+- should_refresh: true only when you're confident enough to refresh on-grid matches now.`;
+
+  const contextBlock = userContext ? `\n\nUser context:\n${userContext}\n` : '';
+  const payloadMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+    { role: 'system', content: system + contextBlock },
+    ...messages.map((m) => ({ role: m.role, content: m.content })),
+  ];
+
+  if (!process.env.OPENAI_API_KEY) {
+    const lastUser = [...messages].reverse().find((m) => m.role === 'user')?.content?.trim() || '';
+    return {
+      reply:
+        `Got you. Tell me 2 things:\n` +
+        `1) What vibe are you craving (calm, playful, ambitious, artsy)?\n` +
+        `2) Any hard filters (age range, city, relationship goal)?`,
+      suggested_prompts: [
+        'I want someone emotionally mature and consistent.',
+        'Prefer someone who loves fitness + travel, 25-32.',
+        'I’m open, but I want something long-term.',
+      ],
+      inferred_search_query: lastUser ? lastUser : null,
+      should_refresh: false,
+      memory_update: {},
+    };
+  }
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: payloadMessages,
+      temperature: 0.75,
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0].message.content;
+    if (!content) throw new Error('No response from OpenAI');
+
+    const parsed = JSON.parse(content);
+    const reply = typeof parsed.reply === 'string' ? parsed.reply : 'Got it — tell me a bit more.';
+    const suggested_prompts = Array.isArray(parsed.suggested_prompts)
+      ? parsed.suggested_prompts.filter((p: any) => typeof p === 'string').slice(0, 6)
+      : [];
+    const inferred_search_query =
+      typeof parsed.inferred_search_query === 'string' && parsed.inferred_search_query.trim().length > 0
+        ? parsed.inferred_search_query.trim()
+        : null;
+    const should_refresh = Boolean(parsed.should_refresh);
+
+    const memory_update = parsed.memory_update && typeof parsed.memory_update === 'object' ? parsed.memory_update : undefined;
+    return { reply, suggested_prompts, inferred_search_query, should_refresh, memory_update };
+  } catch (error) {
+    console.error('Error generating sidekick chat:', error);
+    return {
+      reply: 'I’m here. Tell me the top 2 qualities you want right now, and any dealbreakers.',
+      suggested_prompts: ['Kind + emotionally mature', 'Loves travel + fitness', 'Looking for long-term'],
+      inferred_search_query: null,
+      should_refresh: false,
+      memory_update: {},
+    };
+  }
+};
+
 export default {
   parseSearchQuery,
   generateProfileEmbedding,
@@ -334,4 +450,54 @@ export default {
   generateMatchNarrative,
   analyzePersonality,
   generateBioSuggestions,
+  sidekickChat,
+};
+
+/**
+ * Simple selfie/age check using OpenAI Vision. Returns true if clearly 18+ with one face.
+ */
+export const analyzeSelfieAge = async (
+  photoUrl: string
+): Promise<{ isAdult: boolean; confidence: number; reasoning: string }> => {
+  if (!process.env.OPENAI_API_KEY) {
+    return { isAdult: false, confidence: 0, reasoning: 'OpenAI API key not configured' };
+  }
+
+  const prompt = `You are verifying a dating-profile selfie. Determine if the person appears to be 18 years or older and ensure only one face is present.
+Return JSON: {"isAdult": true/false, "confidence": 0-1, "reasoning": "short reason"}. Say false if unsure or face is missing/multiple.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: VISION_MODEL,
+      temperature: 0,
+      max_tokens: 150,
+      messages: [
+        { role: 'user', content: prompt },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: photoUrl },
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0].message.content;
+    if (!content) {
+      throw new Error('No vision response');
+    }
+    const parsed = JSON.parse(content);
+    return {
+      isAdult: Boolean(parsed.isAdult),
+      confidence: Number(parsed.confidence) || 0,
+      reasoning: parsed.reasoning || 'No reasoning provided',
+    };
+  } catch (error) {
+    console.error('Vision age check error:', error);
+    return { isAdult: false, confidence: 0, reasoning: 'Vision check failed' };
+  }
 };

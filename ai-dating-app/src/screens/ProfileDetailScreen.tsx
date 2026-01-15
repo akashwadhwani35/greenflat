@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { MatchCandidate } from './MatchboardScreen';
@@ -29,6 +30,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
 
   const photoSource = match.primary_photo ? { uri: match.primary_photo } : fallbackPhoto;
   const pickupLine = match.suggested_openers?.[0] || 'Start a conversation!';
+  const isVerified = Boolean((match as any).is_verified);
 
   const handleSwipeLeft = () => {
     setPhotoIndex(0);
@@ -48,62 +50,77 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
       onRequestClose={onClose}
     >
       <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <StatusBar barStyle="dark-content" />
-
-        {/* Header with close button */}
-        <View style={styles.header}>
-          <TouchableOpacity
-            onPress={onClose}
-            style={[styles.closeButton, { backgroundColor: theme.colors.surface }]}
-            activeOpacity={0.7}
-          >
-            <Feather name="x" size={24} color={theme.colors.text} />
-          </TouchableOpacity>
-        </View>
+        <StatusBar barStyle="light-content" />
 
         {/* Scrollable Content */}
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
         >
-          {/* Photo */}
+          {/* Photo hero - full width, no header above */}
           <View style={styles.photoContainer}>
             <Image source={photoSource} style={styles.photo} />
+            <LinearGradient
+              colors={['rgba(16,29,19,0)', 'rgba(16,29,19,0.4)', 'rgba(16,29,19,0.95)']}
+              style={styles.photoGradient}
+            />
 
-            {/* Match percentage badge overlay */}
-            <View style={[styles.matchBadgeOverlay, { backgroundColor: theme.colors.brand }]}>
-              <Typography variant="bodyStrong" style={{ color: '#FFF' }}>
-                {match.match_percentage}% match
-              </Typography>
+            {/* Close button overlaid on photo */}
+            <TouchableOpacity
+              onPress={onClose}
+              style={[styles.closeButtonOverlay, { backgroundColor: 'rgba(0,0,0,0.5)' }]}
+              activeOpacity={0.7}
+            >
+              <Feather name="x" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            {/* Badges on photo */}
+            <View style={styles.heroTopRow}>
+              <View style={[styles.matchBadgeOverlay, { backgroundColor: theme.colors.neonGreen }]}>
+                <Typography variant="small" style={{ color: theme.colors.deepBlack, fontWeight: '600' }}>
+                  {match.match_percentage}% match
+                </Typography>
+              </View>
+
+              {isVerified && (
+                <View style={[styles.verifiedBadgeOverlay, { backgroundColor: 'rgba(173, 255, 26, 0.9)' }]}>
+                  <Feather name="check" size={14} color={theme.colors.deepBlack} />
+                  <Typography variant="small" style={{ color: theme.colors.deepBlack, marginLeft: 4, fontWeight: '600' }}>
+                    Verified
+                  </Typography>
+                </View>
+              )}
             </View>
-          </View>
 
-          {/* Profile Info */}
-          <View style={styles.profileInfo}>
-            {/* Name, Age, City */}
-            <View style={styles.nameSection}>
+            {/* Name and location on photo */}
+            <View style={styles.heroBottom}>
               <View style={styles.nameRow}>
                 <Typography variant="display" style={styles.name}>
                   {match.name}
                 </Typography>
-                {match.age && (
-                  <Typography variant="h1" muted>, {match.age}</Typography>
-                )}
+                {match.age ? (
+                  <Typography variant="display" style={{ color: theme.colors.textDark }}>
+                    , {match.age}
+                  </Typography>
+                ) : null}
               </View>
               <View style={styles.locationRow}>
-                <Feather name="map-pin" size={16} color={theme.colors.muted} />
-                <Typography variant="body" muted style={{ marginLeft: 6 }}>
+                <Feather name="map-pin" size={14} color={theme.colors.mutedLight} />
+                <Typography variant="small" style={{ color: theme.colors.mutedLight, marginLeft: 6 }}>
                   {match.city}
                 </Typography>
               </View>
             </View>
+          </View>
 
-            {/* Match Reason */}
+          {/* Profile Info Cards */}
+          <View style={styles.profileInfo}>
+            {/* Why you match */}
             {match.match_reason && (
-              <View style={[styles.section, { backgroundColor: theme.colors.successTint }]}>
+              <View style={[styles.section, { backgroundColor: 'rgba(45, 80, 45, 0.6)', borderColor: 'rgba(173, 255, 26, 0.3)' }]}>
                 <View style={styles.sectionHeader}>
-                  <Feather name="heart" size={18} color={theme.colors.brand} />
-                  <Typography variant="bodyStrong" style={{ marginLeft: 8 }}>
+                  <Feather name="heart" size={16} color={theme.colors.neonGreen} />
+                  <Typography variant="bodyStrong" style={{ marginLeft: 8, color: theme.colors.text }}>
                     Why you match
                   </Typography>
                 </View>
@@ -113,35 +130,11 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
               </View>
             )}
 
-            {/* Match Highlights / Green Flags */}
-            {match.match_highlights && match.match_highlights.length > 0 && (
-              <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                  <Feather name="check-circle" size={18} color={theme.colors.brand} />
-                  <Typography variant="bodyStrong" style={{ marginLeft: 8 }}>
-                    Green flags
-                  </Typography>
-                </View>
-                <View style={styles.chipsContainer}>
-                  {match.match_highlights.map((highlight, index) => (
-                    <View
-                      key={index}
-                      style={[styles.chip, { backgroundColor: theme.colors.accentTint, borderColor: theme.colors.accent }]}
-                    >
-                      <Typography variant="small" style={{ color: theme.colors.text }}>
-                        {highlight}
-                      </Typography>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {/* AI Pickup Line */}
-            <View style={[styles.section, { backgroundColor: theme.colors.accentTint }]}>
+            {/* AI conversation starter */}
+            <View style={[styles.section, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
               <View style={styles.sectionHeader}>
-                <Feather name="message-circle" size={18} color={theme.colors.primary} />
-                <Typography variant="bodyStrong" style={{ marginLeft: 8 }}>
+                <Feather name="message-circle" size={16} color={theme.colors.muted} />
+                <Typography variant="bodyStrong" style={{ marginLeft: 8, color: theme.colors.text }}>
                   AI conversation starter
                 </Typography>
               </View>
@@ -153,12 +146,12 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
         </ScrollView>
 
         {/* Fixed Swipe Buttons at Bottom */}
-        <View style={[styles.footer, { backgroundColor: theme.colors.background }]}>
+        <View style={[styles.footer, { backgroundColor: theme.colors.background, borderTopColor: theme.colors.border }]}>
           <View style={styles.swipeButtons}>
             {/* Pass Button */}
             <TouchableOpacity
               onPress={handleSwipeLeft}
-              style={[styles.swipeButton, styles.passButton, { borderColor: theme.colors.border }]}
+              style={[styles.swipeButton, styles.passButton, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}
               activeOpacity={0.8}
             >
               <Feather name="x" size={32} color={theme.colors.muted} />
@@ -167,10 +160,10 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             {/* Like Button */}
             <TouchableOpacity
               onPress={handleSwipeRight}
-              style={[styles.swipeButton, styles.likeButton, { backgroundColor: theme.colors.brand }]}
+              style={[styles.swipeButton, styles.likeButton, { backgroundColor: theme.colors.neonGreen }]}
               activeOpacity={0.8}
             >
-              <Feather name="heart" size={32} color="#FFFFFF" />
+              <Feather name="heart" size={32} color={theme.colors.deepBlack} />
             </TouchableOpacity>
           </View>
         </View>
@@ -183,31 +176,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  header: {
-    paddingTop: Platform.OS === 'android' ? (StatusBar.currentHeight || 0) + 12 : 50,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-  },
-  closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 2,
-  },
   scrollContent: {
-    paddingBottom: 120,
+    paddingBottom: 140,
   },
   photoContainer: {
     width: '100%',
-    height: 450,
+    height: 500,
     position: 'relative',
   },
   photo: {
@@ -215,25 +189,55 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#E8E8E8',
   },
-  matchBadgeOverlay: {
+  photoGradient: {
     position: 'absolute',
-    bottom: 20,
-    right: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: 0,
+  },
+  closeButtonOverlay: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 50 : (StatusBar.currentHeight || 0) + 12,
+    right: 16,
+    width: 40,
+    height: 40,
     borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  heroTopRow: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 100 : (StatusBar.currentHeight || 0) + 60,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  matchBadgeOverlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  verifiedBadgeOverlay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  heroBottom: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
   },
   profileInfo: {
-    padding: 24,
-    gap: 20,
-  },
-  nameSection: {
-    gap: 8,
+    padding: 16,
+    gap: 12,
   },
   nameRow: {
     flexDirection: 'row',
@@ -241,34 +245,27 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   name: {
-    fontSize: 32,
+    fontSize: 34,
+    fontWeight: '700',
   },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginTop: 4,
   },
   section: {
     padding: 16,
-    borderRadius: 16,
-    gap: 12,
+    borderRadius: 14,
+    gap: 8,
+    borderWidth: 1,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   sectionText: {
-    lineHeight: 24,
-  },
-  chipsContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  chip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
+    lineHeight: 22,
+    color: '#E0E0E0',
   },
   footer: {
     position: 'absolute',
@@ -279,7 +276,6 @@ const styles = StyleSheet.create({
     paddingBottom: Platform.OS === 'ios' ? 40 : 24,
     paddingTop: 20,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(0,0,0,0.05)',
   },
   swipeButtons: {
     flexDirection: 'row',
@@ -293,14 +289,8 @@ const styles = StyleSheet.create({
     borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 4,
   },
   passButton: {
-    backgroundColor: '#FFFFFF',
     borderWidth: 2,
   },
   likeButton: {

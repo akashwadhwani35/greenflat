@@ -1,18 +1,35 @@
 export const colorTokens = {
-  primary: '#3BB273',
-  primaryDark: '#2A7A56',
+  // GreenFlag Brand Colors (from Behance)
+  neonGreen: '#ADFF1A',        // Grass green - primary CTA color
+  deepBlack: '#101D13',        // Dark green-tinted black (new background)
+  darkBlack: '#0A0A0A',        // Slightly lighter black
+  charcoal: '#1A1A1A',         // Charcoal for cards
+  darkGray: '#212121',         // Dark gray
+  mediumGray: '#2A2A2A',       // Medium gray for elevated cards
+  lightGray: '#3A3A3A',        // Light gray for borders
+  peach: '#FDE2C9',            // Soft peach accent
+  forestGreen: '#418B01',      // Deep green accent
+  ivory: '#F6F6F6',            // Light background for inputs
+
+  // Functional Colors
+  primary: '#ADFF1A',          // Neon green for CTAs
+  primaryDark: '#A8E02C',      // Darker green
   success: '#3BB273',
-  successTint: 'rgba(59,178,115,0.16)',
-  accent: '#F6D6D1',
-  accentTint: 'rgba(246,214,209,0.35)',
-  info: '#91C9B7',
-  background: '#FAFAF2',
-  surface: '#FFFFFF',
-  text: '#121614',
-  muted: '#6E6E6E',
-  mutedLight: '#9E9E9E',
-  border: '#E0E0E0',
-  error: '#E87C74',
+  successTint: 'rgba(188, 246, 65, 0.16)',
+  accent: '#FDE2C9',           // Peach
+  accentTint: 'rgba(253, 226, 201, 0.35)',
+  info: '#ADFF1A',             // Neon green
+  background: '#101D13',       // Dark green-tinted black
+  surface: '#1A1A1A',          // Charcoal for cards
+  surfaceLight: '#2A2A2A',     // Medium gray for elevated cards
+  text: '#FFFFFF',             // White text
+  textDark: '#E0E0E0',         // Slightly dimmed white
+  muted: '#888888',            // Muted gray
+  mutedLight: '#AAAAAA',       // Light muted
+  border: '#333333',           // Dark border
+  borderLight: '#444444',      // Lighter border
+  error: '#FF6B6B',            // Bright error red
+  pink: '#FF4D8A',             // Pink for hearts/likes
 };
 
 export const radiusTokens = {
@@ -78,21 +95,46 @@ export const fontTokens = {
 
 export const createTheme = () => ({
   colors: {
-    background: colorTokens.background,
-    surface: colorTokens.surface,
-    text: colorTokens.text,
-    muted: colorTokens.muted,
-    mutedLight: colorTokens.mutedLight,
-    border: colorTokens.border,
-    primary: colorTokens.primary,
-    primaryDark: colorTokens.primaryDark,
-    brand: colorTokens.primary,
+    // Background & Surface
+    background: colorTokens.background,      // Dark green-tinted black
+    surface: colorTokens.surface,           // Charcoal cards
+    surfaceLight: colorTokens.surfaceLight, // Medium gray for elevated cards
+
+    // Text
+    text: colorTokens.text,                 // White
+    textDark: colorTokens.textDark,         // Dimmed white
+    muted: colorTokens.muted,               // Muted gray
+    mutedLight: colorTokens.mutedLight,     // Light muted
+
+    // Borders
+    border: colorTokens.border,             // Dark border
+    borderLight: colorTokens.borderLight,   // Lighter border
+
+    // Brand & Actions
+    primary: colorTokens.primary,           // Neon green
+    primaryDark: colorTokens.primaryDark,   // Darker neon green
+    brand: colorTokens.neonGreen,           // Neon green
+
+    // Additional Colors
     success: colorTokens.success,
     successTint: colorTokens.successTint,
-    accent: colorTokens.accent,
+    accent: colorTokens.accent,             // Peach
     accentTint: colorTokens.accentTint,
-    info: colorTokens.info,
-    error: colorTokens.error,
+    info: colorTokens.info,                 // Neon green
+    error: colorTokens.error,               // Bright red
+    pink: colorTokens.pink,                 // Pink for likes
+
+    // Specific Brand Colors
+    neonGreen: colorTokens.neonGreen,
+    deepBlack: colorTokens.deepBlack,
+    darkBlack: colorTokens.darkBlack,
+    charcoal: colorTokens.charcoal,
+    darkGray: colorTokens.darkGray,
+    mediumGray: colorTokens.mediumGray,
+    lightGray: colorTokens.lightGray,
+    peach: colorTokens.peach,
+    forestGreen: colorTokens.forestGreen,
+    ivory: colorTokens.ivory,
   },
   radius: radiusTokens,
   spacing: spacingTokens,

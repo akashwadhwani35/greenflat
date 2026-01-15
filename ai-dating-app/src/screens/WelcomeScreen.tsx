@@ -1,120 +1,126 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Animated, ImageBackground, StyleSheet, View, TouchableOpacity, Dimensions, StatusBar } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Typography } from '../components/Typography';
+import React, { useEffect, useRef } from 'react';
+import { Animated, StyleSheet, View, TouchableOpacity, StatusBar, Platform, Image, Text } from 'react-native';
 import { useTheme } from '../theme/ThemeProvider';
 
-const { width, height } = Dimensions.get('screen'); // Use 'screen' instead of 'window' for full screen
+const glassLogo = require('../../assets/glass-logo.png');
 
 type WelcomeScreenProps = {
   onStart: () => void;
+  onLogin?: () => void;
+  onDemoLogin?: () => void;
 };
 
-// Background images
-const backgroundImages = [
-  require('../../assets/welcome-bg-1.jpg'),
-  require('../../assets/welcome-bg-2.jpg'),
-  require('../../assets/welcome-bg-3.jpg'),
-  require('../../assets/welcome-bg-4.jpg'),
-];
-
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, onDemoLogin }) => {
   const theme = useTheme();
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
-  const [nextImageIndex, setNextImageIndex] = useState(1);
-  const imageOpacity = useRef(new Animated.Value(1)).current;
+  const logoAnim = useRef(new Animated.Value(0)).current;
+  const contentAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Ultra smooth Ken Burns-style crossfade every 6 seconds
-    const interval = setInterval(() => {
-      // Smooth fade out current image
-      Animated.timing(imageOpacity, {
-        toValue: 0,
-        duration: 2000, // Longer, smoother transition
+    Animated.sequence([
+      Animated.timing(logoAnim, {
+        toValue: 1,
+        duration: 800,
         useNativeDriver: true,
-        isInteraction: false,
-      }).start(() => {
-        // Switch images
-        setCurrentImageIndex(nextImageIndex);
-        setNextImageIndex((nextImageIndex + 1) % backgroundImages.length);
-
-        // Smooth fade in new image
-        Animated.timing(imageOpacity, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-          isInteraction: false,
-        }).start();
-      });
-    }, 6000);
-
-    return () => clearInterval(interval);
-  }, [nextImageIndex]);
+      }),
+      Animated.timing(contentAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, []);
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
-
-      {/* Current image with animated opacity for smooth transitions */}
-      <Animated.View style={[styles.imageContainer, { opacity: imageOpacity }]}>
-        <ImageBackground
-          source={backgroundImages[currentImageIndex]}
-          style={styles.backgroundImage}
-          resizeMode="cover"
-          blurRadius={0}
-        >
-          <View style={styles.grayscaleOverlay} />
-        </ImageBackground>
-      </Animated.View>
-
-      {/* Next image underneath for smooth crossfade */}
-      <View style={styles.imageContainer}>
-        <ImageBackground
-          source={backgroundImages[nextImageIndex]}
-          style={styles.backgroundImage}
-          resizeMode="cover"
-          blurRadius={0}
-        >
-          <View style={styles.grayscaleOverlay} />
-        </ImageBackground>
-      </View>
-
-      {/* Gradient overlay for text legibility */}
-      <LinearGradient
-        colors={['rgba(0,0,0,0.5)', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.2)', 'rgba(0,0,0,0.75)']}
-        style={styles.gradientOverlay}
-      />
+    <View style={[styles.container, { backgroundColor: theme.colors.neonGreen }]}>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
       <View style={styles.content}>
-        {/* Header - Minimal */}
-        <View style={styles.header}>
-          <Typography variant="h2" style={styles.logo}>
-            Greenflag
-          </Typography>
-        </View>
+        {/* Header - GreenFlag text */}
+        <Animated.View
+          style={[
+            styles.header,
+            {
+              opacity: logoAnim,
+              transform: [{
+                translateY: logoAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [-20, 0],
+                }),
+              }],
+            }
+          ]}
+        >
+          <Text style={styles.brandName}>GreenFlag</Text>
+        </Animated.View>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <Typography variant="display" style={styles.headline}>
-            Find Someone Who Gets You
-          </Typography>
+        {/* Center - 3D Logo */}
+        <Animated.View
+          style={[
+            styles.logoSection,
+            {
+              opacity: logoAnim,
+              transform: [{
+                scale: logoAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.8, 1],
+                }),
+              }],
+            }
+          ]}
+        >
+          <Image
+            source={glassLogo}
+            style={styles.logo3D}
+            resizeMode="contain"
+          />
+        </Animated.View>
 
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={styles.primaryButton}
-              onPress={onStart}
-              activeOpacity={0.85}
-            >
-              <Typography variant="bodyStrong" style={styles.buttonText}>
-                Start your journey
-              </Typography>
-            </TouchableOpacity>
-
-            <Typography variant="tiny" style={styles.legal}>
-              By continuing, you agree to our Terms & Privacy Policy
-            </Typography>
+        {/* Bottom Content */}
+        <Animated.View
+          style={[
+            styles.bottomSection,
+            {
+              opacity: contentAnim,
+              transform: [{
+                translateY: contentAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [30, 0],
+                }),
+              }],
+            }
+          ]}
+        >
+          <View style={styles.headlineContainer}>
+            <Text style={styles.headline}>AI Found</Text>
+            <Text style={styles.headline}>Your match.</Text>
           </View>
-        </View>
+
+          {/* Create Account Button */}
+          <TouchableOpacity
+            style={styles.primaryButton}
+            onPress={onStart}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.primaryButtonText}>Create account</Text>
+          </TouchableOpacity>
+
+          {/* Login Link */}
+          {onLogin ? (
+            <TouchableOpacity onPress={onLogin} style={styles.loginLink}>
+              <Text style={styles.loginText}>
+                Already a member? <Text style={styles.loginTextUnderline}>Log In</Text>
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {/* Terms */}
+          <Text style={styles.termsText}>
+            By registering, you accept our{' '}
+            <Text style={styles.termsLink}>Terms and Conditions of Use</Text>
+            {' '}and our{' '}
+            <Text style={styles.termsLink}>Privacy Policy.</Text>
+          </Text>
+        </Animated.View>
       </View>
     </View>
   );
@@ -123,89 +129,80 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
-  },
-  imageContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    width: '100%',
-    height: '100%',
-  },
-  backgroundImage: {
-    width: '100%',
-    height: '100%',
-  },
-  grayscaleOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
-  gradientOverlay: {
-    ...StyleSheet.absoluteFillObject,
   },
   content: {
     flex: 1,
-    justifyContent: 'space-between',
-    paddingTop: StatusBar.currentHeight ? StatusBar.currentHeight + 50 : 70,
-    paddingBottom: 55,
-    paddingHorizontal: 28,
+    paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 20,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 40,
+    paddingHorizontal: 24,
   },
   header: {
     alignItems: 'center',
+    paddingTop: 20,
   },
-  logo: {
-    fontSize: 22,
-    lineHeight: 28,
-    color: '#FFFFFF',
-    fontWeight: '500',
-    textAlign: 'center',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    opacity: 0.95,
+  brandName: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#000000',
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
-  footer: {
-    gap: 36,
+  logoSection: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logo3D: {
+    width: 280,
+    height: 280,
+  },
+  bottomSection: {
+    gap: 20,
+    alignItems: 'center',
+  },
+  headlineContainer: {
+    alignItems: 'center',
+    marginBottom: 10,
   },
   headline: {
-    fontSize: 44,
-    lineHeight: 52,
-    color: '#FFFFFF',
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#000000',
     textAlign: 'center',
-    paddingHorizontal: 16,
-    fontWeight: '300',
-    textShadowColor: 'rgba(0,0,0,0.8)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 10,
-    letterSpacing: -1,
-  },
-  actions: {
-    gap: 20,
+    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
   },
   primaryButton: {
-    backgroundColor: '#3BB273',
-    borderRadius: 12,
+    backgroundColor: '#000000',
+    borderRadius: 999,
     paddingVertical: 18,
-    paddingHorizontal: 36,
+    paddingHorizontal: 60,
+    width: '100%',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  buttonText: {
-    fontSize: 16,
+  primaryButtonText: {
     color: '#FFFFFF',
-    fontWeight: '500',
-    letterSpacing: 0.3,
+    fontSize: 18,
+    fontWeight: '600',
   },
-  legal: {
+  loginLink: {
+    paddingVertical: 8,
+  },
+  loginText: {
+    fontSize: 15,
+    color: '#000000',
+  },
+  loginTextUnderline: {
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  termsText: {
     fontSize: 12,
-    lineHeight: 17,
-    color: 'rgba(255,255,255,0.8)',
+    color: '#000000',
     textAlign: 'center',
+    lineHeight: 18,
     paddingHorizontal: 20,
+    opacity: 0.8,
+  },
+  termsLink: {
+    fontWeight: '600',
   },
 });
