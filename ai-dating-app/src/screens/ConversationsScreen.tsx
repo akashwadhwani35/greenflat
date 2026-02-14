@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, Image, ActivityIndicator, RefreshControl } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, View, TouchableOpacity, Image, ActivityIndicator, RefreshControl, TextInput } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { PageHeader } from '../components/PageHeader';
 
 type Conversation = {
   match_id: number;
@@ -19,7 +20,7 @@ type Conversation = {
 
 type Props = {
   onBack: () => void;
-  onOpenConversation: (matchId: number, matchName: string) => void;
+  onOpenConversation: (matchId: number, matchName: string, targetUserId: number) => void;
   token: string;
   apiBaseUrl: string;
   currentUserId: number;
@@ -36,6 +37,7 @@ export const ConversationsScreen: React.FC<Props> = ({
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const fetchConversations = async (isRefresh = false) => {
     try {
@@ -90,14 +92,20 @@ export const ConversationsScreen: React.FC<Props> = ({
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
+  const filteredConversations = useMemo(() => {
+    const needle = searchQuery.trim().toLowerCase();
+    if (!needle) return conversations;
+
+    return conversations.filter((item) => {
+      const name = (item.name || '').toLowerCase();
+      const message = (item.last_message || '').toLowerCase();
+      return name.includes(needle) || message.includes(needle);
+    });
+  }, [conversations, searchQuery]);
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Messages</Typography>
-      </View>
+      <PageHeader title="Messages" onBack={onBack} />
 
       {loading && conversations.length === 0 ? (
         <View style={styles.loadingContainer}>
@@ -128,7 +136,26 @@ export const ConversationsScreen: React.FC<Props> = ({
             />
           }
         >
-          {conversations.map((item) => {
+          <View style={[styles.searchContainer, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+            <Feather name="search" size={18} color={theme.colors.muted} />
+            <TextInput
+              style={[styles.searchInput, { color: theme.colors.text }]}
+              placeholder="Search messages"
+              placeholderTextColor={theme.colors.muted}
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+            />
+          </View>
+
+          {filteredConversations.length === 0 ? (
+            <View style={[styles.row, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+              <Typography variant="small" style={{ color: theme.colors.muted }}>
+                No conversations found for "{searchQuery}".
+              </Typography>
+            </View>
+          ) : null}
+
+          {filteredConversations.map((item) => {
             const isUnread = item.unread_count > 0;
             const isLastMessageFromMe = item.last_message_sender_id === currentUserId;
 
@@ -136,10 +163,10 @@ export const ConversationsScreen: React.FC<Props> = ({
               <TouchableOpacity
                 key={item.match_id}
                 style={[styles.row, {
-                  borderColor: isUnread ? theme.colors.neonGreen : theme.colors.border,
-                  backgroundColor: isUnread ? 'rgba(173, 255, 26, 0.05)' : theme.colors.surface,
+                  borderColor: isUnread ? theme.colors.secondaryHairline : theme.colors.border,
+                  backgroundColor: isUnread ? theme.colors.secondaryHighlight : theme.colors.surface,
                 }]}
-                onPress={() => onOpenConversation(item.match_id, item.name)}
+                onPress={() => onOpenConversation(item.match_id, item.name, item.user_id)}
                 activeOpacity={0.7}
               >
                 <View style={styles.photoContainer}>
@@ -215,22 +242,6 @@ export const ConversationsScreen: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F2F2F2',
-  },
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
@@ -254,6 +265,20 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 120,
     gap: 12,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchInput: {
+    flex: 1,
+    marginLeft: 10,
+    fontSize: 16,
+    fontFamily: 'RedHatDisplay_400Regular',
   },
   row: {
     flexDirection: 'row',

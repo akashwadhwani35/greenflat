@@ -11,12 +11,18 @@ const tables = [
   'bookmarks',
   'messages',
   'matches',
+  'blocks',
   'likes',
+  'user_notification_preferences',
+  'user_privacy_settings',
   'photos',
   'personality_responses',
   'user_profiles',
   'user_activity_limits',
   'user_ai_profiles',
+  'otp_request_audit',
+  'otp_codes',
+  'verification_status',
   'users'
 ];
 

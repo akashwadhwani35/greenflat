@@ -9,7 +9,7 @@
     "start": "node dist/index.js",
     "test": "NODE_ENV=test jest --runInBand",
     "test:watch": "NODE_ENV=test jest --watch",
-    "seed:demo": "ts-node --transpile-only src/scripts/seedDemoProfiles.ts"
+    "cleanup:demo-profiles": "ts-node src/scripts/purgeDemoProfiles.ts"
   },
   "keywords": [],
   "author": "",
@@ -24,8 +24,7 @@
     "express-validator": "^7.3.0",
     "jsonwebtoken": "^9.0.2",
     "openai": "^6.6.0",
-    "pg": "^8.16.3",
-    "yoti": "4.12.1"
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

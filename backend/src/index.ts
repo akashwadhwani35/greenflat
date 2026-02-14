@@ -4,11 +4,29 @@ import dotenv from 'dotenv';
 import type { Server } from 'http';
 import routes from './routes';
 import pool from './config/database';
+import { isCloudinaryConfigured } from './services/media.service';
+import { isSmsConfigured } from './services/sms.service';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+
+const assertProductionReadiness = () => {
+  if (process.env.NODE_ENV !== 'production') return;
+  if (process.env.REQUIRE_EXTERNAL_SERVICES === 'false') return;
+
+  const missing: string[] = [];
+  if (!process.env.OPENAI_API_KEY) missing.push('OPENAI_API_KEY');
+  if (!isSmsConfigured()) missing.push('TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN/TWILIO_FROM_NUMBER');
+  if (!isCloudinaryConfigured()) missing.push('CLOUDINARY_CLOUD_NAME/CLOUDINARY_API_KEY/CLOUDINARY_API_SECRET');
+
+  if (missing.length > 0) {
+    throw new Error(`Missing production service configuration: ${missing.join(', ')}`);
+  }
+};
+
+assertProductionReadiness();
 
 // Middleware
 app.use(cors());

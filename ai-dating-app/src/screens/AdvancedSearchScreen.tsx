@@ -64,7 +64,7 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
-          style={[styles.backButton, { backgroundColor: theme.colors.charcoal }]}
+          style={[styles.backButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
           activeOpacity={0.8}
         >
           <Feather name="arrow-left" size={22} color={theme.colors.text} />
@@ -145,10 +145,10 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
                     styles.chip,
                     {
                       backgroundColor: selected
-                        ? theme.colors.neonGreen
+                        ? theme.colors.secondaryHighlight
                         : 'rgba(255, 255, 255, 0.05)',
                       borderColor: selected
-                        ? theme.colors.neonGreen
+                        ? theme.colors.secondaryHairline
                         : theme.colors.border,
                     },
                   ]}
@@ -158,12 +158,12 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
                   <Feather
                     name={option.icon as any}
                     size={16}
-                    color={selected ? theme.colors.deepBlack : theme.colors.text}
+                    color={theme.colors.text}
                   />
                   <Typography
                     variant="body"
                     style={{
-                      color: selected ? theme.colors.deepBlack : theme.colors.text,
+                      color: theme.colors.text,
                       fontWeight: selected ? '600' : '400',
                     }}
                   >
@@ -327,10 +327,10 @@ const ChipToggle: React.FC<{
         styles.chip,
         {
           backgroundColor: active
-            ? 'rgba(188, 246, 65, 0.15)'
+            ? theme.colors.secondaryHighlight
             : 'rgba(255, 255, 255, 0.05)',
           borderColor: active
-            ? theme.colors.neonGreen
+            ? theme.colors.secondaryHairline
             : theme.colors.border,
         },
       ]}
@@ -346,7 +346,7 @@ const ChipToggle: React.FC<{
       <Typography
         variant="body"
         style={{
-          color: active ? theme.colors.neonGreen : theme.colors.text,
+          color: theme.colors.text,
           fontWeight: active ? '600' : '400',
         }}
       >
@@ -377,6 +377,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
   },
   content: {
     paddingHorizontal: 20,

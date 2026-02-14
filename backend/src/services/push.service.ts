@@ -4,6 +4,22 @@ import pool from '../config/database';
 // Create Expo SDK client
 const expo = new Expo();
 
+type NotificationCategory = 'likes' | 'matches' | 'messages' | 'daily_picks' | 'product_updates';
+
+const isNotificationAllowed = async (userId: number, category?: NotificationCategory): Promise<boolean> => {
+  if (!category) return true;
+  const result = await pool.query(
+    `SELECT likes, matches, messages, daily_picks, product_updates
+     FROM user_notification_preferences
+     WHERE user_id = $1`,
+    [userId]
+  );
+
+  if (result.rows.length === 0) return true;
+  const prefs = result.rows[0] as Record<string, boolean>;
+  return prefs[category] !== false;
+};
+
 /**
  * Send push notification to a single user
  */
@@ -11,9 +27,15 @@ export const sendPushNotification = async (
   userId: number,
   title: string,
   body: string,
-  data?: { [key: string]: any }
+  data?: { [key: string]: any },
+  category?: NotificationCategory
 ): Promise<boolean> => {
   try {
+    const allowed = await isNotificationAllowed(userId, category);
+    if (!allowed) {
+      return false;
+    }
+
     // Get user's push token from database
     const result = await pool.query(
       'SELECT push_token FROM users WHERE id = $1 AND push_token IS NOT NULL',
@@ -143,7 +165,8 @@ export const notifyLikeReceived = async (likedUserId: number, likerName: string)
     likedUserId,
     'Someone likes you! 💚',
     `${likerName} liked your profile`,
-    { type: 'like_received', screen: 'LikesInbox' }
+    { type: 'like_received', screen: 'LikesInbox' },
+    'likes'
   );
 };
 
@@ -155,7 +178,8 @@ export const notifyMatch = async (userId: number, matchName: string): Promise<vo
     userId,
     "It's a match! 🎉",
     `You and ${matchName} both liked each other`,
-    { type: 'match', screen: 'Matches' }
+    { type: 'match', screen: 'Matches' },
+    'matches'
   );
 };
 
@@ -171,7 +195,8 @@ export const notifyNewMessage = async (
     recipientId,
     `${senderName} sent you a message`,
     messagePreview.substring(0, 100),
-    { type: 'message', screen: 'Conversations' }
+    { type: 'message', screen: 'Conversations' },
+    'messages'
   );
 };
 

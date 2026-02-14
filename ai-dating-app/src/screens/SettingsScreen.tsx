@@ -1,9 +1,10 @@
-import React from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
+import { PageHeader } from '../components/PageHeader';
 
 type Props = {
   onBack: () => void;
@@ -23,6 +24,9 @@ type Props = {
   onOpenAdvancedSearch?: () => void;
   onOpenWallet?: () => void;
   onLogout?: () => void;
+  token?: string;
+  apiBaseUrl?: string;
+  onAccountDeleted?: () => void;
 };
 
 export const SettingsScreen: React.FC<Props> = ({
@@ -43,8 +47,12 @@ export const SettingsScreen: React.FC<Props> = ({
   onOpenAdvancedSearch,
   onOpenWallet,
   onLogout,
+  token,
+  apiBaseUrl,
+  onAccountDeleted,
 }) => {
   const theme = useTheme();
+  const [deleting, setDeleting] = useState(false);
 
   const menuItems = [
     { title: 'Your profile', subtitle: 'Preview how your profile looks', icon: 'user', action: onOpenProfile },
@@ -59,16 +67,7 @@ export const SettingsScreen: React.FC<Props> = ({
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={onBack}
-          style={[styles.iconButton, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
-          accessibilityRole="button"
-        >
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Settings</Typography>
-      </View>
+      <PageHeader title="Settings" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {menuItems.map((item) => (
@@ -124,7 +123,43 @@ export const SettingsScreen: React.FC<Props> = ({
         </View>
 
         <Button label="Log out" variant="secondary" onPress={onLogout || onBack} fullWidth />
-        <Button label="Delete account" onPress={onBack} fullWidth />
+        <Button
+          label="Delete account"
+          loading={deleting}
+          onPress={() => {
+            if (!token || !apiBaseUrl) return;
+            Alert.alert(
+              'Delete account',
+              'This permanently deletes your profile, matches, and messages.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Delete',
+                  style: 'destructive',
+                  onPress: async () => {
+                    try {
+                      setDeleting(true);
+                      const response = await fetch(`${apiBaseUrl}/profile/me`, {
+                        method: 'DELETE',
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      const body = await response.json().catch(() => ({}));
+                      if (!response.ok) {
+                        throw new Error(body.error || 'Unable to delete account');
+                      }
+                      onAccountDeleted?.();
+                    } catch (error: any) {
+                      Alert.alert('Delete failed', error?.message || 'Please try again.');
+                    } finally {
+                      setDeleting(false);
+                    }
+                  },
+                },
+              ]
+            );
+          }}
+          fullWidth
+        />
       </ScrollView>
     </View>
   );
@@ -132,22 +167,6 @@ export const SettingsScreen: React.FC<Props> = ({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 120,

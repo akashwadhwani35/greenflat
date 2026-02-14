@@ -34,7 +34,9 @@ const signupAndCompleteProfile = async (
   const signupResponse = await agent.post('/api/auth/signup').send(signupPayload);
   expect(signupResponse.status).toBe(201);
   const token = signupResponse.body.token as string;
+  const userId = signupResponse.body.user?.id as number;
   expect(token).toBeTruthy();
+  expect(userId).toBeTruthy();
 
   const baseProfile = {
     height: 168,
@@ -79,7 +81,29 @@ const signupAndCompleteProfile = async (
   expect(profileResponse.status).toBe(200);
   expect(profileResponse.body.ai_persona).toBeTruthy();
 
-  return { token, signupPayload };
+  return { token, userId, signupPayload };
+};
+
+const createMutualMatch = async (
+  userAToken: string,
+  userAId: number,
+  userBToken: string,
+  userBId: number
+) => {
+  const firstLike = await agent
+    .post('/api/likes')
+    .set('Authorization', `Bearer ${userAToken}`)
+    .send({ target_user_id: userBId, is_on_grid: true });
+  expect(firstLike.status).toBe(200);
+
+  const secondLike = await agent
+    .post('/api/likes')
+    .set('Authorization', `Bearer ${userBToken}`)
+    .send({ target_user_id: userAId, is_on_grid: true });
+  expect(secondLike.status).toBe(200);
+  expect(secondLike.body.is_match).toBe(true);
+  expect(secondLike.body.match_id).toBeTruthy();
+  return secondLike.body.match_id as number;
 };
 
 describe('GreenFlag backend core flow', () => {
@@ -155,5 +179,293 @@ describe('GreenFlag backend core flow', () => {
     expect(firstMatch.name).toBe('Arjun Sharma');
     expect(Array.isArray(firstMatch.match_highlights)).toBe(true);
     expect(Array.isArray(firstMatch.suggested_openers)).toBe(true);
+  });
+
+  it('allows unmatching an existing match', async () => {
+    const userA = await signupAndCompleteProfile({
+      email: `unmatch_a_${Date.now()}@example.com`,
+      name: 'Nora',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const userB = await signupAndCompleteProfile({
+      email: `unmatch_b_${Date.now()}@example.com`,
+      name: 'Kabir',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    const matchId = await createMutualMatch(userA.token, userA.userId, userB.token, userB.userId);
+
+    const unmatchResponse = await agent
+      .post(`/api/matches/${matchId}/unmatch`)
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({});
+
+    expect(unmatchResponse.status).toBe(200);
+
+    const matchesAfter = await agent
+      .get('/api/matches')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(matchesAfter.status).toBe(200);
+    expect(matchesAfter.body.matches.length).toBe(0);
+  });
+
+  it('creates a report for a matched user', async () => {
+    const userA = await signupAndCompleteProfile({
+      email: `report_a_${Date.now()}@example.com`,
+      name: 'Ria',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const userB = await signupAndCompleteProfile({
+      email: `report_b_${Date.now()}@example.com`,
+      name: 'Aman',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    const matchId = await createMutualMatch(userA.token, userA.userId, userB.token, userB.userId);
+
+    const reportResponse = await agent
+      .post('/api/report')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ match_id: matchId, reason: 'harassment' });
+
+    expect(reportResponse.status).toBe(201);
+    expect(reportResponse.body.report.reason).toBe('harassment');
+    expect(reportResponse.body.report.reporter_id).toBe(userA.userId);
+    expect(reportResponse.body.report.reported_id).toBe(userB.userId);
+  });
+
+  it('applies wallet purchase credits', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `wallet_${Date.now()}@example.com`,
+      name: 'Maya',
+    });
+
+    const purchaseResponse = await agent
+      .post('/api/wallet/purchase')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ plan: 'starter' });
+    expect(purchaseResponse.status).toBe(200);
+
+    const walletResponse = await agent
+      .get('/api/wallet/summary')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(walletResponse.status).toBe(200);
+    expect(walletResponse.body.credit_balance).toBe(60);
+  });
+
+  it('deletes account and invalidates login', async () => {
+    const email = `delete_${Date.now()}@example.com`;
+    const user = await signupAndCompleteProfile({ email, name: 'Delete Me' });
+
+    const deleteResponse = await agent
+      .delete('/api/profile/me')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(deleteResponse.status).toBe(200);
+
+    const loginResponse = await agent
+      .post('/api/auth/login')
+      .send({ email, password: 'Passw0rd!' });
+    expect(loginResponse.status).toBe(401);
+  });
+
+  it('enforces non-premium message daily limits', async () => {
+    const female = await signupAndCompleteProfile({
+      email: `msg_f_${Date.now()}@example.com`,
+      name: 'Sara',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const male = await signupAndCompleteProfile({
+      email: `msg_m_${Date.now()}@example.com`,
+      name: 'Dev',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    const matchId = await createMutualMatch(female.token, female.userId, male.token, male.userId);
+
+    for (let i = 0; i < 3; i++) {
+      const messageResponse = await agent
+        .post('/api/messages')
+        .set('Authorization', `Bearer ${male.token}`)
+        .send({ match_id: matchId, content: `Message ${i + 1}` });
+      expect(messageResponse.status).toBe(200);
+    }
+
+    const fourthMessage = await agent
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${male.token}`)
+      .send({ match_id: matchId, content: 'Message 4' });
+    expect(fourthMessage.status).toBe(429);
+  });
+
+  it('persists privacy settings and supports block/unblock', async () => {
+    const userA = await signupAndCompleteProfile({
+      email: `privacy_a_${Date.now()}@example.com`,
+      name: 'Priya',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const userB = await signupAndCompleteProfile({
+      email: `privacy_b_${Date.now()}@example.com`,
+      name: 'Arnav',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    const updateSettings = await agent
+      .post('/api/privacy/settings')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ hide_city: true, hide_distance: true, incognito_mode: true, show_online_status: false });
+    expect(updateSettings.status).toBe(200);
+    expect(updateSettings.body.settings.hide_city).toBe(true);
+
+    const getSettings = await agent
+      .get('/api/privacy/settings')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(getSettings.status).toBe(200);
+    expect(getSettings.body.settings.incognito_mode).toBe(true);
+
+    const blockResponse = await agent
+      .post('/api/privacy/block')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ target_user_id: userB.userId });
+    expect(blockResponse.status).toBe(200);
+
+    const blockedList = await agent
+      .get('/api/privacy/blocked')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(blockedList.status).toBe(200);
+    expect(blockedList.body.blocked_users.length).toBe(1);
+    expect(blockedList.body.blocked_users[0].user_id).toBe(userB.userId);
+
+    const likeWhileBlocked = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ target_user_id: userB.userId, is_on_grid: true });
+    expect(likeWhileBlocked.status).toBe(400);
+
+    const unblockResponse = await agent
+      .post('/api/privacy/unblock')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ target_user_id: userB.userId });
+    expect(unblockResponse.status).toBe(200);
+
+    const blockedAfter = await agent
+      .get('/api/privacy/blocked')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(blockedAfter.status).toBe(200);
+    expect(blockedAfter.body.blocked_users.length).toBe(0);
+  });
+
+  it('persists notification preferences server-side', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `notif_${Date.now()}@example.com`,
+      name: 'Noah',
+    });
+
+    const updateResponse = await agent
+      .post('/api/notifications/preferences')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ likes: false, matches: false, messages: true, daily_picks: false, product_updates: false });
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.preferences.likes).toBe(false);
+    expect(updateResponse.body.preferences.messages).toBe(true);
+
+    const getResponse = await agent
+      .get('/api/notifications/preferences')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(getResponse.status).toBe(200);
+    expect(getResponse.body.preferences.likes).toBe(false);
+    expect(getResponse.body.preferences.matches).toBe(false);
+    expect(getResponse.body.preferences.daily_picks).toBe(false);
+  });
+
+  it('supports dev OTP fallback when SMS provider is not configured', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `otp_${Date.now()}@example.com`,
+      name: 'Otp User',
+    });
+
+    const otpResponse = await agent
+      .post('/api/verification/otp/request')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ phone: '+15555555555' });
+    expect(otpResponse.status).toBe(200);
+    expect(typeof otpResponse.body.dev_code).toBe('string');
+    expect(otpResponse.body.dev_code).toHaveLength(6);
+  });
+
+  it('rate limits repeated OTP requests for the same phone', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `otp_limit_${Date.now()}@example.com`,
+      name: 'Otp Limit User',
+    });
+
+    const first = await agent
+      .post('/api/verification/otp/request')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ phone: '+15551234567' });
+    expect(first.status).toBe(200);
+
+    const second = await agent
+      .post('/api/verification/otp/request')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ phone: '+15551234567' });
+    expect(second.status).toBe(429);
+  });
+
+  it('rejects local media payloads and accepts secure hosted media URLs', async () => {
+    const userA = await signupAndCompleteProfile({
+      email: `media_a_${Date.now()}@example.com`,
+      name: 'Media A',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const userB = await signupAndCompleteProfile({
+      email: `media_b_${Date.now()}@example.com`,
+      name: 'Media B',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const matchId = await createMutualMatch(userA.token, userA.userId, userB.token, userB.userId);
+
+    const blockedPayload = await agent
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({
+        match_id: matchId,
+        message_type: 'image',
+        content: 'data:image/png;base64,AAAA',
+      });
+    expect(blockedPayload.status).toBe(400);
+
+    const hostedUrl = await agent
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({
+        match_id: matchId,
+        message_type: 'image',
+        content: 'https://res.cloudinary.com/demo/image/upload/v1/sample.jpg',
+      });
+    expect(hostedUrl.status).toBe(200);
+  });
+
+  it('returns clear selfie verification config error when OpenAI is unavailable', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `selfie_${Date.now()}@example.com`,
+      name: 'Selfie User',
+    });
+
+    const selfieResponse = await agent
+      .post('/api/verification/selfie')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ photo_url: 'data:image/jpeg;base64,AAAA' });
+    expect(selfieResponse.status).toBe(503);
+    expect(selfieResponse.body.error).toMatch(/not configured/i);
   });
 });

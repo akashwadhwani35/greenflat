@@ -12,8 +12,14 @@ export interface User {
   is_verified: boolean;
   is_premium: boolean;
   premium_expires_at?: Date;
+  boost_expires_at?: Date;
+  credit_balance: number;
   cooldown_enabled: boolean;
   cooldown_until?: Date;
+  hide_distance?: boolean;
+  hide_city?: boolean;
+  incognito_mode?: boolean;
+  show_online_status?: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -29,12 +35,19 @@ export interface UserProfile {
   prompt2?: string;
   prompt3?: string;
   smoker?: boolean;
+  smoking_habit?: string;
   drinker?: string;
   diet?: string;
   fitness_level?: string;
   education?: string;
+  education_level?: string;
   occupation?: string;
+  hometown?: string;
   relationship_goal?: string;
+  have_kids?: string;
+  star_sign?: string;
+  politics?: string;
+  religion?: string;
   family_oriented?: boolean;
   spiritual?: boolean;
   open_minded?: boolean;

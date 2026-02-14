@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Alert,
   View,
   StyleSheet,
   ScrollView,
@@ -80,13 +81,48 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const userName = profile?.user?.name || 'New User';
   const userCity = profile?.user?.city || '';
 
-  const checklist = [
-    { label: 'Photo added', done: (profile?.photos || []).length > 0 },
-    { label: 'Location verified', done: Boolean(profile?.user?.city) },
-    { label: 'Contact secured', done: true },
-  ];
-
   const currentFeatures = selectedPlan === 'plus' ? PLUS_FEATURES : PREMIUM_FEATURES;
+  const premiumExpiresAt = profile?.user?.premium_expires_at ? new Date(profile.user.premium_expires_at).getTime() : null;
+  const hasPaidPlan = Boolean(profile?.user?.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > Date.now());
+  const boostExpiresAtMs = profile?.user?.boost_expires_at ? new Date(profile.user.boost_expires_at).getTime() : null;
+  const isBoostActive = Boolean(boostExpiresAtMs && boostExpiresAtMs > Date.now());
+
+  const boostSubtitle = (() => {
+    if (isBoostActive && boostExpiresAtMs) {
+      const diffMs = Math.max(0, boostExpiresAtMs - Date.now());
+      const hours = Math.floor(diffMs / (1000 * 60 * 60));
+      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      return `Boost active • ${hours}h ${minutes}m left`;
+    }
+    return 'Get seen by 10X more people';
+  })();
+
+  const handleBoost = async () => {
+    if (!hasPaidPlan) return;
+    try {
+      const response = await fetch(`${apiBaseUrl}/profile/boost`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || 'Unable to activate boost');
+      }
+
+      if (body.boost_expires_at) {
+        setProfile((prev: any) => ({
+          ...prev,
+          user: {
+            ...(prev?.user || {}),
+            boost_expires_at: body.boost_expires_at,
+          },
+        }));
+      }
+      Alert.alert('Boost activated', 'Your profile will be boosted in search for 24 hours.');
+    } catch (error: any) {
+      Alert.alert('Boost failed', error?.message || 'Unable to activate boost');
+    }
+  };
 
   if (loading) {
     return (
@@ -105,7 +141,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
       {/* Header */}
       <View style={[styles.header, { backgroundColor: theme.colors.deepBlack }]}>
         <TouchableOpacity onPress={onBack} style={styles.headerButton}>
-          <Feather name="chevron-left" size={28} color={theme.colors.text} />
+          <Feather name="arrow-left" size={22} color={theme.colors.text} />
         </TouchableOpacity>
         <Typography variant="h2" style={{ color: theme.colors.text, flex: 1 }}>
           Profile
@@ -223,85 +259,32 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
 
           {/* Boost Button */}
           <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: theme.colors.neonGreen }]}
-            onPress={onOpenCheckout}
-            activeOpacity={0.8}
+            style={[
+              styles.actionButton,
+              { backgroundColor: theme.colors.neonGreen },
+              !hasPaidPlan ? styles.actionButtonDisabled : null,
+            ]}
+            onPress={handleBoost}
+            disabled={!hasPaidPlan}
+            activeOpacity={hasPaidPlan ? 0.8 : 1}
           >
-            <Typography variant="h2" style={{ color: theme.colors.deepBlack, letterSpacing: 2 }}>
+            <Typography
+              variant="h2"
+              style={{
+                color: theme.colors.deepBlack,
+                letterSpacing: 2,
+                fontFamily: theme.fonts.bodyStrong.family,
+                fontWeight: theme.fonts.bodyStrong.weight,
+              }}
+            >
               BOOOOOOOOOOST
             </Typography>
             <Typography variant="small" style={{ color: theme.colors.deepBlack, marginTop: 4 }}>
-              Get seen by 10X more people
+              {boostSubtitle}
             </Typography>
           </TouchableOpacity>
 
-          {/* Compliments Button */}
-          <TouchableOpacity
-            style={[styles.actionButtonOutline, { borderColor: theme.colors.neonGreen }]}
-            onPress={onOpenCheckout}
-            activeOpacity={0.8}
-          >
-            <Typography variant="h2" style={{ color: theme.colors.neonGreen, letterSpacing: 2 }}>
-              COMPLIMENTS
-            </Typography>
-            <Typography variant="small" style={{ color: theme.colors.neonGreen, marginTop: 4 }}>
-              Land directly in DMs
-            </Typography>
-          </TouchableOpacity>
         </View>
-
-        {/* Quick Checklist */}
-        <View style={[styles.checklistCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-          <Typography variant="h2" style={{ color: theme.colors.text, marginBottom: 16 }}>
-            Quick checklist
-          </Typography>
-          {checklist.map((item) => (
-            <View key={item.label} style={styles.checklistRow}>
-              <View
-                style={[
-                  styles.checkCircle,
-                  {
-                    backgroundColor: item.done ? 'rgba(173, 255, 26, 0.15)' : 'rgba(255, 255, 255, 0.05)',
-                    borderColor: item.done ? theme.colors.neonGreen : theme.colors.border,
-                  },
-                ]}
-              >
-                {item.done ? (
-                  <Feather name="check" size={14} color={theme.colors.neonGreen} />
-                ) : (
-                  <Feather name="circle" size={14} color={theme.colors.muted} />
-                )}
-              </View>
-              <Typography
-                variant="body"
-                style={{ color: item.done ? theme.colors.text : theme.colors.muted, marginLeft: 12 }}
-              >
-                {item.label}
-              </Typography>
-            </View>
-          ))}
-        </View>
-
-        {/* Edit Profile and Manage Photos */}
-        <TouchableOpacity
-          style={[styles.editButton, { backgroundColor: theme.colors.neonGreen }]}
-          onPress={onEditProfile}
-          activeOpacity={0.8}
-        >
-          <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
-            Edit profile
-          </Typography>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.editButtonOutline, { borderColor: theme.colors.neonGreen }]}
-          onPress={onManagePhotos}
-          activeOpacity={0.8}
-        >
-          <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
-            Manage photos
-          </Typography>
-        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -326,8 +309,12 @@ const styles = StyleSheet.create({
   headerButton: {
     width: 44,
     height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#1B2920',
+    borderWidth: 1,
+    borderColor: '#4D4D4D',
   },
   scrollView: {
     flex: 1,
@@ -408,44 +395,7 @@ const styles = StyleSheet.create({
     borderRadius: 30,
     alignItems: 'center',
   },
-  actionButtonOutline: {
-    paddingVertical: 18,
-    borderRadius: 30,
-    alignItems: 'center',
-    borderWidth: 2,
-    backgroundColor: 'transparent',
-  },
-  checklistCard: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 20,
-    marginTop: 24,
-  },
-  checklistRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  checkCircle: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  editButton: {
-    paddingVertical: 16,
-    borderRadius: 30,
-    alignItems: 'center',
-    marginTop: 24,
-  },
-  editButtonOutline: {
-    paddingVertical: 16,
-    borderRadius: 30,
-    alignItems: 'center',
-    borderWidth: 2,
-    backgroundColor: 'transparent',
-    marginTop: 12,
+  actionButtonDisabled: {
+    opacity: 0.35,
   },
 });

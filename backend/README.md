@@ -75,16 +75,6 @@ npm run build
 npm start
 ```
 
-### 5. Seed Demo Profiles (Optional)
-
-To load 25 AI-ready demo users with photos, quiz answers, and detailed profiles:
-
-```bash
-npm run seed:demo
-```
-
-> Requires a configured PostgreSQL database. If an `OPENAI_API_KEY` is present, personality summaries will be generated automatically; otherwise sensible defaults are stored.
-
 ## API Endpoints
 
 ### Authentication
@@ -176,7 +166,7 @@ backend/
 
 ## Development Notes
 
-- The matching algorithm currently uses database filtering for the demo
+- The matching algorithm currently uses database filtering
 - Match percentages are calculated based on interests and personality trait overlap
 - Premium features are defined but payment integration is not implemented yet
 - All timestamps use UTC

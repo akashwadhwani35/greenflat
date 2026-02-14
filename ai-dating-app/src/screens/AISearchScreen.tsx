@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,22 +9,24 @@ import {
   StatusBar,
   KeyboardAvoidingView,
   Animated,
+  Image,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
-import { Button } from '../components/Button';
-import { PixelFlag } from '../components/PixelFlag';
-
-const AI_CHAT_STORAGE_KEY = '@greenflag_ai_chat_messages';
-const AI_CHAT_QUERY_KEY = '@greenflag_ai_pending_query';
 
 type Message = {
   id: string;
   type: 'user' | 'ai';
   text: string;
   timestamp: Date;
+};
+
+type SearchHistoryItem = {
+  id: string;
+  prompt: string;
+  createdAt: string;
 };
 
 type AISearchScreenProps = {
@@ -40,15 +42,15 @@ type AISearchScreenProps = {
   };
 };
 
-// Keyword chips for quick selection
+const AI_HISTORY_KEY = '@greenflag_ai_prompt_history_v1';
+
 const SEARCH_KEYWORDS = [
   'funny', 'ambitious', 'adventurous', 'creative', 'caring',
-  'intelligent', 'spontaneous', 'romantic', 'loyal', 'confident',
+  'intelligent', 'spontaneous', 'romantic', 'confident',
   'kind', 'outgoing', 'calm', 'passionate', 'honest',
   'family-oriented', 'fitness lover', 'foodie', 'traveler', 'bookworm',
 ];
 
-// Message Bubble Component
 const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   const theme = useTheme();
   const isUser = message.type === 'user';
@@ -57,10 +59,10 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   useEffect(() => {
     Animated.timing(fadeAnim, {
       toValue: 1,
-      duration: 300,
+      duration: 220,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [fadeAnim]);
 
   return (
     <Animated.View
@@ -91,12 +93,11 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   );
 };
 
-// Minimal typing indicator
 const TypingIndicator: React.FC = () => {
   const theme = useTheme();
-  const dot1 = useRef(new Animated.Value(0)).current;
-  const dot2 = useRef(new Animated.Value(0)).current;
-  const dot3 = useRef(new Animated.Value(0)).current;
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
     const animate = (dot: Animated.Value, delay: number) => {
@@ -104,13 +105,13 @@ const TypingIndicator: React.FC = () => {
         Animated.sequence([
           Animated.timing(dot, {
             toValue: 1,
-            duration: 600,
+            duration: 500,
             delay,
             useNativeDriver: true,
           }),
           Animated.timing(dot, {
             toValue: 0.3,
-            duration: 600,
+            duration: 500,
             useNativeDriver: true,
           }),
         ])
@@ -118,9 +119,9 @@ const TypingIndicator: React.FC = () => {
     };
 
     animate(dot1, 0);
-    animate(dot2, 200);
-    animate(dot3, 400);
-  }, []);
+    animate(dot2, 170);
+    animate(dot3, 330);
+  }, [dot1, dot2, dot3]);
 
   return (
     <View style={styles.typingContainer}>
@@ -131,198 +132,274 @@ const TypingIndicator: React.FC = () => {
   );
 };
 
+const normalizeSpaces = (input: string) => input.replace(/\s+/g, ' ').trim();
+
+const hasMeaningfulKeyword = (input: string) => {
+  // Require at least one real word token (2+ letters), not only punctuation/symbols.
+  return /[A-Za-z]{2,}/.test(input);
+};
+
+const OFF_TOPIC_PATTERNS: RegExp[] = [
+  /\b(poem|poetry|shayari)\b/i,
+  /\b(song|lyrics|sing)\b/i,
+  /\b(joke|funny joke|meme)\b/i,
+  /\b(story|short story)\b/i,
+  /\b(quote|caption)\b/i,
+  /\b(code|program|debug)\b/i,
+  /\b(translate|translation)\b/i,
+  /\b(weather|forecast|temperature)\b/i,
+  /\b(news|headline)\b/i,
+  /\b(math|solve|equation)\b/i,
+];
+
+const isOffTopicPrompt = (input: string) => OFF_TOPIC_PATTERNS.some((pattern) => pattern.test(input));
+
+const summarizePrompt = (input: string) => {
+  const cleaned = normalizeSpaces(input);
+  if (cleaned.length <= 90) return cleaned;
+  return `${cleaned.slice(0, 87)}...`;
+};
+
 export const AISearchScreen: React.FC<AISearchScreenProps> = ({
   onBack,
   onApplySearchQuery,
   token,
   apiBaseUrl,
   userName = 'there',
-  userProfile,
 }) => {
   const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
-  const [inputText, setInputText] = useState('I am looking for ');
+  const [inputText, setInputText] = useState('');
   const [isTyping, setIsTyping] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<SearchHistoryItem[]>([]);
+  const [availableKeywords, setAvailableKeywords] = useState<string[]>(SEARCH_KEYWORDS);
   const scrollViewRef = useRef<ScrollView>(null);
-  const [pendingQuery, setPendingQuery] = useState<string | null>(null);
-  const [suggestedPrompts, setSuggestedPrompts] = useState<string[]>([]);
-  const [isLoaded, setIsLoaded] = useState(false);
 
-  // Load persisted messages on mount
   useEffect(() => {
-    const loadPersistedChat = async () => {
+    const loadHistory = async () => {
       try {
-        const [savedMessages, savedQuery] = await Promise.all([
-          AsyncStorage.getItem(AI_CHAT_STORAGE_KEY),
-          AsyncStorage.getItem(AI_CHAT_QUERY_KEY),
-        ]);
-        if (savedMessages) {
-          const parsed = JSON.parse(savedMessages);
-          // Convert timestamp strings back to Date objects
-          const messagesWithDates = parsed.map((m: any) => ({
-            ...m,
-            timestamp: new Date(m.timestamp),
-          }));
-          setMessages(messagesWithDates);
+        const raw = await AsyncStorage.getItem(AI_HISTORY_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as SearchHistoryItem[];
+        if (Array.isArray(parsed)) {
+          setHistory(parsed);
         }
-        if (savedQuery) {
-          setPendingQuery(savedQuery);
-        }
-      } catch (error) {
-        console.warn('Failed to load AI chat history:', error);
-      } finally {
-        setIsLoaded(true);
+      } catch {
+        setHistory([]);
       }
     };
-    loadPersistedChat();
+
+    loadHistory().catch(() => {});
   }, []);
 
-  // Save messages whenever they change
-  useEffect(() => {
-    if (!isLoaded) return; // Don't save until initial load is complete
-    const saveMessages = async () => {
-      try {
-        await AsyncStorage.setItem(AI_CHAT_STORAGE_KEY, JSON.stringify(messages));
-      } catch (error) {
-        console.warn('Failed to save AI chat history:', error);
-      }
-    };
-    saveMessages();
-  }, [messages, isLoaded]);
+  const saveHistory = async (next: SearchHistoryItem[]) => {
+    try {
+      await AsyncStorage.setItem(AI_HISTORY_KEY, JSON.stringify(next));
+    } catch {
+      // Ignore persistence failure in UI flow.
+    }
+  };
 
-  // Save pending query when it changes
-  useEffect(() => {
-    if (!isLoaded) return;
-    const saveQuery = async () => {
-      try {
-        if (pendingQuery) {
-          await AsyncStorage.setItem(AI_CHAT_QUERY_KEY, pendingQuery);
-        } else {
-          await AsyncStorage.removeItem(AI_CHAT_QUERY_KEY);
-        }
-      } catch (error) {
-        console.warn('Failed to save pending query:', error);
-      }
-    };
-    saveQuery();
-  }, [pendingQuery, isLoaded]);
+  const addHistoryItem = (prompt: string) => {
+    const normalized = normalizeSpaces(prompt);
+    if (!normalized) return;
 
-  // Generate personalized greeting based on user profile
-  const getPersonalizedGreeting = () => {
+    setHistory((prev) => {
+      const deduped = prev.filter((item) => item.prompt.toLowerCase() !== normalized.toLowerCase());
+      const next: SearchHistoryItem[] = [
+        {
+          id: `${Date.now()}`,
+          prompt: normalized,
+          createdAt: new Date().toISOString(),
+        },
+        ...deduped,
+      ].slice(0, 40);
+
+      void saveHistory(next);
+      return next;
+    });
+  };
+
+  const resetFreshPage = () => {
+    setMessages([]);
+    setInputText('');
+    setIsTyping(false);
+    setShowHistory(false);
+    setAvailableKeywords(SEARCH_KEYWORDS);
+  };
+
+  const personalizedText = useMemo(() => {
     const firstName = userName.split(' ')[0];
-    const relationshipGoal = userProfile?.relationshipGoal || 'meaningful connections';
 
     return {
       greeting: `Hey ${firstName} 👋`,
       intro: `I'm here to help you find your`,
-      highlight: `GreenFlag`,
-      question: `What qualities matter most to you in a match right now?`,
+      highlight: `match`,
+      question: `Tell me clearly what kind of person you're looking for.`,
     };
+  }, [userName]);
+
+  const handleInvalidPrompt = (trimmed: string) => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-invalid`,
+        type: 'ai',
+        text: "I couldn't understand that search. Please type clearly who you're looking for (for example: kind, happy, adventurous).",
+        timestamp: new Date(),
+      },
+    ]);
+    setIsTyping(false);
+
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 80);
   };
 
-  const personalizedText = getPersonalizedGreeting();
+  const handleOffTopicPrompt = () => {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-offtopic`,
+        type: 'ai',
+        text: "I'm here to help you find the best possible match. Tell me what you're looking for in a partner.",
+        timestamp: new Date(),
+      },
+    ]);
+    setIsTyping(false);
 
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim()) return;
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+  };
 
-    const trimmed = text.trim();
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      type: 'user',
-      text: trimmed,
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputText('');
+  const handleValidPrompt = async (trimmed: string, transcript: Message[]) => {
     setIsTyping(true);
-    setPendingQuery(trimmed);
 
-    const fallback = () => {
-      const reply =
-        `Okay, I’m with you.\n\n` +
-        `Quick 2 questions so I don’t miss:\n` +
-        `1) What vibe do you want (calm, playful, ambitious, artsy)?\n` +
-        `2) Any hard filters (age range / city / long-term vs casual)?`;
-      setMessages((prev) => [
-        ...prev,
-        { id: (Date.now() + 1).toString(), type: 'ai', text: reply, timestamp: new Date() },
-      ]);
-      setSuggestedPrompts([
-        'Emotionally mature and consistent — long-term.',
-        'Playful + adventurous, loves travel & hikes.',
-        'Someone calm, kind, and good at communication.',
-      ]);
-      setIsTyping(false);
-    };
-
-    try {
-      if (!token || !apiBaseUrl) {
-        fallback();
-      } else {
-        const body = {
-          messages: [...messages, userMessage].map((m) => ({
-            role: m.type === 'user' ? 'user' : 'assistant',
-            content: m.text,
-          })),
-        };
-        const resp = await fetch(`${apiBaseUrl}/ai/sidekick`, {
+    if (token && apiBaseUrl) {
+      try {
+        const response = await fetch(`${apiBaseUrl}/ai/sidekick`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify({
+            messages: transcript.map((msg) => ({
+              role: msg.type === 'user' ? 'user' : 'assistant',
+              content: msg.text,
+            })),
+          }),
         });
-
-        if (!resp.ok) {
-          fallback();
-          return;
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(body.error || 'Unable to process AI search');
         }
 
-        const data = await resp.json();
-        const reply = typeof data.reply === 'string' ? data.reply : null;
-        const inferred = typeof data.inferred_search_query === 'string' ? data.inferred_search_query : null;
-        const shouldRefresh = Boolean(data.should_refresh);
-        const suggestions = Array.isArray(data.suggested_prompts)
-          ? data.suggested_prompts.filter((p: any) => typeof p === 'string')
-          : [];
+        const aiReply = typeof body.reply === 'string' ? body.reply : `Got it. Looking for ${summarizePrompt(trimmed)}.`;
+        setMessages((prev) => [
+          ...prev,
+          { id: `${Date.now()}-valid`, type: 'ai', text: aiReply, timestamp: new Date() },
+        ]);
 
-        setSuggestedPrompts(suggestions.slice(0, 6));
-        if (reply) {
-          setMessages((prev) => [
-            ...prev,
-            { id: (Date.now() + 1).toString(), type: 'ai', text: reply, timestamp: new Date() },
-          ]);
+        if (Array.isArray(body.suggested_prompts) && body.suggested_prompts.length > 0) {
+          setAvailableKeywords(body.suggested_prompts.slice(0, 12));
         }
-        if (inferred) setPendingQuery(inferred);
-        if (shouldRefresh && inferred) {
-          // Nudge user with the CTA; user still taps "Show my AI matches" to apply.
-          setPendingQuery(inferred);
+
+        if (body.should_refresh && typeof body.inferred_search_query === 'string' && body.inferred_search_query.trim().length > 0) {
+          const query = body.inferred_search_query.trim();
+          addHistoryItem(query);
+          onApplySearchQuery?.(query);
+          resetFreshPage();
+        } else {
+          addHistoryItem(trimmed);
         }
+      } catch (error: any) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `${Date.now()}-valid`,
+            type: 'ai',
+            text: error?.message || 'I hit a snag. Try rephrasing what you want in a partner.',
+            timestamp: new Date(),
+          },
+        ]);
+      } finally {
         setIsTyping(false);
       }
-    } catch {
-      fallback();
+      return;
     }
+
+    const summary = summarizePrompt(trimmed);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-valid`,
+        type: 'ai',
+        text: `Gotcha, you're looking for ${summary}.\n\nI can run this once your account is connected.`,
+        timestamp: new Date(),
+      },
+    ]);
+    setIsTyping(false);
+    addHistoryItem(trimmed);
+  };
+
+  const handleSendMessage = (text: string) => {
+    const trimmed = normalizeSpaces(text);
+    if (!trimmed) return;
+
+    setShowHistory(false);
+
+    const userMessage: Message = {
+      id: `${Date.now()}-user`,
+      type: 'user',
+      text: trimmed,
+      timestamp: new Date(),
+    };
+
+    const transcript = [...messages, userMessage];
+    setMessages(transcript);
+    setInputText('');
+
+    if (!hasMeaningfulKeyword(trimmed)) {
+      handleInvalidPrompt(trimmed);
+      return;
+    }
+
+    if (isOffTopicPrompt(trimmed)) {
+      handleOffTopicPrompt();
+      return;
+    }
+
+    void handleValidPrompt(trimmed, transcript);
 
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    }, 80);
   };
 
-  // Only show empty state after loading is complete and there are no messages
-  const isEmpty = isLoaded && messages.length === 0;
-  const hasMessages = isLoaded && messages.length > 0;
+  const isEmpty = messages.length === 0;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <StatusBar barStyle="light-content" />
 
-      {/* Minimal Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton} activeOpacity={0.7}>
+        <TouchableOpacity onPress={onBack} style={styles.headerIconButton} activeOpacity={0.7}>
           <Feather name="x" size={24} color={theme.colors.text} />
+        </TouchableOpacity>
+
+        <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
+          {showHistory ? 'History' : 'AI Search'}
+        </Typography>
+
+        <TouchableOpacity
+          onPress={() => setShowHistory((prev) => !prev)}
+          style={styles.headerIconButton}
+          activeOpacity={0.7}
+        >
+          <Feather name="clock" size={22} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
 
@@ -331,181 +408,172 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
       >
-        {/* Messages */}
-        <ScrollView
-          ref={scrollViewRef}
-          contentContainerStyle={[
-            styles.messagesContent,
-            (isEmpty || !isLoaded) && { flexGrow: 1, justifyContent: 'center' },
-          ]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
-        >
-          {!isLoaded ? (
-            <View style={styles.emptyState}>
-              <Typography variant="body" muted align="center">
-                Loading...
-              </Typography>
-            </View>
-          ) : isEmpty ? (
-            <View style={styles.emptyState}>
-              {/* Personalized Greeting */}
-              <View style={styles.greetingContainer}>
-                {/* 3D GF Logo */}
-                <View style={styles.logoContainer}>
-                  <View style={[styles.logoCircle, { backgroundColor: 'rgba(173, 255, 26, 0.1)' }]}>
-                    <PixelFlag size={60} color={theme.colors.neonGreen} />
+        {showHistory ? (
+          <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
+            {history.length === 0 ? (
+              <View style={styles.historyEmptyState}>
+                <Typography variant="body" muted align="center">
+                  No previous prompts yet.
+                </Typography>
+              </View>
+            ) : (
+              history.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={[styles.historyCapsule, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
+                  activeOpacity={0.85}
+                  onPress={() => handleSendMessage(item.prompt)}
+                >
+                  <View style={[styles.historyIconPill, { backgroundColor: theme.colors.successTint }]}>
+                    <Feather name="clock" size={15} color={theme.colors.neonGreen} />
+                  </View>
+                  <View style={{ flex: 1, gap: 4 }}>
+                    <Typography variant="bodyStrong" style={{ color: theme.colors.text }} numberOfLines={1}>
+                      {item.prompt}
+                    </Typography>
+                    <Typography variant="tiny" style={{ color: theme.colors.muted }}>
+                      {new Date(item.createdAt).toLocaleString()}
+                    </Typography>
+                  </View>
+                  <Feather name="chevron-right" size={16} color={theme.colors.muted} />
+                </TouchableOpacity>
+              ))
+            )}
+          </ScrollView>
+        ) : (
+          <>
+            <ScrollView
+              ref={scrollViewRef}
+              contentContainerStyle={[
+                styles.messagesContent,
+                isEmpty && { flexGrow: 1, justifyContent: 'center' },
+              ]}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+            >
+              {isEmpty ? (
+                <View style={styles.emptyState}>
+                  <View style={styles.greetingContainer}>
+                    <View style={styles.logoContainer}>
+                      <Image
+                        source={require('../../assets/3d-gf-logo.png')}
+                        style={styles.logo3d}
+                        resizeMode="contain"
+                      />
+                    </View>
+
+                    <Typography
+                      variant="small"
+                      muted
+                      align="center"
+                      style={{ marginBottom: 12, marginTop: 24 }}
+                    >
+                      {personalizedText.greeting}
+                    </Typography>
+
+                    <Typography
+                      variant="display"
+                      align="center"
+                      style={{ marginBottom: 20 }}
+                    >
+                      {personalizedText.intro}{'\n'}
+                      <Typography
+                        variant="display"
+                        style={{ color: theme.colors.neonGreen }}
+                      >
+                        {personalizedText.highlight}
+                      </Typography>
+                    </Typography>
+
+                    <Typography
+                      variant="body"
+                      muted
+                      align="center"
+                      style={{ paddingHorizontal: 24, marginBottom: 16 }}
+                    >
+                      {personalizedText.question}
+                    </Typography>
+
+                    <View style={styles.hintContainer}>
+                      <Feather name="info" size={14} color={theme.colors.neonGreen} />
+                      <Typography variant="tiny" muted style={{ marginLeft: 6 }}>
+                        Example: "Kind, happy, emotionally mature, long-term, Bangalore"
+                      </Typography>
+                    </View>
                   </View>
                 </View>
+              ) : (
+                <>
+                  {messages.map((msg) => (
+                    <MessageBubble key={msg.id} message={msg} />
+                  ))}
 
-                <Typography
-                  variant="small"
-                  muted
-                  align="center"
-                  style={{ marginBottom: 12, marginTop: 24 }}
+                  {isTyping && (
+                    <View style={[styles.messageRow, styles.aiMessageRow]}>
+                      <View style={[styles.messageBubble, { backgroundColor: 'rgba(255, 255, 255, 0.06)' }]}>
+                        <TypingIndicator />
+                      </View>
+                    </View>
+                  )}
+                </>
+              )}
+            </ScrollView>
+
+            {isEmpty ? (
+              <View style={styles.keywordsSection}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.keywordsContainer}
                 >
-                  {personalizedText.greeting}
-                </Typography>
-                <Typography
-                  variant="display"
-                  align="center"
-                  style={{ marginBottom: 20 }}
-                >
-                  {personalizedText.intro}{'\n'}
-                  <Typography
-                    variant="display"
-                    style={{ color: theme.colors.neonGreen }}
+                  {availableKeywords.map((keyword) => (
+                    <TouchableOpacity
+                      key={keyword}
+                      style={[styles.keywordChip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
+                      onPress={() => {
+                        setAvailableKeywords((prev) => prev.filter((item) => item !== keyword));
+                        setInputText((prev) => {
+                          const trimmed = prev.trim();
+                          if (!trimmed) return keyword;
+                          if (trimmed.endsWith(',')) return `${trimmed} ${keyword}`;
+                          return `${trimmed}, ${keyword}`;
+                        });
+                      }}
+                      activeOpacity={0.7}
+                    >
+                      <Typography variant="small" style={{ color: theme.colors.text }}>
+                        {keyword}
+                      </Typography>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <View style={[styles.inputContainer, { borderTopColor: 'rgba(255, 255, 255, 0.06)' }]}>
+              <View style={[styles.inputWrapper, { backgroundColor: 'rgba(255, 255, 255, 0.06)' }]}>
+                <TextInput
+                  style={[styles.input, { color: theme.colors.text }]}
+                  placeholder="Describe your ideal match clearly..."
+                  placeholderTextColor={theme.colors.muted}
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                  maxLength={500}
+                />
+                {inputText.trim() ? (
+                  <TouchableOpacity
+                    style={[styles.sendButton, { backgroundColor: theme.colors.neonGreen }]}
+                    onPress={() => handleSendMessage(inputText)}
+                    activeOpacity={0.8}
                   >
-                    {personalizedText.highlight}
-                  </Typography>
-                </Typography>
-                <Typography
-                  variant="body"
-                  muted
-                  align="center"
-                  style={{ paddingHorizontal: 24, marginBottom: 16 }}
-                >
-                  {personalizedText.question}
-                </Typography>
-
-                {/* Hint */}
-                <View style={styles.hintContainer}>
-                  <Feather name="info" size={14} color={theme.colors.neonGreen} />
-                  <Typography variant="tiny" muted style={{ marginLeft: 6 }}>
-                    The more you share, the better I can help.
-                  </Typography>
-                </View>
+                    <Feather name="arrow-up" size={20} color={theme.colors.deepBlack} />
+                  </TouchableOpacity>
+                ) : null}
               </View>
             </View>
-          ) : (
-            <>
-              {messages.map((msg) => (
-                <MessageBubble key={msg.id} message={msg} />
-              ))}
-              {isTyping && (
-                <View style={[styles.messageRow, styles.aiMessageRow]}>
-                  <View style={[styles.messageBubble, { backgroundColor: 'rgba(255, 255, 255, 0.06)' }]}>
-                    <TypingIndicator />
-                  </View>
-                </View>
-              )}
-            </>
-          )}
-        </ScrollView>
-
-        {/* Keyword chips + apply CTA */}
-        {!isLoaded ? null : isEmpty ? (
-          <View style={styles.keywordsSection}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.keywordsContainer}
-            >
-              {SEARCH_KEYWORDS.map((keyword) => (
-                <TouchableOpacity
-                  key={keyword}
-                  style={[styles.keywordChip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
-                  onPress={() => {
-                    // Add keyword to input text
-                    setInputText((prev) => {
-                      const trimmed = prev.trim();
-                      if (trimmed.endsWith(',') || trimmed === 'I am looking for') {
-                        return `${trimmed} ${keyword}`;
-                      }
-                      return `${trimmed}, ${keyword}`;
-                    });
-                  }}
-                  activeOpacity={0.7}
-                >
-                  <Typography variant="small" style={{ color: theme.colors.text }}>
-                    {keyword}
-                  </Typography>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        ) : pendingQuery ? (
-          <View style={[styles.applyBar, { borderTopColor: 'rgba(255, 255, 255, 0.06)' }]}>
-            <Button
-              label="Show my AI matches"
-              onPress={() => {
-                onApplySearchQuery?.(pendingQuery);
-                onBack?.();
-              }}
-              fullWidth
-            />
-            {suggestedPrompts.length > 0 ? (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.suggestionChips}
-                style={{ marginTop: 12 }}
-              >
-                {suggestedPrompts.map((p) => (
-                  <TouchableOpacity
-                    key={p}
-                    style={[styles.suggestionChip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
-                    onPress={() => handleSendMessage(p)}
-                    activeOpacity={0.85}
-                  >
-                    <Typography variant="tiny" style={{ color: theme.colors.textDark }}>
-                      {p}
-                    </Typography>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            ) : null}
-            <Typography variant="tiny" muted align="center" style={{ marginTop: 10 }}>
-              Updates your AI Match (on-grid) feed.
-            </Typography>
-          </View>
-        ) : null}
-
-        {/* Input - only show when loaded */}
-        {isLoaded && (
-        <View style={[styles.inputContainer, { borderTopColor: 'rgba(255, 255, 255, 0.06)' }]}>
-          <View style={[styles.inputWrapper, { backgroundColor: 'rgba(255, 255, 255, 0.06)' }]}>
-            <TextInput
-              style={[styles.input, { color: theme.colors.text }]}
-              placeholder="Share what you're looking for..."
-              placeholderTextColor={theme.colors.muted}
-              value={inputText}
-              onChangeText={setInputText}
-              multiline
-              maxLength={500}
-            />
-            {inputText.trim() ? (
-              <TouchableOpacity
-                style={[styles.sendButton, { backgroundColor: theme.colors.neonGreen }]}
-                onPress={() => handleSendMessage(inputText)}
-                activeOpacity={0.8}
-              >
-                <Feather name="arrow-up" size={20} color={theme.colors.deepBlack} />
-              </TouchableOpacity>
-            ) : null}
-          </View>
-        </View>
+          </>
         )}
       </KeyboardAvoidingView>
     </View>
@@ -519,14 +587,40 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 16,
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
-  backButton: {
+  headerIconButton: {
     width: 40,
     height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historyContent: {
+    paddingHorizontal: 16,
+    paddingBottom: 120,
+    gap: 12,
+  },
+  historyEmptyState: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 240,
+  },
+  historyCapsule: {
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  historyIconPill: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -544,23 +638,23 @@ const styles = StyleSheet.create({
   greetingContainer: {
     alignItems: 'center',
     marginBottom: 8,
+    paddingTop: 20,
   },
   logoContainer: {
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 16,
   },
-  logoCircle: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
+  logo3d: {
+    width: 140,
+    height: 140,
   },
   hintContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 8,
+    paddingHorizontal: 12,
   },
   keywordsSection: {
     paddingVertical: 12,
@@ -607,22 +701,6 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 12,
     borderTopWidth: 1,
-  },
-  applyBar: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
-    borderTopWidth: 1,
-  },
-  suggestionChips: {
-    gap: 10,
-    paddingRight: 10,
-  },
-  suggestionChip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
   },
   inputWrapper: {
     flexDirection: 'row',

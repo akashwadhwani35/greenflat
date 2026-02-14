@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, Image, ActivityIndicator } from 'react-native';
+import { ScrollView, StyleSheet, View, Image, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { PageHeader } from '../components/PageHeader';
 
 type Props = {
   onBack: () => void;
   token: string;
   apiBaseUrl: string;
+  onOpenConversation?: (matchId: number, matchName: string, targetUserId: number) => void;
 };
 
-export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }) => {
+export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onOpenConversation }) => {
   const theme = useTheme();
   const [matches, setMatches] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -31,10 +33,8 @@ export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }
         const data = await response.json();
         setMatches(data.matches || []);
       } catch (err: any) {
-        setError(err.message || 'Unable to load matches, showing demo.');
-        setMatches([
-          { name: 'Demo Match', bio: 'Mindful travel, tea rituals', matched_at: new Date().toISOString(), primary_photo: null, city: 'Bengaluru' },
-        ]);
+        setError(err.message || 'Unable to load matches.');
+        setMatches([]);
       } finally {
         setLoading(false);
       }
@@ -45,12 +45,7 @@ export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Matches</Typography>
-      </View>
+      <PageHeader title="Matches" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading ? <ActivityIndicator color={theme.colors.brand} /> : null}
@@ -60,7 +55,12 @@ export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }
           </Typography>
         ) : null}
         {matches.map((item, index) => (
-          <View key={index} style={[styles.row, { borderColor: theme.colors.border }]}>
+          <TouchableOpacity
+            key={index}
+            style={[styles.row, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}
+            onPress={() => onOpenConversation?.(item.match_id, item.name, item.user_id)}
+            activeOpacity={0.8}
+          >
             <Image source={item.primary_photo ? { uri: item.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />
             <View style={{ flex: 1, gap: 4 }}>
               <Typography variant="bodyStrong">{item.name}</Typography>
@@ -72,7 +72,7 @@ export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }
               </Typography>
             </View>
             <Feather name="message-circle" size={18} color={theme.colors.brand} />
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
     </View>
@@ -81,22 +81,6 @@ export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F2F2F2',
-  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 120,

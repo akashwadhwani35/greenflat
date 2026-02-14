@@ -13,7 +13,6 @@ import {
   TextInput,
   Image,
   TouchableOpacity,
-  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -29,6 +28,7 @@ import { useTheme } from '../theme/ThemeProvider';
 
 type OnboardingScreenProps = {
   onComplete: (result: { token: string; name: string; userId?: number }) => void;
+  onBack?: () => void;
   apiBaseUrl: string;
 };
 
@@ -47,7 +47,7 @@ const slides: Slide[] = [
   { key: 'physical', title: 'A bit about your look', subtitle: 'Height and body type (optional).' },
   { key: 'lifestyle', title: 'Your lifestyle', subtitle: 'Habits that matter to you.' },
   { key: 'personality', title: 'Show your personality', subtitle: 'Interests and a quick quiz.' },
-  { key: 'prompts', title: 'Tell your story', subtitle: 'Answer prompts to stand out.' },
+  { key: 'prompts', title: 'Tell us about yourself', subtitle: 'This helps our AI understand you and find your best match.' },
   { key: 'photos', title: 'Add your photos', subtitle: 'Show the real you.' },
   { key: 'contact', title: 'Secure your profile', subtitle: 'Email or phone + verification.' },
 ];
@@ -56,6 +56,7 @@ const identityOptions = ['She / Her', 'He / Him', 'They / Them', 'Another label'
 const lookingForOptions = ['Friendship', 'Dating', 'Long-term', 'Exploring'];
 const bodyTypeOptions = ['Slim', 'Athletic', 'Average', 'Curvy', 'Muscular', 'Plus-size'];
 const drinkerOptions = ['Never', 'Social', 'Regular'];
+const smokerOptions = ['Never', 'Social', 'Regular'];
 const dietOptions = ['Omnivore', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', 'Other'];
 const fitnessOptions = ['Not active', 'Lightly active', 'Active', 'Very active'];
 const interestOptions = ['Travel', 'Fitness', 'Music', 'Art', 'Cooking', 'Gaming', 'Reading', 'Sports', 'Movies', 'Technology', 'Photography', 'Dancing'];
@@ -71,7 +72,7 @@ const personalityQuestions = [
   { q: 'I handle conflict by:', a: 'Addressing it immediately', b: 'Taking time to process', c: 'Compromising', d: 'Avoiding when possible' },
 ];
 
-export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, apiBaseUrl }) => {
+export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, onBack, apiBaseUrl }) => {
   const theme = useTheme();
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -100,7 +101,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     bodyType: '',
 
     // Lifestyle
-    smoker: false,
+    smoker: 'Never' as 'Never' | 'Social' | 'Regular',
     drinker: 'Social' as 'Never' | 'Social' | 'Regular',
     diet: '',
     fitnessLevel: '',
@@ -123,6 +124,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     contactValue: '',
     contactType: 'email' as 'email' | 'phone',
     otp: '',
+    password: '',
+    confirmPassword: '',
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -199,7 +202,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         } else if (form.contactType === 'phone' && !isValidPhone(form.contactValue)) {
           nextErrors.contact = 'Add phone with country code.';
         }
-        if (form.otp.length !== 4) nextErrors.otp = 'Enter the 4-digit code.';
+        if (form.password.length < 8) {
+          nextErrors.password = 'Password must be at least 8 characters.';
+        }
+        if (form.confirmPassword !== form.password) {
+          nextErrors.confirmPassword = 'Passwords do not match.';
+        }
         break;
       default:
         break;
@@ -227,7 +235,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     const email = resolveEmail();
     const gender = mapIdentityToGender(form.identity || '');
     const interested_in = gender === 'female' ? 'male' : gender === 'male' ? 'female' : 'both';
-    const password = 'GreenFlag!123';
+    const password = form.password;
 
     const signupResponse = await fetch(`${apiBaseUrl}/auth/signup`, {
       method: 'POST',
@@ -284,7 +292,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       prompt1: form.prompt1 || null,
       prompt2: form.prompt2 || null,
       prompt3: form.prompt3 || null,
-      smoker: form.smoker,
+      smoker: form.smoker.toLowerCase(),
       drinker: form.drinker.toLowerCase(),
       diet: form.diet || 'balanced',
       fitness_level: form.fitnessLevel || 'active',
@@ -296,7 +304,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       open_minded: true,
       career_focused: true,
       self_summary: form.bio,
-      ideal_partner_prompt: form.prompt1 || 'Kind, curious, and communicates well.',
+      ideal_partner_prompt: form.prompt1 || form.bio || 'Kind, curious, and communicates well.',
       connection_preferences: form.vibe || 'Open to meaningful connections',
       dealbreakers: 'Poor communication and unkindness.',
       growth_journey: 'Investing in emotional fitness and healthy routines.',
@@ -363,7 +371,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   };
 
   const handleBack = () => {
-    if (step === 0) return;
+    if (step === 0) {
+      onBack?.();
+      return;
+    }
     setStep((prev) => prev - 1);
   };
 
@@ -799,15 +810,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
               <View style={{ gap: 20 }}>
                 <View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Typography variant="body" style={{ color: theme.colors.text }}>Smoker</Typography>
-                    <TouchableOpacity
-                      onPress={() => setForm((prev) => ({ ...prev, smoker: !prev.smoker }))}
-                      style={[styles.toggle, { backgroundColor: form.smoker ? theme.colors.neonGreen : theme.colors.border }]}
-                    >
-                      <View style={[styles.toggleThumb, { transform: [{ translateX: form.smoker ? 20 : 0 }] }]} />
-                    </TouchableOpacity>
-                  </View>
+                  <Typography variant="small" style={{ color: theme.colors.muted }}>Smoking habits</Typography>
+                  {renderChipRow(smokerOptions, [form.smoker], (option) =>
+                    setForm((prev) => ({ ...prev, smoker: option as 'Never' | 'Social' | 'Regular' }))
+                  , false)}
                 </View>
 
                 <View>
@@ -885,54 +891,60 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <View style={{ marginBottom: 0 }}>
-                <UnderlineInput
-                  placeholder="Write a short bio about yourself"
-                  value={form.bio}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, bio: text }))}
-                  multiline
-                  error={errors.bio}
-                />
-              </View>
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, marginBottom: 16, fontStyle: 'italic' }}>
-                e.g., "Adventure seeker who loves trying new restaurants. Dog mom. Always up for a road trip."
+              <Typography variant="body" style={{ color: theme.colors.muted }}>
+                Tell us about yourself so AI can find your best match.
               </Typography>
+              <TextInput
+                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
+                placeholder="Write a short bio about yourself..."
+                placeholderTextColor={theme.colors.muted}
+                value={form.bio}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, bio: text }))}
+                multiline
+                numberOfLines={6}
+                textAlignVertical="top"
+                maxLength={500}
+              />
+              <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'right' }}>
+                {form.bio.length}/500
+              </Typography>
+              {errors.bio ? <Typography variant="small" tone="error">{errors.bio}</Typography> : null}
 
-              <View style={{ marginBottom: 0 }}>
-                <UnderlineInput
-                  placeholder="Prompt 1: My ideal date is..."
-                  value={form.prompt1}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, prompt1: text }))}
-                  multiline
-                />
-              </View>
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, marginBottom: 16, fontStyle: 'italic' }}>
-                e.g., "Exploring a farmers market, then cooking together at home with wine and music"
-              </Typography>
+              <TextInput
+                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
+                placeholder="Prompt 1: My ideal date is..."
+                placeholderTextColor={theme.colors.muted}
+                value={form.prompt1}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, prompt1: text }))}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                maxLength={240}
+              />
 
-              <View style={{ marginBottom: 0 }}>
-                <UnderlineInput
-                  placeholder="Prompt 2: I'm known for..."
-                  value={form.prompt2}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, prompt2: text }))}
-                  multiline
-                />
-              </View>
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, marginBottom: 16, fontStyle: 'italic' }}>
-                e.g., "Making people laugh with my terrible puns and always being the friend who plans the trips"
-              </Typography>
+              <TextInput
+                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
+                placeholder="Prompt 2: I'm known for..."
+                placeholderTextColor={theme.colors.muted}
+                value={form.prompt2}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, prompt2: text }))}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                maxLength={240}
+              />
 
-              <View style={{ marginBottom: 0 }}>
-                <UnderlineInput
-                  placeholder="Prompt 3: My perfect weekend..."
-                  value={form.prompt3}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, prompt3: text }))}
-                  multiline
-                />
-              </View>
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: -18, fontStyle: 'italic' }}>
-                e.g., "Saturday morning hike, brunch with friends, and binge-watching a new series on Sunday"
-              </Typography>
+              <TextInput
+                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
+                placeholder="Prompt 3: My perfect weekend..."
+                placeholderTextColor={theme.colors.muted}
+                value={form.prompt3}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, prompt3: text }))}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+                maxLength={240}
+              />
             </View>
           </View>
         );
@@ -983,74 +995,36 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               </View>
 
               {/* Contact Input */}
+                <UnderlineInput
+                  placeholder={form.contactType === 'email' ? 'you@example.com' : '+1 234 567 8900'}
+                  keyboardType={form.contactType === 'email' ? 'email-address' : 'phone-pad'}
+                  value={form.contactValue}
+                  onChangeText={(text) => setForm((prev) => ({ ...prev, contactValue: text }))}
+                  error={errors.contact}
+                  style={{ marginTop: 16 }}
+                />
+
               <UnderlineInput
-                placeholder={form.contactType === 'email' ? 'you@example.com' : '+1 234 567 8900'}
-                keyboardType={form.contactType === 'email' ? 'email-address' : 'phone-pad'}
-                value={form.contactValue}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, contactValue: text }))}
-                error={errors.contact}
-                style={{ marginTop: 16 }}
+                placeholder="Create password"
+                value={form.password}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, password: text }))}
+                secureTextEntry
+                error={errors.password}
+                style={{ marginTop: 12 }}
               />
 
-              {/* Send OTP Button */}
-              {form.contactValue.trim() && !form.otp && (
-                <TouchableOpacity
-                  style={[styles.sendOtpButton, {
-                    backgroundColor: loading ? theme.colors.surfaceLight : theme.colors.neonGreen,
-                    opacity: loading ? 0.7 : 1
-                  }]}
-                  onPress={async () => {
-                    if (form.contactType === 'email' && !isValidEmail(form.contactValue)) {
-                      setErrors((prev) => ({ ...prev, contact: 'Enter a valid email' }));
-                      return;
-                    }
-                    if (form.contactType === 'phone' && !isValidPhone(form.contactValue)) {
-                      setErrors((prev) => ({ ...prev, contact: 'Enter a valid phone with country code' }));
-                      return;
-                    }
-                    setLoading(true);
-                    setErrors((prev) => ({ ...prev, contact: '', otp: '' }));
-                    try {
-                      // For now, just generate a demo OTP (later will call backend)
-                      const demoOtp = Math.floor(1000 + Math.random() * 9000).toString();
-                      Alert.alert(
-                        'Verification Code',
-                        `Your code is: ${demoOtp}\n\n(In production, this will be sent via ${form.contactType})`,
-                        [{ text: 'OK' }]
-                      );
-                      console.log('Demo OTP:', demoOtp);
-                      // Store demo OTP in state for verification
-                      setForm((prev) => ({ ...prev, otp: demoOtp }));
-                      setTimeout(() => setForm((prev) => ({ ...prev, otp: '' })), 100);
-                    } catch (error: any) {
-                      Alert.alert('Error', error.message || 'Failed to send code');
-                    } finally {
-                      setLoading(false);
-                    }
-                  }}
-                  disabled={loading}
-                >
-                  <Feather name="send" size={18} color={theme.colors.deepBlack} />
-                  <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack, marginLeft: 8 }}>
-                    {loading ? 'Sending...' : 'Send Code'}
-                  </Typography>
-                </TouchableOpacity>
-              )}
+              <UnderlineInput
+                placeholder="Confirm password"
+                value={form.confirmPassword}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, confirmPassword: text }))}
+                secureTextEntry
+                error={errors.confirmPassword}
+                style={{ marginTop: 12 }}
+              />
 
-              {/* OTP Input - shows after sending code */}
-              <View style={{ marginTop: 24 }}>
-                <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 8 }}>
-                  Enter verification code
-                </Typography>
-                <UnderlineInput
-                  placeholder="Enter 4-digit code"
-                  keyboardType="numeric"
-                  value={form.otp}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, otp: text.replace(/[^0-9]/g, '').slice(0, 4) }))}
-                  maxLength={4}
-                  error={errors.otp}
-                />
-              </View>
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>
+                You can complete phone OTP and selfie verification in Verification after signup.
+              </Typography>
             </View>
           </View>
         );
@@ -1075,58 +1049,61 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   return (
     <View style={[styles.wrapper, { backgroundColor: theme.colors.background }]}>
       <StatusBar barStyle="light-content" />
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity
-              onPress={handleBack}
-              style={styles.backButton}
-              disabled={step === 0}
-            >
-              <Feather name="chevron-left" size={28} color={theme.colors.neonGreen} />
-            </TouchableOpacity>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity
+            onPress={handleBack}
+            style={[
+              styles.backButton,
+              { borderColor: theme.colors.neonGreen }
+            ]}
+            disabled={step === 0 && !onBack}
+          >
+            <Feather name="chevron-left" size={28} color={theme.colors.neonGreen} />
+          </TouchableOpacity>
 
-            <View style={styles.progressInfo}>
-              <Typography variant="small" style={{ color: theme.colors.muted }}>
-                Step {step + 1} of {slides.length}
-              </Typography>
-              <View style={[styles.progressBar, { backgroundColor: theme.colors.border }]}>
-                <View style={[styles.progressFill, { width: `${progress * 100}%`, backgroundColor: theme.colors.neonGreen }]} />
-              </View>
+          <View style={styles.progressInfo}>
+            <Typography variant="small" style={{ color: theme.colors.muted }}>
+              Step {step + 1} of {slides.length}
+            </Typography>
+            <View style={[styles.progressBar, { backgroundColor: theme.colors.border }]}>
+              <View style={[styles.progressFill, { width: `${progress * 100}%`, backgroundColor: theme.colors.neonGreen }]} />
             </View>
           </View>
-
-          {/* Content */}
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            style={styles.stage}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-          >
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
-            >
-              <Animated.View style={[styles.contentColumn, animatedContentStyle]}>
-                <View style={styles.titleSection}>
-                  <Typography variant="display" style={{ color: theme.colors.text }}>
-                    {slides[step].title}
-                  </Typography>
-                  {slides[step].subtitle ? (
-                    <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 8 }}>
-                      {slides[step].subtitle}
-                    </Typography>
-                  ) : null}
-                </View>
-
-                <View style={styles.formSection}>{renderSlide()}</View>
-              </Animated.View>
-            </ScrollView>
-          </KeyboardAvoidingView>
         </View>
-      </TouchableWithoutFeedback>
+
+        {/* Content */}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.stage}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        >
+          <ScrollView
+            style={styles.scrollView}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="always"
+            keyboardDismissMode="on-drag"
+            nestedScrollEnabled
+          >
+            <Animated.View style={[styles.contentColumn, animatedContentStyle]}>
+              <View style={styles.titleSection}>
+                <Typography variant="display" style={{ color: theme.colors.text }}>
+                  {slides[step].title}
+                </Typography>
+                {slides[step].subtitle ? (
+                  <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 8 }}>
+                    {slides[step].subtitle}
+                  </Typography>
+                ) : null}
+              </View>
+
+              <View style={styles.formSection}>{renderSlide()}</View>
+            </Animated.View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
 
       {/* Footer */}
       <View style={[styles.footer, { backgroundColor: theme.colors.background }]}>
@@ -1245,6 +1222,15 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     borderWidth: 1.5,
+  },
+  bioCardInput: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    fontSize: 16,
+    minHeight: 150,
+    fontFamily: 'RedHatDisplay_400Regular',
+    marginTop: 10,
   },
   photoGrid: {
     flexDirection: 'row',

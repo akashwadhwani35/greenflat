@@ -45,7 +45,7 @@ export const signup = async (req: Request, res: Response) => {
     const userResult = await client.query(
       `INSERT INTO users (email, password_hash, name, gender, interested_in, date_of_birth, city, cooldown_enabled)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, email, name, gender, interested_in, city, is_verified, is_premium, cooldown_enabled, created_at`,
+       RETURNING id, email, name, gender, interested_in, city, is_verified, is_premium, credit_balance, cooldown_enabled, created_at`,
       [email, password_hash, name, gender, interested_in, date_of_birth, city, cooldown_enabled]
     );
 
@@ -55,6 +55,21 @@ export const signup = async (req: Request, res: Response) => {
     await client.query(
       `INSERT INTO user_activity_limits (user_id)
        VALUES ($1)`,
+      [user.id]
+    );
+
+    await client.query(
+      `INSERT INTO user_privacy_settings (user_id, hide_distance, hide_city, incognito_mode, show_online_status)
+       VALUES ($1, FALSE, FALSE, FALSE, TRUE)
+       ON CONFLICT (user_id) DO NOTHING`,
+      [user.id]
+    );
+
+    await client.query(
+      `INSERT INTO user_notification_preferences (
+         user_id, likes, matches, messages, daily_picks, product_updates
+       ) VALUES ($1, TRUE, TRUE, TRUE, TRUE, TRUE)
+       ON CONFLICT (user_id) DO NOTHING`,
       [user.id]
     );
 
@@ -78,6 +93,7 @@ export const signup = async (req: Request, res: Response) => {
         city: user.city,
         is_verified: user.is_verified,
         is_premium: user.is_premium,
+        credit_balance: Number(user.credit_balance || 0),
         cooldown_enabled: user.cooldown_enabled,
       },
       token,
@@ -136,6 +152,7 @@ export const login = async (req: Request, res: Response) => {
         city: user.city,
         is_verified: user.is_verified,
         is_premium: user.is_premium,
+        credit_balance: Number(user.credit_balance || 0),
         cooldown_enabled: user.cooldown_enabled,
       },
       token,

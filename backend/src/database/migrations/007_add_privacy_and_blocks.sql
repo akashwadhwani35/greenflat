@@ -1,0 +1,27 @@
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS hide_distance BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS hide_city BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS incognito_mode BOOLEAN DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS show_online_status BOOLEAN DEFAULT TRUE;
+
+CREATE TABLE IF NOT EXISTS user_privacy_settings (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  hide_distance BOOLEAN DEFAULT FALSE,
+  hide_city BOOLEAN DEFAULT FALSE,
+  incognito_mode BOOLEAN DEFAULT FALSE,
+  show_online_status BOOLEAN DEFAULT TRUE,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS blocks (
+  id SERIAL PRIMARY KEY,
+  blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE (blocker_id, blocked_id),
+  CHECK (blocker_id <> blocked_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocks_blocker_id ON blocks(blocker_id);
+CREATE INDEX IF NOT EXISTS idx_blocks_blocked_id ON blocks(blocked_id);

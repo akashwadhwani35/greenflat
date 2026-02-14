@@ -2,6 +2,43 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { notifyNewMessage } from '../services/push.service';
+import { DAILY_LIMITS, LIKE_RESET_HOURS } from '../utils/constants';
+import { normalizeMediaMessageUrl, normalizeTextMessage } from '../services/media.service';
+
+const checkAndResetLimits = async (userId: number, client: any) => {
+  const result = await client.query(
+    'SELECT * FROM user_activity_limits WHERE user_id = $1 FOR UPDATE',
+    [userId]
+  );
+
+  if (result.rows.length === 0) {
+    await client.query(
+      'INSERT INTO user_activity_limits (user_id) VALUES ($1)',
+      [userId]
+    );
+    return { messages_started_count: 0 };
+  }
+
+  const limits = result.rows[0];
+  const lastReset = new Date(limits.last_reset_at);
+  const now = new Date();
+  const hoursSinceReset = (now.getTime() - lastReset.getTime()) / (1000 * 60 * 60);
+
+  if (hoursSinceReset >= LIKE_RESET_HOURS) {
+    await client.query(
+      `UPDATE user_activity_limits
+       SET on_grid_likes_count = 0,
+           off_grid_likes_count = 0,
+           messages_started_count = 0,
+           last_reset_at = NOW()
+       WHERE user_id = $1`,
+      [userId]
+    );
+    return { messages_started_count: 0 };
+  }
+
+  return limits;
+};
 
 /**
  * Send a message to a matched user
@@ -11,13 +48,52 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
 
   try {
     const userId = req.userId!;
-    const { match_id, content, message_type = 'text' } = req.body;
+    const { match_id, content, message_type = 'text' } = req.body as {
+      match_id?: number;
+      content?: unknown;
+      message_type?: 'text' | 'image' | 'voice';
+    };
 
     if (!match_id || !content) {
       return res.status(400).json({ error: 'Match ID and content are required' });
     }
 
+    if (!['text', 'image', 'voice'].includes(message_type)) {
+      return res.status(400).json({ error: 'Invalid message_type' });
+    }
+
+    let normalizedContent: string;
+    try {
+      normalizedContent =
+        message_type === 'text'
+          ? normalizeTextMessage(content)
+          : normalizeMediaMessageUrl(content);
+    } catch (validationError: any) {
+      return res.status(400).json({ error: validationError?.message || 'Invalid message content' });
+    }
+
     await client.query('BEGIN');
+
+    const senderResult = await client.query(
+      'SELECT gender, is_premium FROM users WHERE id = $1 FOR UPDATE',
+      [userId]
+    );
+    if (senderResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const sender = senderResult.rows[0];
+    const limits = await checkAndResetLimits(userId, client);
+    const dailyLimits = sender.gender === 'male' ? DAILY_LIMITS.male : DAILY_LIMITS.female;
+
+    if (!sender.is_premium && limits.messages_started_count >= dailyLimits.messages_per_day) {
+      await client.query('ROLLBACK');
+      return res.status(429).json({
+        error: 'Daily message limit reached',
+        limit: dailyLimits.messages_per_day,
+        reset_in_hours: LIKE_RESET_HOURS,
+      });
+    }
 
     // Verify the match exists and user is part of it
     const matchResult = await client.query(
@@ -43,7 +119,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
-      [match_id, userId, recipientId, content, message_type]
+      [match_id, userId, recipientId, normalizedContent, message_type]
     );
 
     const message = messageResult.rows[0];
@@ -54,10 +130,21 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       [match_id]
     );
 
+    await client.query(
+      `UPDATE user_activity_limits
+       SET messages_started_count = messages_started_count + 1,
+           updated_at = NOW()
+       WHERE user_id = $1`,
+      [userId]
+    );
+
     await client.query('COMMIT');
 
     // Send push notification to recipient
-    const preview = content.length > 50 ? content.substring(0, 47) + '...' : content;
+    const previewBase = message_type === 'text'
+      ? normalizedContent
+      : (message_type === 'image' ? 'Sent an image' : 'Sent a voice note');
+    const preview = previewBase.length > 50 ? previewBase.substring(0, 47) + '...' : previewBase;
     notifyNewMessage(recipientId, senderName, preview).catch(err =>
       console.error('Failed to send message notification:', err)
     );
@@ -162,6 +249,11 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
          LIMIT 1
        ) last_msg ON true
        WHERE m.user1_id = $1 OR m.user2_id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = other_user.id)
+              OR (b.blocker_id = other_user.id AND b.blocked_id = $1)
+         )
        ORDER BY COALESCE(m.last_message_at, m.matched_at) DESC`,
       [userId]
     );

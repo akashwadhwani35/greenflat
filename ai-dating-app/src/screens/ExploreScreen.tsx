@@ -17,6 +17,8 @@ type ExploreScreenProps = {
   onOpenAdvancedSearch?: () => void;
   filters?: AdvancedFilters;
   preferredTab?: 'onGrid' | 'offGrid';
+  pendingAISearchCharge?: boolean;
+  onConsumeAISearchCharge?: () => void;
 };
 
 export const ExploreScreen: React.FC<ExploreScreenProps> = ({
@@ -27,6 +29,8 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
   onOpenWallet,
   filters,
   preferredTab,
+  pendingAISearchCharge,
+  onConsumeAISearchCharge,
 }) => {
   return (
     <View style={styles.container}>
@@ -38,6 +42,8 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
         onOpenWallet={onOpenWallet}
         filters={filters}
         preferredTab={preferredTab}
+        pendingAISearchCharge={pendingAISearchCharge}
+        onConsumeAISearchCharge={onConsumeAISearchCharge}
       />
     </View>
   );

@@ -37,7 +37,7 @@ export const Chip: React.FC<Props> = ({ label, selected, onPress, tone = 'defaul
 const createStyles = (theme: Theme, selected?: boolean, tone: ChipTone = 'default', compact?: boolean) => {
   const isSelected = Boolean(selected);
   const backgroundColor = isSelected
-    ? theme.colors.primary
+    ? theme.colors.secondaryHighlight
     : tone === 'accent'
     ? theme.colors.accentTint
     : tone === 'success'
@@ -45,7 +45,7 @@ const createStyles = (theme: Theme, selected?: boolean, tone: ChipTone = 'defaul
     : 'transparent';
 
   const borderColor = isSelected
-    ? theme.colors.primary
+    ? theme.colors.secondaryHairline
     : tone === 'accent'
     ? theme.colors.accent
     : tone === 'success'
@@ -53,7 +53,7 @@ const createStyles = (theme: Theme, selected?: boolean, tone: ChipTone = 'defaul
     : theme.colors.border;
 
   const labelColor = isSelected
-    ? theme.colors.surface
+    ? theme.colors.text
     : tone === 'success'
     ? theme.colors.success
     : theme.colors.text;

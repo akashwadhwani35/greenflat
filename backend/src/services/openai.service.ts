@@ -232,17 +232,25 @@ Return only the match reason, nothing else.`;
   }
 };
 
-/**
- * Analyze personality quiz responses and generate insights
- */
-export const analyzePersonality = async (answers: string[]): Promise<{
+export const analyzePersonality = async (
+  answers: string[],
+  aboutYouText: string
+): Promise<{
   summary: string;
   top_traits: string[];
   compatibility_tips: string;
 }> => {
-  const prompt = `Based on these personality quiz answers (A/B/C/D format), provide insights:
+  const prompt = `Based only on the two inputs below, provide personality insights.
 
-Answers: ${answers.join(', ')}
+Input 1: Personality quiz answers (A/B/C/D)
+${answers.join(', ') || 'No quiz answers provided'}
+
+Input 2: "Tell us about yourself" text
+${aboutYouText || 'No text provided'}
+
+Important:
+- Use ONLY these two inputs.
+- Do NOT infer from photos, location, age, interests outside Input 2, or any other profile fields.
 
 Quiz context:
 - A answers → Funny, Playful, Adventurous, Spontaneous

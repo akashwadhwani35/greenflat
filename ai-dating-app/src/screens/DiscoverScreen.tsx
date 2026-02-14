@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, Dimensions, RefreshControl, Animated } from 'react-native';
+import { Alert, View, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, Dimensions, RefreshControl, Animated } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Typography } from '../components/Typography';
@@ -27,6 +27,7 @@ export type MatchCandidate = {
   distance_km?: number;
   is_new?: boolean; // Added in last 24 hours
   created_at?: string;
+  is_on_grid?: boolean;
 };
 
 type DiscoverScreenProps = {
@@ -37,12 +38,14 @@ type DiscoverScreenProps = {
   onOpenWallet?: () => void;
   filters?: AdvancedFilters;
   preferredTab?: 'onGrid' | 'offGrid';
+  pendingAISearchCharge?: boolean;
+  onConsumeAISearchCharge?: () => void;
 };
 
 const fallbackPhotos = [
   require('../../assets/icon.png'),
-  require('../../assets/splash-icon.png'),
-  require('../../assets/adaptive-icon.png'),
+  require('../../assets/icon.png'),
+  require('../../assets/icon.png'),
 ];
 
 // Skeleton Card Component
@@ -84,87 +87,6 @@ const SkeletonCard: React.FC<{ index: number }> = ({ index }) => {
   );
 };
 
-const demoMatches: MatchCandidate[] = [
-  {
-    id: 1001,
-    name: 'Mira',
-    age: 29,
-    city: 'Bengaluru',
-    match_percentage: 92,
-    match_reason: 'Shares your love for mindful adventures',
-    primary_photo: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
-    is_verified: true,
-    is_active: true,
-    distance_km: 3.2,
-    is_new: true,
-    suggested_openers: ['What is your favorite mindful practice?'],
-  },
-  {
-    id: 1002,
-    name: 'Rhea',
-    age: 31,
-    city: 'Pune',
-    match_percentage: 88,
-    match_reason: 'Emotionally fluent storyteller',
-    primary_photo: 'https://images.unsplash.com/photo-1531891437562-4301cf35b7e4?auto=format&fit=crop&w=800&q=80',
-    is_verified: true,
-    is_active: false,
-    distance_km: 8.5,
-    suggested_openers: ['I would love to hear one of your stories'],
-  },
-  {
-    id: 1003,
-    name: 'Nadia',
-    age: 28,
-    city: 'Goa',
-    match_percentage: 86,
-    match_reason: 'Sparks deep conversations',
-    primary_photo: 'https://images.unsplash.com/photo-1518057111178-44a106bad636?auto=format&fit=crop&w=800&q=80',
-    is_verified: false,
-    is_active: true,
-    distance_km: 15.7,
-    is_new: true,
-  },
-  {
-    id: 1004,
-    name: 'Sanaya',
-    age: 30,
-    city: 'Ahmedabad',
-    match_percentage: 84,
-    match_reason: 'Grounded and mindful',
-    primary_photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
-    is_verified: true,
-    is_active: false,
-    distance_km: 5.3,
-    suggested_openers: ['How do you stay grounded in daily life?'],
-  },
-  {
-    id: 1005,
-    name: 'Aditi',
-    age: 27,
-    city: 'Delhi',
-    match_percentage: 82,
-    match_reason: 'Values vulnerability',
-    primary_photo: 'https://images.unsplash.com/photo-1452570053594-1b985d6ea890?auto=format&fit=crop&w=800&q=80',
-    is_verified: false,
-    is_active: true,
-    distance_km: 12.1,
-  },
-  {
-    id: 1006,
-    name: 'Ishaan',
-    age: 33,
-    city: 'Chennai',
-    match_percentage: 80,
-    match_reason: 'Slow-travel filmmaker',
-    primary_photo: 'https://images.unsplash.com/photo-1489424731084-a5d8b219a5bb?auto=format&fit=crop&w=800&q=80',
-    is_verified: true,
-    is_active: true,
-    distance_km: 7.9,
-    suggested_openers: ['What is your most memorable film project?'],
-  },
-];
-
 export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   token,
   apiBaseUrl,
@@ -173,17 +95,21 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   onOpenWallet,
   filters,
   preferredTab,
+  pendingAISearchCharge = false,
+  onConsumeAISearchCharge,
 }) => {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState<'onGrid' | 'offGrid'>('onGrid');
-  const [matches, setMatches] = useState<MatchCandidate[]>(demoMatches);
+  const [matches, setMatches] = useState<MatchCandidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [walletBalance, setWalletBalance] = useState(50); // Demo balance
+  const [walletBalance, setWalletBalance] = useState(0);
   const [viewedProfileIds, setViewedProfileIds] = useState<number[]>([]); // Track viewed profiles
-  const [showRewindButton, setShowRewindButton] = useState(false); // Show rewind for premium
+  const [offGridHistory, setOffGridHistory] = useState<MatchCandidate[][]>([]);
+  const [isPremium, setIsPremium] = useState(false);
 
   const fetchNewOffGridProfiles = useCallback(async () => {
+    setLoading(true);
     setRefreshing(true);
     try {
       // Fetch new off-grid profiles excluding already viewed ones
@@ -202,7 +128,10 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
       if (response.ok) {
         const data = await response.json();
-        const newProfiles = data.matches || [];
+        const newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
+        if (matches.length > 0) {
+          setOffGridHistory((prev) => [...prev.slice(-9), matches]);
+        }
         setMatches(newProfiles);
         // Track the new profile IDs
         setViewedProfileIds(prev => [...prev, ...newProfiles.map((m: MatchCandidate) => m.id)]);
@@ -210,9 +139,10 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     } catch (error) {
       console.error('Failed to fetch new off-grid profiles:', error);
     } finally {
+      setLoading(false);
       setRefreshing(false);
     }
-  }, [apiBaseUrl, token, viewedProfileIds]);
+  }, [apiBaseUrl, token, viewedProfileIds, matches]);
 
   const buildBackendFilters = useCallback(() => {
     const parsed: Record<string, any> = {};
@@ -236,7 +166,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   }, [filters]);
 
   const fetchOnGridMatches = useCallback(async () => {
+    setLoading(true);
     setRefreshing(true);
+    let reachedServer = false;
     try {
       const response = await fetch(`${apiBaseUrl}/matches/search`, {
         method: 'POST',
@@ -247,22 +179,47 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         body: JSON.stringify({
           is_on_grid: true,
           search_query: filters?.keywords?.trim() || '',
+          charge_credits: pendingAISearchCharge,
           filters: buildBackendFilters(),
           limit: 12,
         }),
       });
+      reachedServer = true;
 
       if (response.ok) {
         const data = await response.json();
-        const newProfiles = data.matches || [];
+        const newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: true }));
         setMatches(newProfiles);
+      } else {
+        const body = await response.json().catch(() => ({}));
+        if (response.status === 402) {
+          Alert.alert('Not enough credits', body.error || 'AI Search costs 1 credit.');
+        }
       }
     } catch (error) {
       console.error('Failed to fetch on-grid profiles:', error);
     } finally {
+      if (pendingAISearchCharge && reachedServer) {
+        onConsumeAISearchCharge?.();
+      }
+      setLoading(false);
       setRefreshing(false);
     }
-  }, [apiBaseUrl, token, filters?.keywords, buildBackendFilters]);
+  }, [apiBaseUrl, token, filters?.keywords, buildBackendFilters, pendingAISearchCharge, onConsumeAISearchCharge]);
+
+  const fetchWalletBalance = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/likes/remaining`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setWalletBalance(Number(data.credit_balance || 0));
+      setIsPremium(Boolean(data.is_premium));
+    } catch {
+      // Ignore wallet fetch errors in feed UI.
+    }
+  }, [apiBaseUrl, token]);
 
   const onRefresh = useCallback(() => {
     if (activeTab === 'offGrid') {
@@ -283,15 +240,30 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   useEffect(() => {
     if (activeTab === 'onGrid') {
       fetchOnGridMatches();
+    } else {
+      fetchNewOffGridProfiles();
     }
-  }, [activeTab, fetchOnGridMatches]);
+    // Intentionally trigger on tab changes only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  useEffect(() => {
+    fetchWalletBalance();
+  }, [fetchWalletBalance]);
 
   const handleRewind = useCallback(() => {
-    // Premium feature: go back to previous profile
-    // TODO: Check if user has premium subscription
-    // TODO: Implement rewind logic
-    alert('🔄 Rewind Feature\n\nThis is a premium feature. Upgrade to rewind and see profiles you passed!');
-  }, []);
+    if (!isPremium) {
+      Alert.alert('Premium required', 'Rewind is available on paid plans only.');
+      return;
+    }
+    if (offGridHistory.length === 0) {
+      Alert.alert('Nothing to rewind', 'No previous off-grid set available.');
+      return;
+    }
+    const previous = offGridHistory[offGridHistory.length - 1];
+    setOffGridHistory((prev) => prev.slice(0, -1));
+    setMatches(previous);
+  }, [isPremium, offGridHistory]);
 
   const getMatchColor = (percentage: number) => {
     if (percentage >= 90) return theme.colors.neonGreen;
@@ -346,12 +318,14 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
           {/* Top badges row */}
           <View style={styles.topBadgesRow}>
-            {/* Match percentage badge */}
-            <View style={[styles.matchBadge, { backgroundColor: matchColor }]}>
-              <Typography variant="tiny" style={[styles.matchBadgeText, { color: theme.colors.deepBlack }]}>
-                {match.match_percentage}%
-              </Typography>
-            </View>
+            {/* Show match percentage only on AI Match (on-grid) */}
+            {activeTab === 'onGrid' ? (
+              <View style={[styles.matchBadge, { backgroundColor: matchColor }]}>
+                <Typography variant="tiny" style={[styles.matchBadgeText, { color: theme.colors.deepBlack }]}>
+                  {match.match_percentage}%
+                </Typography>
+              </View>
+            ) : null}
 
             {/* Verified badge */}
             {match.is_verified && (
@@ -442,8 +416,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           {/* Rewind (Premium) - only off-grid */}
           {activeTab === 'offGrid' && (
             <TouchableOpacity
-              style={styles.rewindIconButton}
+              style={[styles.rewindIconButton, !isPremium ? styles.rewindIconDisabled : null]}
               onPress={handleRewind}
+              disabled={!isPremium}
               activeOpacity={0.8}
             >
               <Feather name="rotate-ccw" size={20} color="#FFD700" />
@@ -469,6 +444,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         <TouchableOpacity
           style={[
             styles.tab,
+            styles.tabLeft,
             activeTab === 'onGrid' && [styles.tabActive, { backgroundColor: theme.colors.neonGreen }],
           ]}
           onPress={() => setActiveTab('onGrid')}
@@ -487,6 +463,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         <TouchableOpacity
           style={[
             styles.tab,
+            styles.tabRight,
             activeTab === 'offGrid' && [styles.tabActive, { backgroundColor: theme.colors.neonGreen }],
           ]}
           onPress={() => setActiveTab('offGrid')}
@@ -599,19 +576,27 @@ const styles = StyleSheet.create({
   tabsRow: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingBottom: 24,
-    gap: 12,
+    paddingBottom: 32,
   },
   tab: {
     flex: 1,
     paddingVertical: 14,
     paddingHorizontal: 24,
-    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'transparent',
+  },
+  tabLeft: {
+    borderTopLeftRadius: 24,
+    borderBottomLeftRadius: 24,
+    borderTopRightRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+  tabRight: {
+    borderTopLeftRadius: 0,
+    borderBottomLeftRadius: 0,
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
   },
   tabActive: {
     shadowColor: '#ADFF1A',
@@ -619,7 +604,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
-    borderColor: 'transparent',
   },
   filterButton: {
     width: 48,
@@ -648,6 +632,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFD700',
+  },
+  rewindIconDisabled: {
+    opacity: 0.45,
   },
   scrollContent: {
     paddingHorizontal: 20,

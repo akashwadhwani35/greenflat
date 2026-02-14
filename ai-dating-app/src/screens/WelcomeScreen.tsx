@@ -1,19 +1,23 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View, TouchableOpacity, StatusBar, Platform, Image, Text } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Animated, StyleSheet, View, TouchableOpacity, StatusBar, Platform, Image, Text, Dimensions, Modal, ScrollView } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { useTheme } from '../theme/ThemeProvider';
+import { Typography } from '../components/Typography';
 
 const glassLogo = require('../../assets/glass-logo.png');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const LOGO_SIZE = Math.min(SCREEN_WIDTH * 0.96, 420);
 
 type WelcomeScreenProps = {
   onStart: () => void;
   onLogin?: () => void;
-  onDemoLogin?: () => void;
 };
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, onDemoLogin }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin }) => {
   const theme = useTheme();
   const logoAnim = useRef(new Animated.Value(0)).current;
   const contentAnim = useRef(new Animated.Value(0)).current;
+  const [legalModal, setLegalModal] = useState<null | 'terms' | 'privacy'>(null);
 
   useEffect(() => {
     Animated.sequence([
@@ -68,11 +72,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
             }
           ]}
         >
-          <Image
-            source={glassLogo}
-            style={styles.logo3D}
-            resizeMode="contain"
-          />
+          <View style={styles.logoWrap}>
+            <Image
+              source={glassLogo}
+              style={styles.logo3D}
+              resizeMode="contain"
+            />
+          </View>
         </Animated.View>
 
         {/* Bottom Content */}
@@ -114,14 +120,59 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
           ) : null}
 
           {/* Terms */}
-          <Text style={styles.termsText}>
-            By registering, you accept our{' '}
-            <Text style={styles.termsLink}>Terms and Conditions of Use</Text>
-            {' '}and our{' '}
-            <Text style={styles.termsLink}>Privacy Policy.</Text>
-          </Text>
+          <View style={styles.termsWrap}>
+            <Text style={styles.termsText}>
+              By registering, you accept our{' '}
+              <Text style={styles.termsLink} onPress={() => setLegalModal('terms')}>
+                Terms and Conditions of Use
+              </Text>
+              {' '}and our{' '}
+              <Text style={styles.termsLink} onPress={() => setLegalModal('privacy')}>
+                Privacy Policy.
+              </Text>
+            </Text>
+          </View>
         </Animated.View>
       </View>
+
+      <Modal
+        visible={Boolean(legalModal)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLegalModal(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: theme.colors.surface, borderColor: theme.colors.border }]}>
+            <TouchableOpacity
+              onPress={() => setLegalModal(null)}
+              style={[styles.modalClose, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+              accessibilityRole="button"
+            >
+              <Feather name="x" size={20} color={theme.colors.text} />
+            </TouchableOpacity>
+
+            <Typography variant="h2" style={{ color: theme.colors.text }}>
+              {legalModal === 'privacy' ? 'Privacy Policy' : 'Terms and Conditions of Use'}
+            </Typography>
+
+            <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+              {legalModal === 'privacy' ? (
+                <>
+                  <Text style={styles.modalBodyText}>We respect your privacy and protect your personal data.</Text>
+                  <Text style={styles.modalBodyText}>GreenFlag uses your profile details, preferences, and activity to improve matching and safety.</Text>
+                  <Text style={styles.modalBodyText}>We do not sell personal data. Data is processed to provide app features, moderation, and support.</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.modalBodyText}>By using GreenFlag, you agree to use the app responsibly and respectfully.</Text>
+                  <Text style={styles.modalBodyText}>Do not misuse messaging, impersonate others, or post unlawful or harmful content.</Text>
+                  <Text style={styles.modalBodyText}>Token and credit features, including AI Search and Compliments, are subject to app pricing and limits.</Text>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -144,16 +195,23 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '700',
     color: '#000000',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    fontFamily: 'RedHatDisplay_700Bold',
   },
   logoSection: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    width: '100%',
+  },
+  logoWrap: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logo3D: {
-    width: 280,
-    height: 280,
+    width: LOGO_SIZE,
+    height: LOGO_SIZE,
+    alignSelf: 'center',
   },
   bottomSection: {
     gap: 20,
@@ -168,7 +226,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',
-    fontFamily: Platform.OS === 'ios' ? 'System' : 'sans-serif-medium',
+    fontFamily: 'RedHatDisplay_700Bold',
   },
   primaryButton: {
     backgroundColor: '#000000',
@@ -182,6 +240,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 18,
     fontWeight: '600',
+    fontFamily: 'RedHatDisplay_600SemiBold',
   },
   loginLink: {
     paddingVertical: 8,
@@ -189,10 +248,12 @@ const styles = StyleSheet.create({
   loginText: {
     fontSize: 15,
     color: '#000000',
+    fontFamily: 'RedHatDisplay_400Regular',
   },
   loginTextUnderline: {
     fontWeight: '600',
     textDecorationLine: 'underline',
+    fontFamily: 'RedHatDisplay_600SemiBold',
   },
   termsText: {
     fontSize: 12,
@@ -201,8 +262,50 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     paddingHorizontal: 20,
     opacity: 0.8,
+    fontFamily: 'RedHatDisplay_400Regular',
   },
   termsLink: {
     fontWeight: '600',
+    fontFamily: 'RedHatDisplay_600SemiBold',
+  },
+  termsWrap: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 28,
+  },
+  modalCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    maxHeight: '78%',
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 10,
+  },
+  modalClose: {
+    alignSelf: 'flex-end',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  modalContent: {
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 10,
+  },
+  modalBodyText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 20,
+    fontFamily: 'RedHatDisplay_400Regular',
   },
 });

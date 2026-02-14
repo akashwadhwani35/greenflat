@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
-import { Button } from '../components/Button';
+import { PageHeader } from '../components/PageHeader';
 
 type Props = {
   onBack: () => void;
@@ -38,38 +38,59 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
     fetchProfile().catch(() => {});
   }, [apiBaseUrl, token]);
 
-  const checklist = [
-    { label: 'Photo added', done: (profile?.photos || []).length > 0 },
-    { label: 'Location verified', done: Boolean(profile?.user?.city) },
-    { label: 'Contact secured', done: true },
-  ];
-
   const primaryPhoto = profile?.photos?.find((p: any) => p.is_primary) || profile?.photos?.[0];
   const interests: string[] = profile?.profile?.interests || [];
   const topTraits: string[] = profile?.personality?.top_traits || profile?.personality?.personality_traits || [];
   const about = profile?.profile?.bio || profile?.ai_persona?.self_summary || null;
+  const completionSignals = [
+    (profile?.photos || []).length > 0,
+    Boolean(profile?.user?.city),
+    Boolean(profile?.user?.date_of_birth),
+    Boolean(profile?.user?.gender),
+    Boolean(profile?.profile?.bio),
+    Array.isArray(profile?.profile?.interests) && profile.profile.interests.length > 0,
+    Boolean(profile?.profile?.height),
+    Boolean(profile?.profile?.relationship_goal),
+    profile?.profile?.smoker !== null && profile?.profile?.smoker !== undefined,
+    Boolean(profile?.profile?.drinker),
+  ];
+  const completionPercent = Math.round(
+    (completionSignals.filter(Boolean).length / completionSignals.length) * 100
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={[styles.iconButton, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Your profile</Typography>
-        <View style={{ flex: 1 }} />
-        {onEditProfile ? (
+      <PageHeader
+        title="Profile"
+        onBack={onBack}
+        right={onEditProfile ? (
           <TouchableOpacity
             onPress={onEditProfile}
-            style={[styles.iconButton, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
+            style={[styles.editButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
             accessibilityRole="button"
           >
-            <Feather name="edit-3" size={18} color={theme.colors.neonGreen} />
+            <Feather name="edit-3" size={18} color={theme.colors.text} />
           </TouchableOpacity>
-        ) : null}
-      </View>
+        ) : undefined}
+      />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading ? <ActivityIndicator color={theme.colors.brand} /> : null}
+
+        <View style={[styles.completionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+          <View style={styles.completionHeaderRow}>
+            <Typography variant="bodyStrong">Profile completion</Typography>
+            <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+              {completionPercent}%
+            </Typography>
+          </View>
+          <View style={[styles.completionTrack, { backgroundColor: theme.colors.border }]}>
+            <View style={[styles.completionFill, { width: `${completionPercent}%`, backgroundColor: theme.colors.neonGreen }]} />
+          </View>
+          <Typography variant="tiny" style={{ color: theme.colors.muted }}>
+            Complete your profile to improve match quality.
+          </Typography>
+        </View>
 
         <View style={[styles.hero, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
           <View style={styles.heroPhotoWrap}>
@@ -115,10 +136,6 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
             </View>
           </View>
 
-          <View style={styles.heroActions}>
-            <Button label="Edit profile" onPress={onEditProfile || onBack} />
-            <Button label="Manage photos" variant="secondary" onPress={onManagePhotos || onBack} />
-          </View>
         </View>
 
         {about ? (
@@ -145,7 +162,7 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
             </View>
             <View style={styles.chips}>
               {interests.slice(0, 10).map((i: string) => (
-                <View key={i} style={[styles.chip, { backgroundColor: 'rgba(173, 255, 26, 0.10)', borderColor: 'rgba(173, 255, 26, 0.22)' }]}>
+                <View key={i} style={[styles.chip, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
                   <Typography variant="small" style={{ color: theme.colors.textDark }}>
                     {i}
                   </Typography>
@@ -169,7 +186,7 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
             {topTraits.length > 0 ? (
               <View style={[styles.chips, { marginTop: 12 }]}>
                 {topTraits.slice(0, 6).map((t: string) => (
-                  <View key={t} style={[styles.chip, { backgroundColor: 'rgba(253, 226, 201, 0.18)', borderColor: 'rgba(253, 226, 201, 0.30)' }]}>
+                  <View key={t} style={[styles.chip, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
                     <Typography variant="small" style={{ color: theme.colors.textDark }}>
                       {t}
                     </Typography>
@@ -180,17 +197,6 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
           </View>
         ) : null}
 
-        <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-          <Typography variant="h2">Quick checklist</Typography>
-          {checklist.map((item) => (
-            <View key={item.label} style={styles.row}>
-              <View style={[styles.badge, { backgroundColor: item.done ? theme.colors.successTint : theme.colors.accentTint }]}>
-                <Feather name={item.done ? 'check' : 'clock'} size={14} color={item.done ? theme.colors.brand : theme.colors.muted} />
-              </View>
-              <Typography variant="body">{item.label}</Typography>
-            </View>
-          ))}
-        </View>
       </ScrollView>
     </View>
   );
@@ -198,18 +204,10 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  editButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -218,6 +216,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 140,
     gap: 12,
+  },
+  completionCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    gap: 8,
+  },
+  completionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  completionTrack: {
+    height: 8,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  completionFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   hero: {
     borderWidth: 1,
@@ -265,10 +283,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  heroActions: {
-    padding: 14,
-    gap: 10,
-  },
   card: {
     borderWidth: 1,
     borderRadius: 14,
@@ -290,17 +304,5 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  badge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

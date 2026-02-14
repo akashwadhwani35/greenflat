@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS } from '../utils/constants';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
+import { consumeCredits, getCreditBalance } from '../services/credits.service';
 
 const haversineDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const toRad = (value: number) => (value * Math.PI) / 180;
@@ -194,8 +195,11 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       exclude_ids?: number[];
       is_on_grid?: boolean;
       limit?: number;
+      charge_credits?: boolean;
     };
+    const chargeCredits = Boolean((req.body as any)?.charge_credits);
     const isAIEnabled = Boolean(process.env.OPENAI_API_KEY);
+    let remainingCredits: number | null = null;
 
     // Use AI to parse natural language search query
     let aiParsedQuery: Awaited<ReturnType<typeof parseSearchQuery>> | null = null;
@@ -239,6 +243,9 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    const normalizedSearchQuery = (search_query || '').trim();
+    const shouldChargeForAISearch = chargeCredits && normalizedSearchQuery.length > 0 && is_on_grid !== false;
+
     const currentUser = currentUserResult.rows[0];
     const userAge = calculateAge(currentUser.date_of_birth);
     const currentUserPersonaEmbedding = parseEmbedding((currentUser as any).persona_embedding);
@@ -272,15 +279,16 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const offGridCount = limits.off_grid_results;
 
     // Build base query for candidates
-    let queryParams: any[] = [userId, currentUser.interested_in];
-    let paramIndex = 3;
+    let queryParams: any[] = [userId];
+    let paramIndex = 2;
 
     let baseQuery = `
       SELECT
-        u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude,
+        u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
         p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
         p.smoker, p.drinker, p.relationship_goal,
         pr.personality_traits,
+        privacy.hide_distance, privacy.hide_city, privacy.incognito_mode, privacy.show_online_status,
         uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
         uap.dealbreakers, uap.growth_journey, uap.persona_embedding,
         primary_photo.photo_url as primary_photo
@@ -288,12 +296,31 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       LEFT JOIN user_profiles p ON u.id = p.user_id
       LEFT JOIN personality_responses pr ON u.id = pr.user_id
       LEFT JOIN user_ai_profiles uap ON u.id = uap.user_id
+      LEFT JOIN user_privacy_settings privacy ON privacy.user_id = u.id
       LEFT JOIN photos primary_photo ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
       LEFT JOIN likes existing_like ON existing_like.liker_id = $1 AND existing_like.liked_id = u.id
+      LEFT JOIN blocks blocked_rel
+        ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
+         OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
       WHERE u.id != $1
-        AND u.gender = $2
         AND existing_like.id IS NULL
+        AND blocked_rel.id IS NULL
     `;
+
+    // Seeker preference: interested_in='both' should not collapse results.
+    if (currentUser.interested_in !== 'both') {
+      baseQuery += ` AND u.gender = $${paramIndex}`;
+      queryParams.push(currentUser.interested_in);
+      paramIndex++;
+    }
+
+    // Reciprocal preference: candidate should also be open to the seeker's gender.
+    baseQuery += ` AND (u.interested_in = 'both' OR u.interested_in = $${paramIndex})`;
+    queryParams.push(currentUser.gender);
+    paramIndex++;
+
+    // Respect candidate privacy and blocking.
+    baseQuery += ` AND COALESCE(privacy.incognito_mode, FALSE) = FALSE`;
 
     // Apply age filters
     if (enhancedFilters.minAge || enhancedFilters.maxAge) {
@@ -391,6 +418,8 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         }
 
         const candidateEmbedding = parseEmbedding(candidate.persona_embedding);
+        const boostExpiresAt = candidate.boost_expires_at ? new Date(candidate.boost_expires_at).getTime() : null;
+        const boostActive = Boolean(boostExpiresAt && boostExpiresAt > Date.now());
         const matchPercentage = calculateMatchPercentage(
           search_query || '',
           aiParsedQuery?.preferences || null,
@@ -404,16 +433,25 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
         return {
           ...candidate,
+          city: candidate.hide_city ? null : candidate.city,
           match_percentage: matchPercentage,
           age: calculateAge(candidate.date_of_birth),
           persona_embedding: candidateEmbedding,
-          distance_km: distance_km ?? undefined,
+          boost_active: boostActive,
+          boost_expires_at: candidate.boost_expires_at || null,
+          distance_km: candidate.hide_distance ? undefined : (distance_km ?? undefined),
+          is_active: candidate.show_online_status ? true : false,
+          is_on_grid: is_on_grid !== false,
         };
       })
       .filter((candidate: any): candidate is any => Boolean(candidate));
 
-    // Sort by match percentage
-    scoredCandidates.sort((a: any, b: any) => b.match_percentage - a.match_percentage);
+    // Boosted users are ranked ahead while boost is active, then by match percentage.
+    scoredCandidates.sort((a: any, b: any) => {
+      const boostDiff = Number(b.boost_active) - Number(a.boost_active);
+      if (boostDiff !== 0) return boostDiff;
+      return b.match_percentage - a.match_percentage;
+    });
 
     // If specific type requested (for refresh), return only that type
     let onGridMatches: any[];
@@ -491,6 +529,25 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    // Charge only when we are actually returning visible on-grid profiles.
+    if (shouldChargeForAISearch && onGridWithReasons.length > 0) {
+      try {
+        remainingCredits = await consumeCredits(
+          userId,
+          1,
+          'ai_search',
+          { search_query: normalizedSearchQuery, on_grid_results: onGridWithReasons.length }
+        );
+      } catch (error: any) {
+        if (error.message === 'INSUFFICIENT_CREDITS') {
+          return res.status(402).json({ error: 'Not enough credits. AI Search costs 1 credit.' });
+        }
+        throw error;
+      }
+    } else {
+      remainingCredits = await getCreditBalance(userId);
+    }
+
     // Save search history
     await pool.query(
       'INSERT INTO search_history (user_id, search_query, filters) VALUES ($1, $2, $3)',
@@ -502,6 +559,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       // Return only on-grid matches
       res.json({
         matches: onGridWithReasons,
+        credit_balance: remainingCredits,
         ai_context: aiParsedQuery
           ? {
               search_intent: aiParsedQuery.search_intent,
@@ -514,6 +572,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       // Return only off-grid matches
       res.json({
         matches: offGridMatches,
+        credit_balance: remainingCredits,
         ai_context: aiParsedQuery
           ? {
               search_intent: aiParsedQuery.search_intent,
@@ -527,6 +586,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       res.json({
         on_grid_matches: onGridWithReasons,
         off_grid_matches: offGridMatches,
+        credit_balance: remainingCredits,
         ai_context: aiParsedQuery
           ? {
               search_intent: aiParsedQuery.search_intent,
@@ -569,7 +629,19 @@ export const refreshOffGrid = async (req: AuthRequest, res: Response) => {
 
 export const getUserDetails = async (req: AuthRequest, res: Response) => {
   try {
+    const userId = req.userId!;
     const { targetUserId } = req.params;
+
+    const blockResult = await pool.query(
+      `SELECT 1 FROM blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)
+       LIMIT 1`,
+      [userId, targetUserId]
+    );
+    if (blockResult.rows.length > 0) {
+      return res.status(403).json({ error: 'User unavailable' });
+    }
 
     const result = await pool.query(
       `SELECT
@@ -610,5 +682,48 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Get user details error:', error);
     res.status(500).json({ error: 'Failed to fetch user details' });
+  }
+};
+
+export const unmatch = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.userId!;
+    const { matchId } = req.params;
+
+    await client.query('BEGIN');
+
+    const matchResult = await client.query(
+      'SELECT id, user1_id, user2_id FROM matches WHERE id = $1 FOR UPDATE',
+      [matchId]
+    );
+
+    if (matchResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Match not found' });
+    }
+
+    const match = matchResult.rows[0];
+    if (match.user1_id !== userId && match.user2_id !== userId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'You are not part of this match' });
+    }
+
+    const otherUserId = match.user1_id === userId ? match.user2_id : match.user1_id;
+
+    await client.query('DELETE FROM matches WHERE id = $1', [matchId]);
+    await client.query(
+      'DELETE FROM likes WHERE (liker_id = $1 AND liked_id = $2) OR (liker_id = $2 AND liked_id = $1)',
+      [userId, otherUserId]
+    );
+
+    await client.query('COMMIT');
+    return res.json({ message: 'Unmatched successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Unmatch error:', error);
+    return res.status(500).json({ error: 'Failed to unmatch' });
+  } finally {
+    client.release();
   }
 };

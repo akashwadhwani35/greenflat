@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, TextInput, ActivityIndicator, Alert } from 'react-native';
+import { ScrollView, StyleSheet, View, TouchableOpacity, TextInput, ActivityIndicator, Alert, Image, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 import { Typography } from '../components/Typography';
 import { Button } from '../components/Button';
 import { useTheme } from '../theme/ThemeProvider';
+import { PageHeader } from '../components/PageHeader';
 
 type Props = {
   onBack: () => void;
@@ -27,11 +30,9 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   const [loading, setLoading] = useState(false);
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
-  const [lastOtp, setLastOtp] = useState<string | null>(null);
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
   const [city, setCity] = useState('');
-  const [selfieUrl, setSelfieUrl] = useState('');
+  const [selfiePayload, setSelfiePayload] = useState<string | null>(null);
+  const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
 
   const getStatus = async () => {
     try {
@@ -65,8 +66,11 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to send OTP');
-      setLastOtp(data.demo_code || null);
-      Alert.alert('OTP sent', 'Check SMS (demo shows code inline).');
+      if (data.dev_code) {
+        Alert.alert('OTP sent (dev)', `Use code: ${data.dev_code}`);
+      } else {
+        Alert.alert('OTP sent', 'Check your phone for the verification code.');
+      }
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Unable to send OTP');
     }
@@ -91,36 +95,83 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
     }
   };
 
-  const startFace = async () => {
-    await fetch(`${apiBaseUrl}/verification/face/start`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
-    }).catch(() => {});
-    Alert.alert('Started', 'Face verification started (demo).');
+  const captureSelfie = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Allow camera access to verify your selfie.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 5],
+        quality: 0.7,
+        base64: Platform.OS !== 'web',
+        cameraType: ImagePicker.CameraType.front,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const payload = Platform.OS === 'web'
+        ? asset.uri
+        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+      setSelfiePayload(payload);
+      setSelfiePreview(asset.uri);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Unable to capture selfie');
+    }
   };
 
-  const completeFace = async (success = true) => {
-    await fetch(`${apiBaseUrl}/verification/face/complete`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ success, age_verified: true }),
-    }).catch(() => {});
-    await getStatus();
-    Alert.alert(success ? 'Verified' : 'Failed', success ? 'Face verified.' : 'Face verification failed.');
+  const pickSelfie = async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Allow photo library access to choose a selfie.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 5],
+        quality: 0.7,
+        base64: Platform.OS !== 'web',
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const payload = Platform.OS === 'web'
+        ? asset.uri
+        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+      setSelfiePayload(payload);
+      setSelfiePreview(asset.uri);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Unable to choose selfie');
+    }
   };
 
   const verifyLocation = async () => {
     try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Allow location access to verify your location.');
+        return;
+      }
+      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const latitude = current.coords.latitude;
+      const longitude = current.coords.longitude;
+
       const response = await fetch(`${apiBaseUrl}/verification/location`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ lat: Number(lat), lng: Number(lng), city: city || undefined }),
+        body: JSON.stringify({ lat: Number(latitude), lng: Number(longitude), city: city || undefined }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to verify location');
@@ -132,6 +183,10 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   };
 
   const verifySelfie = async () => {
+    if (!selfiePayload) {
+      Alert.alert('Selfie required', 'Please capture or upload a selfie first.');
+      return;
+    }
     try {
       const response = await fetch(`${apiBaseUrl}/verification/selfie`, {
         method: 'POST',
@@ -139,12 +194,12 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ photo_url: selfieUrl }),
+        body: JSON.stringify({ photo_url: selfiePayload }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Unable to verify selfie');
       await getStatus();
-      Alert.alert('Verified', 'Selfie verified as 18+.');
+      Alert.alert('Verified', 'Photo and age verification completed.');
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Unable to verify selfie');
     }
@@ -152,12 +207,7 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Verification</Typography>
-      </View>
+      <PageHeader title="Verification" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading ? <ActivityIndicator color={theme.colors.brand} /> : null}
@@ -182,11 +232,6 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
           />
           <View style={styles.row}>
             <Button label="Send OTP" onPress={requestOtp} />
-            {lastOtp ? (
-              <Typography variant="tiny" muted>
-                demo code: {lastOtp}
-              </Typography>
-            ) : null}
           </View>
           <TextInput
             placeholder="OTP"
@@ -200,46 +245,32 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
         </View>
 
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
-          <Typography variant="h2">Face & age</Typography>
+          <Typography variant="h2">Photo & age verification</Typography>
           <Typography variant="small" muted>
-            You can use AI selfie check (18+ estimate) or the demo buttons below.
+            Use a clear front-face selfie. We verify one face and 18+ eligibility.
           </Typography>
-          <TextInput
-            placeholder="Selfie URL"
-            value={selfieUrl}
-            onChangeText={setSelfieUrl}
-            style={[styles.input, { color: theme.colors.text, borderColor: theme.colors.border }]}
-            placeholderTextColor={theme.colors.muted}
-          />
-          <Button label="Verify selfie (AI)" onPress={verifySelfie} />
+          {selfiePreview ? (
+            <Image source={{ uri: selfiePreview }} style={styles.selfiePreview} />
+          ) : (
+            <View style={[styles.selfiePlaceholder, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+              <Feather name="camera" size={26} color={theme.colors.muted} />
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 8 }}>
+                No selfie selected
+              </Typography>
+            </View>
+          )}
           <View style={styles.row}>
-            <Button label="Start face check" onPress={startFace} />
-            <Button label="Mark verified" onPress={() => completeFace(true)} />
-            <Button label="Mark failed" variant="secondary" onPress={() => completeFace(false)} />
+            <Button label="Capture selfie" onPress={captureSelfie} />
+            <Button label="Upload selfie" variant="secondary" onPress={pickSelfie} />
           </View>
+          <Button label="Verify selfie (AI)" onPress={verifySelfie} />
         </View>
 
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="h2">Location</Typography>
           <Typography variant="small" muted>
-            Enter coordinates to verify. (Plug real maps/geolocation in production.)
+            Use your current device location to verify where you are.
           </Typography>
-          <TextInput
-            placeholder="Latitude"
-            value={lat}
-            onChangeText={setLat}
-            style={[styles.input, { color: theme.colors.text, borderColor: theme.colors.border }]}
-            placeholderTextColor={theme.colors.muted}
-            keyboardType="numeric"
-          />
-          <TextInput
-            placeholder="Longitude"
-            value={lng}
-            onChangeText={setLng}
-            style={[styles.input, { color: theme.colors.text, borderColor: theme.colors.border }]}
-            placeholderTextColor={theme.colors.muted}
-            keyboardType="numeric"
-          />
           <TextInput
             placeholder="City (optional)"
             value={city}
@@ -263,22 +294,6 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F2F2F2',
-  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 120,
@@ -311,5 +326,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     flexWrap: 'wrap',
+  },
+  selfiePlaceholder: {
+    height: 180,
+    borderWidth: 1,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selfiePreview: {
+    width: '100%',
+    height: 240,
+    borderRadius: 14,
+    backgroundColor: '#111',
   },
 });

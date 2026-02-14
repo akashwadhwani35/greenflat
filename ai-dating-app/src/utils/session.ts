@@ -9,6 +9,7 @@ export type SavedSession = {
 };
 
 const SESSION_KEY = 'greenflag.session.v1';
+const FIRST_SEARCH_DONE_PREFIX = 'greenflag.firstSearchDone.v1.';
 
 export const loadSession = async (): Promise<SavedSession | null> => {
   try {
@@ -30,3 +31,15 @@ export const clearSession = async (): Promise<void> => {
   await AsyncStorage.removeItem(SESSION_KEY);
 };
 
+export const loadFirstSearchDone = async (userId: number): Promise<boolean> => {
+  try {
+    const value = await AsyncStorage.getItem(`${FIRST_SEARCH_DONE_PREFIX}${userId}`);
+    return value === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const saveFirstSearchDone = async (userId: number): Promise<void> => {
+  await AsyncStorage.setItem(`${FIRST_SEARCH_DONE_PREFIX}${userId}`, '1');
+};

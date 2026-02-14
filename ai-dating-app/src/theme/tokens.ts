@@ -10,6 +10,8 @@ export const colorTokens = {
   peach: '#FDE2C9',            // Soft peach accent
   forestGreen: '#418B01',      // Deep green accent
   ivory: '#F6F6F6',            // Light background for inputs
+  secondaryHighlight: '#1B2920', // Secondary highlighted surface
+  secondaryHairline: '#4D4D4D',  // Hairline for secondary highlights
 
   // Functional Colors
   primary: '#ADFF1A',          // Neon green for CTAs
@@ -135,6 +137,8 @@ export const createTheme = () => ({
     peach: colorTokens.peach,
     forestGreen: colorTokens.forestGreen,
     ivory: colorTokens.ivory,
+    secondaryHighlight: colorTokens.secondaryHighlight,
+    secondaryHairline: colorTokens.secondaryHairline,
   },
   radius: radiusTokens,
   spacing: spacingTokens,

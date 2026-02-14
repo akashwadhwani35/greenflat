@@ -1,9 +1,10 @@
-import React from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, TextInput } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, Linking, ScrollView, StyleSheet, View, TouchableOpacity, TextInput } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
+import { PageHeader } from '../components/PageHeader';
 
 type Props = {
   onBack: () => void;
@@ -18,15 +19,12 @@ const faqs = [
 
 export const HelpCenterScreen: React.FC<Props> = ({ onBack, onOpenTerms }) => {
   const theme = useTheme();
+  const [query, setQuery] = useState('');
+  const [details, setDetails] = useState('');
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Help Center</Typography>
-      </View>
+      <PageHeader title="Help center" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.searchBox}>
@@ -35,6 +33,8 @@ export const HelpCenterScreen: React.FC<Props> = ({ onBack, onOpenTerms }) => {
             placeholder="Search help"
             style={[styles.searchInput, { color: theme.colors.text }]}
             placeholderTextColor={theme.colors.muted}
+            value={query}
+            onChangeText={setQuery}
           />
         </View>
 
@@ -57,8 +57,25 @@ export const HelpCenterScreen: React.FC<Props> = ({ onBack, onOpenTerms }) => {
             style={[styles.textArea, { borderColor: theme.colors.border, color: theme.colors.text }]}
             placeholderTextColor={theme.colors.muted}
             multiline
+            value={details}
+            onChangeText={setDetails}
           />
-          <Button label="Send" onPress={() => {}} fullWidth />
+          <Button
+            label="Send"
+            onPress={async () => {
+              const subject = encodeURIComponent('GreenFlag Support Request');
+              const body = encodeURIComponent(`Issue:\n${details || query || 'No details provided.'}`);
+              const url = `mailto:support@greenflag.app?subject=${subject}&body=${body}`;
+              try {
+                const supported = await Linking.canOpenURL(url);
+                if (!supported) throw new Error('Email app unavailable');
+                await Linking.openURL(url);
+              } catch {
+                Alert.alert('Unable to open email', 'Please email support@greenflag.app');
+              }
+            }}
+            fullWidth
+          />
         </View>
 
         <TouchableOpacity style={styles.linkRow} onPress={onOpenTerms}>
@@ -74,22 +91,6 @@ export const HelpCenterScreen: React.FC<Props> = ({ onBack, onOpenTerms }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F2F2F2',
-  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 140,
@@ -129,4 +130,3 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 });
-

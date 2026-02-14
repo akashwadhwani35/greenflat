@@ -23,8 +23,14 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       diet,
       fitness_level,
       education,
+      education_level,
       occupation,
+      hometown,
       relationship_goal,
+      have_kids,
+      star_sign,
+      politics,
+      religion,
       family_oriented,
       spiritual,
       open_minded,
@@ -48,40 +54,74 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
 
     await client.query('BEGIN');
 
+    const smokingHabit =
+      typeof smoker === 'string'
+        ? smoker.toLowerCase()
+        : smoker === true
+          ? 'regular'
+          : smoker === false
+            ? 'never'
+            : null;
+
+    const smokerBoolean =
+      typeof smoker === 'boolean'
+        ? smoker
+        : smokingHabit
+          ? smokingHabit !== 'never'
+          : null;
+
     // Create or update user profile
     const profileResult = await client.query(
       `INSERT INTO user_profiles (
         user_id, height, body_type, interests, bio, prompt1, prompt2, prompt3,
-        smoker, drinker, diet, fitness_level, education, occupation,
-        relationship_goal, family_oriented, spiritual, open_minded, career_focused,
+        smoker, smoking_habit, drinker, diet, fitness_level, education, education_level, occupation, hometown,
+        relationship_goal, have_kids, star_sign, politics, religion,
+        family_oriented, spiritual, open_minded, career_focused,
         updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW())
       ON CONFLICT (user_id)
       DO UPDATE SET
         height = $2, body_type = $3, interests = $4, bio = $5,
         prompt1 = $6, prompt2 = $7, prompt3 = $8, smoker = $9,
-        drinker = $10, diet = $11, fitness_level = $12, education = $13,
-        occupation = $14, relationship_goal = $15, family_oriented = $16,
-        spiritual = $17, open_minded = $18, career_focused = $19,
+        smoking_habit = $10, drinker = $11, diet = $12, fitness_level = $13, education = $14, education_level = $15,
+        occupation = $16, hometown = $17, relationship_goal = $18, have_kids = $19, star_sign = $20,
+        politics = $21, religion = $22, family_oriented = $23,
+        spiritual = $24, open_minded = $25, career_focused = $26,
         updated_at = NOW()
       RETURNING *`,
       [
         userId, height, body_type, interests, bio, prompt1, prompt2, prompt3,
-        smoker, drinker, diet, fitness_level, education, occupation,
-        relationship_goal, family_oriented, spiritual, open_minded, career_focused,
+        smokerBoolean, smokingHabit, drinker, diet, fitness_level, education, education_level, occupation, hometown,
+        relationship_goal, have_kids, star_sign, politics, religion,
+        family_oriented, spiritual, open_minded, career_focused,
       ]
     );
 
-    // Calculate personality traits from quiz answers
+    const existingPersonalityResult = await client.query(
+      `SELECT question1_answer, question2_answer, question3_answer, question4_answer,
+              question5_answer, question6_answer, question7_answer, question8_answer
+       FROM personality_responses
+       WHERE user_id = $1`,
+      [userId]
+    );
+
+    const existingAnswers = existingPersonalityResult.rows[0] || {};
+    const normalizeAnswer = (value: unknown): string | null => {
+      if (typeof value !== 'string') return null;
+      const upper = value.trim().toUpperCase();
+      return ['A', 'B', 'C', 'D'].includes(upper) ? upper : null;
+    };
+
+    // Always preserve already-saved quiz answers when a request doesn't include them.
     const answers = [
-      question1_answer,
-      question2_answer,
-      question3_answer,
-      question4_answer,
-      question5_answer,
-      question6_answer,
-      question7_answer,
-      question8_answer,
+      normalizeAnswer(question1_answer) ?? normalizeAnswer(existingAnswers.question1_answer),
+      normalizeAnswer(question2_answer) ?? normalizeAnswer(existingAnswers.question2_answer),
+      normalizeAnswer(question3_answer) ?? normalizeAnswer(existingAnswers.question3_answer),
+      normalizeAnswer(question4_answer) ?? normalizeAnswer(existingAnswers.question4_answer),
+      normalizeAnswer(question5_answer) ?? normalizeAnswer(existingAnswers.question5_answer),
+      normalizeAnswer(question6_answer) ?? normalizeAnswer(existingAnswers.question6_answer),
+      normalizeAnswer(question7_answer) ?? normalizeAnswer(existingAnswers.question7_answer),
+      normalizeAnswer(question8_answer) ?? normalizeAnswer(existingAnswers.question8_answer),
     ];
 
     const personalityTraits: string[] = [];
@@ -95,15 +135,18 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
     const uniqueTraits = [...new Set(personalityTraits)];
 
     const filteredAnswers = answers.filter((answer): answer is string => Boolean(answer));
+    const aboutYouText = [bio, prompt1, prompt2, prompt3]
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .join('\n');
     let aiPersonalityInsights = {
       summary: 'You have a unique personality!',
       top_traits: uniqueTraits.slice(0, 3),
       compatibility_tips: 'You would match well with someone who shares your values.',
     };
 
-    if (process.env.OPENAI_API_KEY && filteredAnswers.length > 0) {
+    if (process.env.OPENAI_API_KEY && (filteredAnswers.length > 0 || aboutYouText.length > 0)) {
       try {
-        const insights = await analyzePersonality(filteredAnswers);
+        const insights = await analyzePersonality(filteredAnswers, aboutYouText);
         aiPersonalityInsights = {
           summary: insights.summary,
           top_traits: insights.top_traits && insights.top_traits.length > 0 ? insights.top_traits : uniqueTraits.slice(0, 3),
@@ -131,9 +174,9 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         updated_at = NOW()
       RETURNING *`,
       [
-        userId, question1_answer, question2_answer, question3_answer,
-        question4_answer, question5_answer, question6_answer,
-        question7_answer, question8_answer, uniqueTraits,
+        userId, answers[0], answers[1], answers[2],
+        answers[3], answers[4], answers[5],
+        answers[6], answers[7], uniqueTraits,
         aiPersonalityInsights.summary,
         aiPersonalityInsights.compatibility_tips,
         aiPersonalityInsights.top_traits,
@@ -214,7 +257,10 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 
     // Get user data
     const userResult = await pool.query(
-      'SELECT id, email, name, gender, interested_in, date_of_birth, city, is_verified, is_premium, cooldown_enabled FROM users WHERE id = $1',
+      `SELECT id, email, name, gender, interested_in, date_of_birth, city,
+              is_verified, is_premium, premium_expires_at, boost_expires_at, credit_balance, cooldown_enabled
+       FROM users
+       WHERE id = $1`,
       [userId]
     );
 
@@ -259,6 +305,56 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+};
+
+export const activateBoost = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const userResult = await pool.query(
+      'SELECT is_premium, premium_expires_at, boost_expires_at FROM users WHERE id = $1',
+      [userId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+    const now = Date.now();
+    const premiumExpiresAt = user.premium_expires_at ? new Date(user.premium_expires_at).getTime() : null;
+    const hasPaidPlan = Boolean(user.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > now);
+
+    if (!hasPaidPlan) {
+      return res.status(403).json({ error: 'Boost is available only for paid plans' });
+    }
+
+    const boostExpiresAt = user.boost_expires_at ? new Date(user.boost_expires_at).getTime() : null;
+    if (boostExpiresAt && boostExpiresAt > now) {
+      return res.json({
+        message: 'Boost is already active',
+        boost_active: true,
+        boost_expires_at: new Date(boostExpiresAt).toISOString(),
+      });
+    }
+
+    const updateResult = await pool.query(
+      `UPDATE users
+       SET boost_expires_at = NOW() + INTERVAL '24 hours',
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING boost_expires_at`,
+      [userId]
+    );
+
+    return res.json({
+      message: 'Boost activated for 24 hours',
+      boost_active: true,
+      boost_expires_at: updateResult.rows[0].boost_expires_at,
+    });
+  } catch (error) {
+    console.error('Activate boost error:', error);
+    return res.status(500).json({ error: 'Failed to activate boost' });
   }
 };
 
@@ -360,9 +456,9 @@ export const reorderPhoto = async (req: AuthRequest, res: Response) => {
 export const updateUserBasics = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
-    const { name, city } = req.body;
+    const { name, city, gender, date_of_birth } = req.body;
 
-    if (!name && !city) {
+    if (!name && !city && !gender && !date_of_birth) {
       return res.status(400).json({ error: 'Nothing to update' });
     }
 
@@ -370,15 +466,37 @@ export const updateUserBasics = async (req: AuthRequest, res: Response) => {
       `UPDATE users
        SET name = COALESCE($1, name),
            city = COALESCE($2, city),
+           gender = COALESCE($3, gender),
+           date_of_birth = COALESCE($4, date_of_birth),
            updated_at = NOW()
-       WHERE id = $3
-       RETURNING id, name, city`,
-      [name || null, city || null, userId]
+       WHERE id = $5
+       RETURNING id, name, city, gender, date_of_birth`,
+      [name || null, city || null, gender || null, date_of_birth || null, userId]
     );
 
     res.json({ user: result.rows[0] });
   } catch (error) {
     console.error('Update user basics error:', error);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+};
+
+export const deleteAccount = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    const result = await pool.query(
+      'DELETE FROM users WHERE id = $1 RETURNING id',
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    return res.json({ message: 'Account deleted' });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    return res.status(500).json({ error: 'Failed to delete account' });
   }
 };

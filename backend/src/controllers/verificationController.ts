@@ -1,11 +1,23 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
-import { createYotiSession, getYotiSessionResult, isYotiConfigured } from '../services/yoti.service';
 import { analyzeSelfieAge } from '../services/openai.service';
+import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
 
 const OTP_TTL_SECONDS = 300;
+const OTP_REQUEST_COOLDOWN_SECONDS = 60;
+const OTP_REQUEST_LIMIT_PER_HOUR = 5;
+const OTP_VERIFY_MAX_ATTEMPTS = 5;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
+
+const normalizePhone = (raw: unknown): string | null => {
+  if (typeof raw !== 'string') return null;
+  const stripped = raw.replace(/[^\d+]/g, '');
+  if (!stripped.startsWith('+')) return null;
+  const digits = stripped.slice(1);
+  if (!/^\d{8,15}$/.test(digits)) return null;
+  return `+${digits}`;
+};
 
 const getOrCreateVerificationStatus = async (userId: number) => {
   const existing = await pool.query(
@@ -25,26 +37,70 @@ const getOrCreateVerificationStatus = async (userId: number) => {
 
 export const requestOtp = async (req: Request, res: Response) => {
   try {
-    const { phone } = req.body;
-    if (!phone) {
+    const normalizedPhone = normalizePhone((req.body as any)?.phone);
+    if (!normalizedPhone) {
       return res.status(400).json({ error: 'Phone is required' });
     }
+
+    const smsConfigured = isSmsConfigured();
+    const devBypass = canUseDevOtpBypass();
+    if (!smsConfigured && !devBypass) {
+      return res.status(503).json({ error: 'SMS provider is not configured' });
+    }
+
+    const recentOtp = await pool.query(
+      'SELECT created_at FROM otp_codes WHERE phone = $1',
+      [normalizedPhone]
+    );
+    if (recentOtp.rows.length > 0) {
+      const createdAt = new Date(recentOtp.rows[0].created_at).getTime();
+      const secondsSinceLast = Math.floor((Date.now() - createdAt) / 1000);
+      if (secondsSinceLast < OTP_REQUEST_COOLDOWN_SECONDS) {
+        return res.status(429).json({
+          error: 'Please wait before requesting another OTP',
+          retry_in_seconds: OTP_REQUEST_COOLDOWN_SECONDS - secondsSinceLast,
+        });
+      }
+    }
+
+    const hourlyCount = await pool.query(
+      `SELECT COUNT(*)::int AS count
+       FROM otp_request_audit
+       WHERE phone = $1 AND created_at >= NOW() - INTERVAL '1 hour'`,
+      [normalizedPhone]
+    );
+    if (hourlyCount.rows[0]?.count >= OTP_REQUEST_LIMIT_PER_HOUR) {
+      return res.status(429).json({
+        error: 'Too many OTP requests. Try again later.',
+        retry_after_seconds: 3600,
+      });
+    }
+
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
 
     await pool.query(
       `
-        INSERT INTO otp_codes (phone, code, expires_at)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (phone) DO UPDATE SET code = $2, expires_at = $3, created_at = NOW()
+        INSERT INTO otp_codes (phone, code, expires_at, verify_attempts)
+        VALUES ($1, $2, $3, 0)
+        ON CONFLICT (phone) DO UPDATE SET code = $2, expires_at = $3, verify_attempts = 0, created_at = NOW()
       `,
-      [phone, code, expiresAt]
+      [normalizedPhone, code, expiresAt]
     );
 
-    res.json({
-      message: 'OTP sent (demo)',
-      demo_code: code, // NOTE: return only for demo/testing
+    await pool.query(
+      'INSERT INTO otp_request_audit (phone) VALUES ($1)',
+      [normalizedPhone]
+    );
+
+    if (smsConfigured) {
+      await sendOtpSms(normalizedPhone, code);
+    }
+
+    return res.json({
+      message: 'OTP sent',
       expires_in_seconds: OTP_TTL_SECONDS,
+      ...(smsConfigured ? {} : { dev_code: code, delivery: 'dev-bypass' }),
     });
   } catch (error) {
     console.error('Request OTP error', error);
@@ -55,33 +111,43 @@ export const requestOtp = async (req: Request, res: Response) => {
 export const verifyOtp = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
-    const { phone, code } = req.body;
-    if (!phone || !code) {
+    const normalizedPhone = normalizePhone((req.body as any)?.phone);
+    const { code } = req.body;
+    if (!normalizedPhone || !code) {
       return res.status(400).json({ error: 'Phone and code are required' });
     }
     const otpResult = await pool.query(
       'SELECT * FROM otp_codes WHERE phone = $1',
-      [phone]
+      [normalizedPhone]
     );
     if (otpResult.rows.length === 0) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
     const record = otpResult.rows[0];
     if (record.code !== code) {
+      const nextAttempts = Number(record.verify_attempts || 0) + 1;
+      if (nextAttempts >= OTP_VERIFY_MAX_ATTEMPTS) {
+        await pool.query('DELETE FROM otp_codes WHERE phone = $1', [normalizedPhone]);
+        return res.status(429).json({ error: 'Too many invalid attempts. Request a new OTP.' });
+      }
+      await pool.query(
+        'UPDATE otp_codes SET verify_attempts = $2 WHERE phone = $1',
+        [normalizedPhone, nextAttempts]
+      );
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
     if (new Date(record.expires_at).getTime() < Date.now()) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
 
-    await pool.query('DELETE FROM otp_codes WHERE phone = $1', [phone]);
+    await pool.query('DELETE FROM otp_codes WHERE phone = $1', [normalizedPhone]);
     await pool.query('UPDATE users SET is_verified = TRUE WHERE id = $1', [userId]);
     const statusResult = await pool.query(
       `INSERT INTO verification_status (user_id, phone, otp_verified, updated_at)
        VALUES ($1, $2, TRUE, NOW())
        ON CONFLICT (user_id) DO UPDATE SET phone = $2, otp_verified = TRUE, updated_at = NOW()
        RETURNING *`,
-      [userId, phone]
+      [userId, normalizedPhone]
     );
 
     res.json({ message: 'OTP verified', status: statusResult.rows[0] });
@@ -91,102 +157,11 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const startFaceCheck = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId!;
-
-    // Check if Yoti is configured
-    if (!isYotiConfigured()) {
-      // Fallback to demo mode
-      await pool.query(
-        `INSERT INTO verification_status (user_id, face_status, updated_at)
-         VALUES ($1, 'pending', NOW())
-         ON CONFLICT (user_id) DO UPDATE SET face_status = 'pending', updated_at = NOW()`,
-        [userId]
-      );
-      return res.json({
-        message: 'Face verification started (demo mode - Yoti not configured)',
-        demo: true
-      });
-    }
-
-    // Create Yoti session
-    const yotiSession = await createYotiSession(userId);
-
-    // Store session ID in verification status
-    await pool.query(
-      `INSERT INTO verification_status (user_id, face_status, updated_at)
-       VALUES ($1, 'pending', NOW())
-       ON CONFLICT (user_id) DO UPDATE SET face_status = 'pending', updated_at = NOW()`,
-      [userId]
-    );
-
-    // Store session ID temporarily (you might want to add a yoti_session_id column)
-    // For now, we'll return it to the client
-    res.json({
-      message: 'Yoti session created',
-      sessionId: yotiSession.sessionId,
-      clientSessionToken: yotiSession.clientSessionToken,
-      sessionUrl: yotiSession.sessionUrl,
-      demo: false,
-    });
-  } catch (error: any) {
-    console.error('Start face check error', error);
-    res.status(500).json({ error: error.message || 'Failed to start face check' });
-  }
-};
-
-export const completeFaceCheck = async (req: AuthRequest, res: Response) => {
-  try {
-    const userId = req.userId!;
-    const { success, age_verified, sessionId } = req.body;
-
-    // If sessionId provided, retrieve Yoti results
-    if (sessionId && isYotiConfigured()) {
-      const yotiResult = await getYotiSessionResult(sessionId);
-
-      if (yotiResult.error) {
-        return res.status(400).json({ error: yotiResult.error });
-      }
-
-      // Update verification status with Yoti results
-      await pool.query(
-        `INSERT INTO verification_status (user_id, face_status, age_verified, updated_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (user_id) DO UPDATE SET face_status = $2, age_verified = $3, updated_at = NOW()`,
-        [userId, yotiResult.success ? 'verified' : 'failed', yotiResult.ageVerified]
-      );
-
-      return res.json({
-        message: yotiResult.success ? 'Verification successful' : 'Verification failed',
-        ageVerified: yotiResult.ageVerified,
-        livenessVerified: yotiResult.livenessVerified,
-        dateOfBirth: yotiResult.dateOfBirth,
-        documentType: yotiResult.documentType,
-        issuingCountry: yotiResult.issuingCountry,
-      });
-    }
-
-    // Fallback to demo mode
-    await pool.query(
-      `INSERT INTO verification_status (user_id, face_status, age_verified, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET face_status = $2, age_verified = (verification_status.age_verified OR $3), updated_at = NOW()`,
-      [userId, success ? 'verified' : 'failed', Boolean(age_verified)]
-    );
-
-    res.json({
-      message: success ? 'Face verified (demo)' : 'Face verification failed (demo)',
-      demo: true
-    });
-  } catch (error: any) {
-    console.error('Complete face check error', error);
-    res.status(500).json({ error: error.message || 'Failed to complete face check' });
-  }
-};
-
 export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
   try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'Selfie verification is not configured' });
+    }
     const userId = req.userId!;
     const { photo_url } = req.body;
     if (!photo_url) {
@@ -302,6 +277,12 @@ export const publicGeocode = async (req: Request, res: Response) => {
     }
 
     if (!GOOGLE_MAPS_API_KEY) {
+      if (hasQuery) {
+        return res.json({
+          city: query,
+          suggestions: [{ city: query, lat: undefined, lng: undefined }],
+        });
+      }
       return res.status(500).json({ error: 'Google Maps API key not configured' });
     }
 

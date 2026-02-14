@@ -75,7 +75,7 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess }) 
           </View>
 
           <Typography variant="tiny" muted align="center" style={{ marginTop: 14 }}>
-            Tip: If you seeded demo data, use the Demo Profile button instead.
+            Use your registered account credentials to sign in.
           </Typography>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -112,4 +112,3 @@ const styles = StyleSheet.create({
     gap: 14,
   },
 });
-

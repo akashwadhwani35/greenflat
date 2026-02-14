@@ -16,9 +16,15 @@ CREATE TABLE IF NOT EXISTS users (
     is_verified BOOLEAN DEFAULT FALSE,
     is_premium BOOLEAN DEFAULT FALSE,
     premium_expires_at TIMESTAMP,
+    boost_expires_at TIMESTAMP,
+    credit_balance INTEGER NOT NULL DEFAULT 50,
     cooldown_enabled BOOLEAN DEFAULT FALSE,
     cooldown_until TIMESTAMP,
     push_token TEXT,
+    hide_distance BOOLEAN DEFAULT FALSE,
+    hide_city BOOLEAN DEFAULT FALSE,
+    incognito_mode BOOLEAN DEFAULT FALSE,
+    show_online_status BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -35,12 +41,19 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     prompt2 TEXT,
     prompt3 TEXT,
     smoker BOOLEAN,
+    smoking_habit VARCHAR(50),
     drinker VARCHAR(50),
     diet VARCHAR(50),
     fitness_level VARCHAR(50),
     education VARCHAR(100),
+    education_level VARCHAR(100),
     occupation VARCHAR(100),
+    hometown VARCHAR(100),
     relationship_goal VARCHAR(50),
+    have_kids VARCHAR(50),
+    star_sign VARCHAR(50),
+    politics VARCHAR(50),
+    religion VARCHAR(100),
     family_oriented BOOLEAN,
     spiritual BOOLEAN,
     open_minded BOOLEAN,
@@ -85,6 +98,8 @@ CREATE TABLE IF NOT EXISTS likes (
     liker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     liked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     is_on_grid BOOLEAN DEFAULT TRUE,
+    is_compliment BOOLEAN DEFAULT FALSE,
+    compliment_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(liker_id, liked_id)
 );
@@ -165,6 +180,16 @@ CREATE TABLE IF NOT EXISTS search_history (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS credit_transactions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount INTEGER NOT NULL,
+    direction VARCHAR(10) NOT NULL CHECK (direction IN ('debit', 'credit')),
+    reason VARCHAR(100) NOT NULL,
+    metadata JSONB,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Profile Views Table
 CREATE TABLE IF NOT EXISTS profile_views (
     id SERIAL PRIMARY KEY,
@@ -184,12 +209,51 @@ CREATE TABLE IF NOT EXISTS reports (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- User Privacy Settings
+CREATE TABLE IF NOT EXISTS user_privacy_settings (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    hide_distance BOOLEAN DEFAULT FALSE,
+    hide_city BOOLEAN DEFAULT FALSE,
+    incognito_mode BOOLEAN DEFAULT FALSE,
+    show_online_status BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS user_notification_preferences (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    likes BOOLEAN DEFAULT TRUE,
+    matches BOOLEAN DEFAULT TRUE,
+    messages BOOLEAN DEFAULT TRUE,
+    daily_picks BOOLEAN DEFAULT TRUE,
+    product_updates BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Block relationships
+CREATE TABLE IF NOT EXISTS blocks (
+    id SERIAL PRIMARY KEY,
+    blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(blocker_id, blocked_id),
+    CHECK (blocker_id <> blocked_id)
+);
+
 -- OTP Codes (for phone verification)
 CREATE TABLE IF NOT EXISTS otp_codes (
     id SERIAL PRIMARY KEY,
     phone TEXT UNIQUE NOT NULL,
     code CHAR(6) NOT NULL,
+    verify_attempts INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS otp_request_audit (
+    id SERIAL PRIMARY KEY,
+    phone TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -212,7 +276,9 @@ CREATE TABLE IF NOT EXISTS verification_status (
 -- Indexes for performance
 CREATE INDEX idx_users_gender ON users(gender);
 CREATE INDEX idx_users_city ON users(city);
+CREATE INDEX idx_users_boost_expires_at ON users(boost_expires_at);
 CREATE INDEX idx_users_created_at ON users(created_at);
+CREATE INDEX idx_credit_transactions_user_id ON credit_transactions(user_id);
 CREATE INDEX idx_likes_liker_id ON likes(liker_id);
 CREATE INDEX idx_likes_liked_id ON likes(liked_id);
 CREATE INDEX idx_likes_created_at ON likes(created_at);
@@ -222,3 +288,6 @@ CREATE INDEX idx_messages_match_id ON messages(match_id);
 CREATE INDEX idx_messages_created_at ON messages(created_at);
 CREATE INDEX idx_profile_views_viewed_id ON profile_views(viewed_id);
 CREATE INDEX idx_photos_user_id ON photos(user_id);
+CREATE INDEX idx_blocks_blocker_id ON blocks(blocker_id);
+CREATE INDEX idx_blocks_blocked_id ON blocks(blocked_id);
+CREATE INDEX idx_otp_request_audit_phone_created_at ON otp_request_audit(phone, created_at DESC);

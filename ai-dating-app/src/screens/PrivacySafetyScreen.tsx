@@ -1,58 +1,155 @@
-import React from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, View, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { PageHeader } from '../components/PageHeader';
 
-type Props = { onBack: () => void };
+type Props = {
+  onBack: () => void;
+  token: string;
+  apiBaseUrl: string;
+};
 
-export const PrivacySafetyScreen: React.FC<Props> = ({ onBack }) => {
+type PrivacySettings = {
+  hide_distance: boolean;
+  hide_city: boolean;
+  incognito_mode: boolean;
+  show_online_status: boolean;
+};
+
+export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }) => {
   const theme = useTheme();
+  const [settings, setSettings] = useState<PrivacySettings>({
+    hide_distance: false,
+    hide_city: false,
+    incognito_mode: false,
+    show_online_status: true,
+  });
+  const [blocked, setBlocked] = useState<Array<{ user_id: number; name: string; city?: string }>>([]);
+  const [loading, setLoading] = useState(false);
 
   const toggles = [
-    { title: 'Hide distance', icon: 'map-pin' },
-    { title: 'Hide city', icon: 'home' },
-    { title: 'Incognito mode', icon: 'eye-off' },
-    { title: 'Show online status', icon: 'wifi' },
+    { key: 'hide_distance' as const, title: 'Hide distance', icon: 'map-pin' },
+    { key: 'hide_city' as const, title: 'Hide city', icon: 'home' },
+    { key: 'incognito_mode' as const, title: 'Incognito mode', icon: 'eye-off' },
+    { key: 'show_online_status' as const, title: 'Show online status', icon: 'wifi' },
   ];
 
-  const blocked = ['ajay92', 'sophia_k', 'traveler89'];
+  const refresh = async () => {
+    try {
+      setLoading(true);
+      const [settingsResponse, blockedResponse] = await Promise.all([
+        fetch(`${apiBaseUrl}/privacy/settings`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+        fetch(`${apiBaseUrl}/privacy/blocked`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }),
+      ]);
+
+      const settingsBody = await settingsResponse.json().catch(() => ({}));
+      const blockedBody = await blockedResponse.json().catch(() => ({}));
+      if (settingsResponse.ok && settingsBody.settings) {
+        setSettings((prev) => ({ ...prev, ...settingsBody.settings }));
+      }
+      if (blockedResponse.ok && Array.isArray(blockedBody.blocked_users)) {
+        setBlocked(blockedBody.blocked_users);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    refresh().catch(() => {});
+  }, [apiBaseUrl, token]);
+
+  const updateSetting = async (key: keyof PrivacySettings, value: boolean) => {
+    const previous = settings;
+    setSettings((prev) => ({ ...prev, [key]: value }));
+    try {
+      const response = await fetch(`${apiBaseUrl}/privacy/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ [key]: value }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || 'Unable to update setting');
+      }
+    } catch (error: any) {
+      setSettings(previous);
+      Alert.alert('Update failed', error?.message || 'Please try again.');
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Privacy & safety</Typography>
-      </View>
+      <PageHeader title="Privacy & safety" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {loading ? <ActivityIndicator color={theme.colors.brand} /> : null}
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="h2">Visibility</Typography>
           {toggles.map((item) => (
-            <View key={item.title} style={styles.row}>
+            <TouchableOpacity
+              key={item.title}
+              style={styles.row}
+              activeOpacity={0.8}
+              onPress={() => updateSetting(item.key, !settings[item.key])}
+            >
               <View style={[styles.iconPill, { backgroundColor: theme.colors.accentTint }]}>
                 <Feather name={item.icon as any} size={16} color={theme.colors.brand} />
               </View>
               <Typography variant="body">{item.title}</Typography>
-              <Feather name="toggle-right" size={32} color={theme.colors.brand} />
-            </View>
+              <Feather
+                name={settings[item.key] ? 'toggle-right' : 'toggle-left'}
+                size={32}
+                color={settings[item.key] ? theme.colors.brand : theme.colors.muted}
+              />
+            </TouchableOpacity>
           ))}
         </View>
 
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="h2">Blocked profiles</Typography>
-          {blocked.map((name) => (
-            <View key={name} style={styles.row}>
-              <Typography variant="body">{name}</Typography>
-              <TouchableOpacity>
+          {blocked.map((item) => (
+            <View key={item.user_id} style={styles.row}>
+              <Typography variant="body">{item.name}</Typography>
+              <TouchableOpacity
+                onPress={async () => {
+                  try {
+                    const response = await fetch(`${apiBaseUrl}/privacy/unblock`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                      },
+                      body: JSON.stringify({ target_user_id: item.user_id }),
+                    });
+                    const body = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(body.error || 'Unable to unblock user');
+                    setBlocked((prev) => prev.filter((entry) => entry.user_id !== item.user_id));
+                  } catch (error: any) {
+                    Alert.alert('Unblock failed', error?.message || 'Please try again.');
+                  }
+                }}
+              >
                 <Typography variant="small" style={{ color: theme.colors.brand }}>
                   Unblock
                 </Typography>
               </TouchableOpacity>
             </View>
           ))}
+          {blocked.length === 0 ? (
+            <Typography variant="small" muted>
+              No blocked profiles.
+            </Typography>
+          ) : null}
           <Typography variant="tiny" muted>
             Blocking removes chat and visibility both ways.
           </Typography>
@@ -77,22 +174,6 @@ export const PrivacySafetyScreen: React.FC<Props> = ({ onBack }) => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F2F2F2',
-  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 140,
@@ -123,4 +204,3 @@ const styles = StyleSheet.create({
     gap: 8,
   },
 });
-

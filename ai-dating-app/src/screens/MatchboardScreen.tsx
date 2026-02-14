@@ -16,6 +16,8 @@ export type MatchCandidate = {
   match_highlights?: string[];
   suggested_openers?: string[];
   primary_photo?: string;
+  is_verified?: boolean;
+  is_on_grid?: boolean;
 };
 
 type MatchboardScreenProps = {
@@ -36,97 +38,9 @@ type MatchboardScreenProps = {
 
 const fallbackPhotos = [
   require('../../assets/icon.png'),
-  require('../../assets/splash-icon.png'),
-  require('../../assets/adaptive-icon.png'),
+  require('../../assets/icon.png'),
+  require('../../assets/icon.png'),
 ];
-
-const baseDemo: MatchCandidate[] = [
-  {
-    id: 1001,
-    name: 'Mira Kulkarni',
-    age: 29,
-    city: 'Bengaluru',
-    match_percentage: 92,
-    match_reason: 'Shares your love for mindful adventures and slow travel rituals.',
-    match_highlights: ['Mindful travel', 'Community builder', 'Values-led'],
-    suggested_openers: ["Ask Mira about her favourite sunrise hike around the city."],
-    primary_photo: 'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 1002,
-    name: 'Rhea Sen',
-    age: 31,
-    city: 'Pune',
-    match_percentage: 88,
-    match_reason: 'Emotionally fluent product storyteller who journals daily.',
-    match_highlights: ['Calm communicator', 'Journaling buddy'],
-    suggested_openers: ["What's the most meaningful entry in your journal this month?"],
-    primary_photo: 'https://images.unsplash.com/photo-1531891437562-4301cf35b7e4?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 1003,
-    name: 'Nadia Fernandes',
-    age: 28,
-    city: 'Goa',
-    match_percentage: 86,
-    match_reason: 'Marine conservationist who sparks deep conversations.',
-    match_highlights: ['Ocean minded', 'Purpose driven'],
-    suggested_openers: ["Ask about her latest reef restoration project."],
-    primary_photo: 'https://images.unsplash.com/photo-1518057111178-44a106bad636?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 1004,
-    name: 'Sanaya Patel',
-    age: 30,
-    city: 'Ahmedabad',
-    match_percentage: 84,
-    match_reason: 'Grounded entrepreneur blending mindfulness and empathy.',
-    match_highlights: ['Wellness founder', 'Tea rituals'],
-    suggested_openers: ["Share your favourite grounding ritual."],
-    primary_photo: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 1005,
-    name: 'Aditi Rao',
-    age: 27,
-    city: 'Delhi',
-    match_percentage: 82,
-    match_reason: 'Creative psychotherapist helping couples communicate.',
-    match_highlights: ['Psychotherapist', 'Values vulnerability'],
-    suggested_openers: ["What's a question you wish people asked more often?"],
-    primary_photo: 'https://images.unsplash.com/photo-1452570053594-1b985d6ea890?auto=format&fit=crop&w=800&q=80',
-  },
-  {
-    id: 1006,
-    name: 'Ishaan Balakrishnan',
-    age: 33,
-    city: 'Chennai',
-    match_percentage: 80,
-    match_reason: 'Slow-travel filmmaker documenting mindful retreats.',
-    match_highlights: ['Documentary maker', 'Hosts tea salons'],
-    suggested_openers: ["What story are you crafting right now?"],
-    primary_photo: 'https://images.unsplash.com/photo-1489424731084-a5d8b219a5bb?auto=format&fit=crop&w=800&q=80',
-  },
-];
-
-const demoOnGridMatches: MatchCandidate[] = (() => {
-  const cities = ['Bengaluru', 'Mumbai', 'Delhi', 'Pune', 'Hyderabad', 'Chennai', 'Goa', 'Kochi', 'Jaipur', 'Ahmedabad'];
-  const variants: MatchCandidate[] = [];
-  let idx = 0;
-  while (variants.length < 80) {
-    const src = baseDemo[idx % baseDemo.length];
-    const city = cities[variants.length % cities.length];
-    variants.push({
-      ...src,
-      id: src.id + variants.length + 1,
-      city,
-      match_percentage: Math.max(70, src.match_percentage - (variants.length % 15)),
-      name: `${src.name.split(' ')[0]} ${city}`,
-    });
-    idx++;
-  }
-  return [...baseDemo, ...variants];
-})();
 
 export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
   token,
@@ -163,7 +77,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
         distance_km: filters?.distance_km ? Number(filters.distance_km) : undefined,
       };
 
-      const effectiveQuery = searchQuery || filters.keywords || 'mindful, emotionally intelligent';
+      const effectiveQuery = searchQuery || filters.keywords || '';
 
       const response = await fetch(`${apiBaseUrl}/matches/search`, {
         method: 'POST',
@@ -182,13 +96,13 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
       const data = await response.json();
       const hasOnGrid = Array.isArray(data.on_grid_matches) && data.on_grid_matches.length > 0;
 
-      setOnGridMatches(hasOnGrid ? data.on_grid_matches : demoOnGridMatches);
+      setOnGridMatches(hasOnGrid ? data.on_grid_matches : []);
       if (!hasOnGrid) {
-        setError('Showing curated matches while we gather live results.');
+        setError('No live matches found yet. Try adjusting filters or search.');
       }
     } catch (fetchError: any) {
-      setError(fetchError.message || 'Using curated matches for now.');
-      setOnGridMatches(demoOnGridMatches);
+      setError(fetchError.message || 'Unable to load matches right now.');
+      setOnGridMatches([]);
     } finally {
       setLoading(false);
     }
@@ -269,11 +183,13 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
             style={styles.photoOverlay}
           />
           <View style={styles.badgeRow}>
-            <View style={[styles.matchBadge, { backgroundColor: 'rgba(59,178,115,0.9)' }]}>
-              <Typography variant="tiny" style={{ color: '#fff' }}>
-                {match.match_percentage}% match
-              </Typography>
-            </View>
+            {activeTab === 'onGrid' ? (
+              <View style={[styles.matchBadge, { backgroundColor: 'rgba(59,178,115,0.9)' }]}>
+                <Typography variant="tiny" style={{ color: '#fff' }}>
+                  {match.match_percentage}% match
+                </Typography>
+              </View>
+            ) : null}
             <View style={styles.cityPill}>
               <Feather name="map-pin" size={12} color="#fff" />
               <Typography variant="tiny" style={{ color: '#fff' }} numberOfLines={1}>

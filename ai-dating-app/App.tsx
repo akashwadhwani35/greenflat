@@ -1,7 +1,6 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { StyleSheet, View, ActivityIndicator, Alert } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput } from 'react-native';
 import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisplay_600SemiBold, RedHatDisplay_700Bold } from '@expo-google-fonts/red-hat-display';
-import { Inter_400Regular, Inter_500Medium } from '@expo-google-fonts/inter';
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
@@ -32,11 +31,9 @@ import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { ProfileOverviewScreen } from './src/screens/ProfileOverviewScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { AISearchScreen } from './src/screens/AISearchScreen';
-import { clearSession, loadSession, saveSession } from './src/utils/session';
+import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession } from './src/utils/session';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
-const DEMO_EMAIL = process.env.EXPO_PUBLIC_DEMO_EMAIL ?? 'emma.johnson@example.com';
-const DEMO_PASSWORD = process.env.EXPO_PUBLIC_DEMO_PASSWORD ?? 'Passw0rd!';
 
 type Stage = 'welcome' | 'login' | 'onboarding' | 'postOnboarding' | 'matchboard';
 type Overlay =
@@ -74,13 +71,27 @@ const AppShell: React.FC = () => {
   const [selectedMatch, setSelectedMatch] = useState<MatchCandidate | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
-  const [currentConversation, setCurrentConversation] = useState<{ matchId: number; matchName: string; matchPhoto?: string } | null>(null);
+  const [currentConversation, setCurrentConversation] = useState<{ matchId: number; matchName: string; matchPhoto?: string; targetUserId?: number } | null>(null);
   const [showMatchModal, setShowMatchModal] = useState(false);
-  const [matchedUser, setMatchedUser] = useState<{ id: number; name: string; photo?: string } | null>(null);
+  const [matchedUser, setMatchedUser] = useState<{ matchId: number; userId: number; name: string; photo?: string } | null>(null);
   const [overlay, setOverlay] = useState<Overlay>('aiSearch');
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({});
   const [activeTab, setActiveTab] = useState<TabId>('ai');
   const [preferredDiscoverTab, setPreferredDiscoverTab] = useState<'onGrid' | 'offGrid'>('onGrid');
+  const [hasCompletedFirstSearch, setHasCompletedFirstSearch] = useState(false);
+  const [pendingAISearchCharge, setPendingAISearchCharge] = useState(false);
+
+  const applyEntryPointForUser = async (id: number) => {
+    const firstSearchDone = await loadFirstSearchDone(id);
+    setHasCompletedFirstSearch(firstSearchDone);
+    if (firstSearchDone) {
+      setOverlay(null);
+      setActiveTab('explore');
+      return;
+    }
+    setOverlay('aiSearch');
+    setActiveTab('ai');
+  };
 
   // Register for push notifications
   usePushNotifications(authToken, API_BASE_URL);
@@ -93,6 +104,9 @@ const AppShell: React.FC = () => {
           setAuthToken(session.token);
           setUserName(session.user.name || '');
           setUserId(session.user.id || null);
+          if (session.user.id) {
+            await applyEntryPointForUser(session.user.id);
+          }
           setStage('matchboard');
         }
       } finally {
@@ -107,13 +121,25 @@ const AppShell: React.FC = () => {
     setUserName(user.name || 'friend');
     setUserId(user.id);
     await saveSession({ token, user });
+    await applyEntryPointForUser(user.id);
   };
 
   const logout = async () => {
+    if (authToken) {
+      try {
+        await fetch(`${API_BASE_URL}/push/unregister`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${authToken}` },
+        });
+      } catch {
+        // Best-effort only.
+      }
+    }
     await clearSession();
     setAuthToken(null);
     setUserId(null);
     setUserName('');
+    setHasCompletedFirstSearch(false);
     setOverlay('aiSearch');
     setActiveTab('ai');
     setPreferredDiscoverTab('onGrid');
@@ -132,62 +158,6 @@ const AppShell: React.FC = () => {
 
   const handlePostOnboardingComplete = () => {
     setStage('matchboard');
-  };
-
-  const handleDemoLogin = async () => {
-    try {
-      const login = async () => {
-        const response = await fetch(`${API_BASE_URL}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: DEMO_EMAIL, password: DEMO_PASSWORD }),
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(data.error || 'Demo login failed');
-        }
-        return data;
-      };
-
-      let data;
-
-      try {
-        data = await login();
-      } catch (loginError: any) {
-        // Attempt to create the demo user if it doesn't exist yet
-        const signupResponse = await fetch(`${API_BASE_URL}/auth/signup`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            email: DEMO_EMAIL,
-            password: DEMO_PASSWORD,
-            name: 'Emma Johnson',
-            gender: 'female',
-            interested_in: 'male',
-            date_of_birth: '1995-01-01',
-            city: 'New York',
-          }),
-        });
-
-        if (!signupResponse.ok) {
-          const signupBody = await signupResponse.json().catch(() => ({}));
-          throw new Error(signupBody.error || loginError.message || 'Demo login failed');
-        }
-
-        data = await login();
-      }
-
-      if (data.user?.id) {
-        await persistAuth(data.token, { id: data.user.id, name: data.user?.name || 'friend' });
-      } else {
-        setAuthToken(data.token);
-        setUserName(data.user?.name || 'friend');
-        setUserId(data.user?.id || null);
-      }
-      setStage('postOnboarding');
-    } catch (error: any) {
-      Alert.alert('Demo login failed', error.message || 'Please check demo credentials');
-    }
   };
 
   const handleCardPress = (match: MatchCandidate) => {
@@ -224,7 +194,7 @@ const AppShell: React.FC = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ target_user_id: selectedMatch.id, is_on_grid: true }),
+        body: JSON.stringify({ target_user_id: selectedMatch.id, is_on_grid: selectedMatch.is_on_grid ?? true }),
       });
 
       if (!response.ok) {
@@ -236,7 +206,8 @@ const AppShell: React.FC = () => {
       if (data.is_match && data.match_id) {
         // Show match modal
         setMatchedUser({
-          id: data.match_id,
+          matchId: data.match_id,
+          userId: selectedMatch.id,
           name: selectedMatch.name,
           photo: selectedMatch.primary_photo,
         });
@@ -248,6 +219,36 @@ const AppShell: React.FC = () => {
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Unable to process like.');
       setTimeout(() => setSelectedMatch(null), 300);
+    }
+  };
+
+  const handleSendCompliment = async (targetUserId: number, content: string) => {
+    if (!authToken) {
+      Alert.alert('Sign in required', 'Please restart onboarding to continue.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/likes/compliment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          target_user_id: targetUserId,
+          content,
+        }),
+      });
+
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || 'Unable to send compliment.');
+      }
+
+      Alert.alert('Compliment sent', 'Delivered to their Likes inbox. 5 credits used.');
+    } catch (error: any) {
+      Alert.alert('Could not send compliment', error.message || 'Please try again.');
     }
   };
 
@@ -309,16 +310,50 @@ const AppShell: React.FC = () => {
             onOpenAdvancedSearch={() => setOverlay('advancedSearch')}
             onOpenWallet={() => setOverlay('wallet')}
             onLogout={logout}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onAccountDeleted={logout}
           />
         );
       case 'notifications':
-        return <NotificationsScreen {...overlayProps} />;
+        return <NotificationsScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'wallet':
-        return <WalletScreen {...overlayProps} onOpenCheckout={() => setOverlay('checkout')} />;
+        return <WalletScreen {...overlayProps} onOpenCheckout={() => setOverlay('checkout')} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'likes':
-        return <LikesInboxScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
+        return (
+          <LikesInboxScreen
+            {...overlayProps}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onViewProfile={(user) => {
+              setSelectedMatch({
+                id: user.id,
+                name: user.name,
+                age: user.age || undefined,
+                city: user.city || '',
+                match_percentage: 0,
+                primary_photo: user.primary_photo,
+                is_verified: user.is_verified,
+                is_on_grid: true,
+              });
+              setOverlay(null);
+              setShowProfileModal(true);
+            }}
+          />
+        );
       case 'matches':
-        return <MatchesListScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
+        return (
+          <MatchesListScreen
+            {...overlayProps}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onOpenConversation={(matchId, matchName, targetUserId) => {
+              setCurrentConversation({ matchId, matchName, targetUserId });
+              setShowMessages(true);
+              setOverlay(null);
+            }}
+          />
+        );
       case 'conversations':
         return (
           <ConversationsScreen
@@ -326,8 +361,8 @@ const AppShell: React.FC = () => {
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             currentUserId={userId!}
-            onOpenConversation={(matchId, matchName) => {
-              setCurrentConversation({ matchId, matchName });
+            onOpenConversation={(matchId, matchName, targetUserId) => {
+              setCurrentConversation({ matchId, matchName, targetUserId });
               setShowMessages(true);
               setOverlay(null);
             }}
@@ -345,23 +380,8 @@ const AppShell: React.FC = () => {
           />
         );
       case 'aiSearch':
-        return (
-          <AISearchScreen
-            {...overlayProps}
-            onApplySearchQuery={(query) => {
-              setAdvancedFilters((prev) => ({ ...prev, keywords: query }));
-              setPreferredDiscoverTab('onGrid');
-              setOverlay(null);
-              setActiveTab('explore');
-            }}
-            token={authToken!}
-            apiBaseUrl={API_BASE_URL}
-            userName={userName}
-            userProfile={{
-              relationshipGoal: 'a long-term relationship',
-            }}
-          />
-        );
+        // AISearchScreen is rendered separately to persist state - return null here
+        return null;
       case 'profileEdit':
         return <ProfileEditScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onOpenPhotos={() => setOverlay('photos')} />;
       case 'photos':
@@ -369,13 +389,13 @@ const AppShell: React.FC = () => {
       case 'verification':
         return <VerificationScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'privacySafety':
-        return <PrivacySafetyScreen {...overlayProps} />;
+        return <PrivacySafetyScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'helpCenter':
         return <HelpCenterScreen {...overlayProps} onOpenTerms={() => setOverlay('terms')} />;
       case 'terms':
         return <TermsScreen {...overlayProps} />;
       case 'checkout':
-        return <CheckoutScreen {...overlayProps} />;
+        return <CheckoutScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onPurchased={() => setOverlay('wallet')} />;
       case 'profileOverview':
         return (
           <ProfileOverviewScreen
@@ -416,7 +436,7 @@ const AppShell: React.FC = () => {
     }
     switch (stage) {
       case 'welcome':
-        return <WelcomeScreen onStart={() => setStage('onboarding')} onLogin={() => setStage('login')} onDemoLogin={handleDemoLogin} />;
+        return <WelcomeScreen onStart={() => setStage('onboarding')} onLogin={() => setStage('login')} />;
       case 'login':
         return (
           <LoginScreen
@@ -429,14 +449,11 @@ const AppShell: React.FC = () => {
           />
         );
       case 'onboarding':
-        return <OnboardingScreen onComplete={handleOnboardingComplete} apiBaseUrl={API_BASE_URL} />;
+        return <OnboardingScreen onComplete={handleOnboardingComplete} onBack={() => setStage('welcome')} apiBaseUrl={API_BASE_URL} />;
       case 'postOnboarding':
         return <PostOnboardingScreen onComplete={handlePostOnboardingComplete} />;
       case 'matchboard':
-        if (!authToken) {
-          setStage('welcome');
-          return null;
-        }
+        if (!authToken) return null;
 
         // Render main content based on overlay state
         const mainContent = overlay ? (
@@ -457,6 +474,8 @@ const AppShell: React.FC = () => {
               onOpenAdvancedSearch={() => setOverlay('advancedSearch')}
               filters={advancedFilters}
               preferredTab={preferredDiscoverTab}
+              pendingAISearchCharge={pendingAISearchCharge}
+              onConsumeAISearchCharge={() => setPendingAISearchCharge(false)}
             />
             <ProfileDetailScreen
               match={selectedMatch}
@@ -464,6 +483,7 @@ const AppShell: React.FC = () => {
               onClose={handleCloseProfile}
               onSwipeLeft={handleSwipeLeft}
               onSwipeRight={handleSwipeRight}
+              onSendCompliment={handleSendCompliment}
             />
 
             {/* Match Modal */}
@@ -480,9 +500,10 @@ const AppShell: React.FC = () => {
                 onSendMessage={() => {
                   setShowMatchModal(false);
                   setCurrentConversation({
-                    matchId: matchedUser.id,
+                    matchId: matchedUser.matchId,
                     matchName: matchedUser.name,
                     matchPhoto: matchedUser.photo,
+                    targetUserId: matchedUser.userId,
                   });
                   setShowMessages(true);
                 }}
@@ -500,12 +521,48 @@ const AppShell: React.FC = () => {
         return (
           <View style={{ flex: 1 }}>
             {mainContent}
+            {/* AISearchScreen - Always mounted to preserve chat state */}
+            <View style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: overlay === 'aiSearch' ? 50 : -1,
+              opacity: overlay === 'aiSearch' ? 1 : 0,
+              pointerEvents: overlay === 'aiSearch' ? 'auto' : 'none',
+            }}>
+              <AISearchScreen
+                onBack={() => {
+                  setOverlay(null);
+                  setActiveTab('explore');
+                }}
+                onApplySearchQuery={(query) => {
+                  setAdvancedFilters((prev) => ({ ...prev, keywords: query }));
+                  setPendingAISearchCharge(true);
+                  setPreferredDiscoverTab('onGrid');
+                  if (userId && !hasCompletedFirstSearch) {
+                    setHasCompletedFirstSearch(true);
+                    void saveFirstSearchDone(userId);
+                  }
+                  setOverlay(null);
+                  setActiveTab('explore');
+                }}
+                token={authToken!}
+                apiBaseUrl={API_BASE_URL}
+                userName={userName}
+                userProfile={{
+                  relationshipGoal: 'a long-term relationship',
+                }}
+              />
+            </View>
             {/* Messages Screen - Full screen overlay */}
             {showMessages && currentConversation && userId && (
               <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}>
                 <MessagesScreen
                   matchId={currentConversation.matchId}
                   matchName={currentConversation.matchName}
+                  targetUserId={currentConversation.targetUserId}
                   currentUserId={userId}
                   token={authToken}
                   apiBaseUrl={API_BASE_URL}
@@ -544,9 +601,23 @@ export default function App() {
     RedHatDisplay_500Medium,
     RedHatDisplay_600SemiBold,
     RedHatDisplay_700Bold,
-    Inter_400Regular,
-    Inter_500Medium,
   });
+
+  useEffect(() => {
+    const TextAny = Text as any;
+    const TextInputAny = TextInput as any;
+    const textDefaults = (TextAny.defaultProps || {}) as any;
+    const inputDefaults = (TextInputAny.defaultProps || {}) as any;
+
+    TextAny.defaultProps = {
+      ...textDefaults,
+      style: [{ fontFamily: 'RedHatDisplay_400Regular' }, textDefaults.style].filter(Boolean),
+    };
+    TextInputAny.defaultProps = {
+      ...inputDefaults,
+      style: [{ fontFamily: 'RedHatDisplay_400Regular' }, inputDefaults.style].filter(Boolean),
+    };
+  }, []);
 
   if (!fontsLoaded) {
     return (

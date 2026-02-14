@@ -3,6 +3,7 @@ import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS } from '../utils/constants';
 import { notifyLikeReceived, notifyMatch } from '../services/push.service';
+import { consumeCredits } from '../services/credits.service';
 
 // Helper to reset activity limits if needed
 const checkAndResetLimits = async (userId: number, client: any) => {
@@ -116,6 +117,19 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       // Premium users can bookmark
     }
 
+    const blockResult = await client.query(
+      `SELECT 1
+       FROM blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)
+       LIMIT 1`,
+      [userId, target_user_id]
+    );
+    if (blockResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'You cannot like this user due to privacy settings' });
+    }
+
     // Check if already liked
     const existingLike = await client.query(
       'SELECT id FROM likes WHERE liker_id = $1 AND liked_id = $2',
@@ -226,11 +240,12 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
 };
 
 export const getLikesRemaining = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
   try {
     const userId = req.userId!;
 
-    const userResult = await pool.query(
-      'SELECT gender, is_premium FROM users WHERE id = $1',
+    const userResult = await client.query(
+      'SELECT gender, is_premium, credit_balance FROM users WHERE id = $1',
       [userId]
     );
 
@@ -241,26 +256,20 @@ export const getLikesRemaining = async (req: AuthRequest, res: Response) => {
     const user = userResult.rows[0];
     const dailyLimits = user.gender === 'male' ? DAILY_LIMITS.male : DAILY_LIMITS.female;
 
-    const limitsResult = await pool.query(
-      'SELECT * FROM user_activity_limits WHERE user_id = $1',
-      [userId]
-    );
-
-    const limits = limitsResult.rows[0] || {
-      on_grid_likes_count: 0,
-      off_grid_likes_count: 0,
-      messages_started_count: 0,
-    };
+    const limits = await checkAndResetLimits(userId, client);
 
     res.json({
       on_grid_remaining: Math.max(0, dailyLimits.on_grid_likes - limits.on_grid_likes_count),
       off_grid_remaining: Math.max(0, dailyLimits.off_grid_likes - limits.off_grid_likes_count),
       messages_remaining: Math.max(0, dailyLimits.messages_per_day - limits.messages_started_count),
       is_premium: user.is_premium,
+      credit_balance: Number(user.credit_balance || 0),
     });
   } catch (error) {
     console.error('Get likes remaining error:', error);
     res.status(500).json({ error: 'Failed to fetch limits' });
+  } finally {
+    client.release();
   }
 };
 
@@ -272,6 +281,8 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
       `SELECT
          l.id,
          l.is_on_grid,
+         l.is_compliment,
+         l.compliment_message,
          l.created_at,
          liker.id as user_id,
          liker.name,
@@ -284,6 +295,11 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
        FROM likes l
        JOIN users liker ON liker.id = l.liker_id
        WHERE l.liked_id = $1
+         AND NOT EXISTS (
+           SELECT 1 FROM blocks b
+           WHERE (b.blocker_id = $1 AND b.blocked_id = liker.id)
+              OR (b.blocker_id = liker.id AND b.blocked_id = $1)
+         )
        ORDER BY l.created_at DESC
        LIMIT 50`,
       [userId]
@@ -292,6 +308,8 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
     const likes = result.rows.map((row: any) => ({
       id: row.id,
       is_on_grid: row.is_on_grid,
+      is_compliment: row.is_compliment,
+      compliment_message: row.compliment_message,
       created_at: row.created_at,
       user: {
         id: row.user_id,
@@ -312,6 +330,85 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
   }
 };
 
+export const sendCompliment = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
+
+  try {
+    const userId = req.userId!;
+    const { target_user_id, content } = req.body as {
+      target_user_id?: number;
+      content?: string;
+    };
+
+    if (!target_user_id || target_user_id === userId) {
+      return res.status(400).json({ error: 'Valid target user ID is required' });
+    }
+
+    const complimentText = (content || '').trim().slice(0, 300);
+    if (!complimentText) {
+      return res.status(400).json({ error: 'Compliment text is required' });
+    }
+
+    await client.query('BEGIN');
+
+    const targetUserResult = await client.query('SELECT id, name FROM users WHERE id = $1', [target_user_id]);
+    if (targetUserResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Target user not found' });
+    }
+
+    let remainingCredits = 0;
+    try {
+      remainingCredits = await consumeCredits(
+        userId,
+        5,
+        'compliment_send',
+        { target_user_id, preview: complimentText.slice(0, 80) },
+        client
+      );
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      if (error.message === 'INSUFFICIENT_CREDITS') {
+        return res.status(402).json({ error: 'Not enough credits. Compliments cost 5 credits.' });
+      }
+      throw error;
+    }
+
+    const existingLike = await client.query(
+      'SELECT id FROM likes WHERE liker_id = $1 AND liked_id = $2',
+      [userId, target_user_id]
+    );
+
+    if (existingLike.rows.length > 0) {
+      await client.query(
+        `UPDATE likes
+         SET is_compliment = TRUE, compliment_message = $3, created_at = NOW()
+         WHERE liker_id = $1 AND liked_id = $2`,
+        [userId, target_user_id, complimentText]
+      );
+    } else {
+      await client.query(
+        `INSERT INTO likes (liker_id, liked_id, is_on_grid, is_compliment, compliment_message)
+         VALUES ($1, $2, TRUE, TRUE, $3)`,
+        [userId, target_user_id, complimentText]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      message: 'Compliment sent successfully',
+      credit_balance: remainingCredits,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Send compliment error:', error);
+    res.status(500).json({ error: 'Failed to send compliment' });
+  } finally {
+    client.release();
+  }
+};
+
 export const getMatches = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -325,13 +422,18 @@ export const getMatches = async (req: AuthRequest, res: Response) => {
         u.date_of_birth,
         u.city,
         u.is_verified,
-        (SELECT photo_url FROM photos WHERE user_id = u.id AND is_primary = TRUE LIMIT 1) as primary_photo,
+        primary_photo.photo_url as primary_photo,
         p.bio,
         p.interests
       FROM matches m
       JOIN users u ON (u.id = m.user1_id OR u.id = m.user2_id) AND u.id != $1
       LEFT JOIN user_profiles p ON u.id = p.user_id
-      WHERE m.user1_id = $1 OR m.user2_id = $1
+      LEFT JOIN photos primary_photo ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
+      LEFT JOIN blocks blocked_rel
+        ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
+         OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
+      WHERE (m.user1_id = $1 OR m.user2_id = $1)
+        AND blocked_rel.id IS NULL
       ORDER BY m.matched_at DESC`,
       [userId]
     );

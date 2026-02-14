@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, Image, TextInput, ActivityIndicator } from 'react-native';
+import { ScrollView, StyleSheet, View, TouchableOpacity, Image, ActivityIndicator, Alert, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
+import { PageHeader } from '../components/PageHeader';
 
 type Props = { onBack: () => void; token: string; apiBaseUrl: string };
 
 export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }) => {
   const theme = useTheme();
   const [photos, setPhotos] = useState<{ photo_url: string; is_primary: boolean; id: number; order_index?: number }[]>([]);
-  const [newUrl, setNewUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +40,7 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   }, [apiBaseUrl, token]);
 
   const uploadPhoto = async (is_primary = false, urlInput?: string) => {
-    const urlToUse = (urlInput || newUrl).trim();
+    const urlToUse = (urlInput || '').trim();
     if (!urlToUse) return;
     try {
       setLoading(true);
@@ -56,12 +57,40 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || 'Unable to upload photo');
       }
-      setNewUrl(is_primary ? newUrl : '');
       await fetchPhotos();
     } catch (err: any) {
       setError(err.message || 'Unable to upload photo');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const pickAndUploadPhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Permission needed', 'Allow photo library access to add your photo.');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [4, 5],
+        quality: 0.7,
+        base64: Platform.OS !== 'web',
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const asset = result.assets[0];
+      const photoPayload = Platform.OS === 'web'
+        ? asset.uri
+        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+
+      await uploadPhoto(false, photoPayload);
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Could not pick a photo.');
     }
   };
 
@@ -132,13 +161,7 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.iconButton} accessibilityRole="button">
-          <Feather name="arrow-left" size={20} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h1">Photos</Typography>
-        <View style={{ width: 32 }} />
-      </View>
+      <PageHeader title="Photos" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Typography variant="body" muted>
@@ -182,16 +205,16 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
               </View>
             ))}
 
-          <View style={[styles.addCard, { borderColor: theme.colors.border }]}>
-            <TextInput
-              placeholder="Paste image URL"
-              value={newUrl}
-              onChangeText={setNewUrl}
-              style={[styles.urlInput, { color: theme.colors.text }]}
-              placeholderTextColor={theme.colors.muted}
-            />
-            <Button label="Add photo" onPress={() => uploadPhoto(false)} fullWidth />
-          </View>
+          <TouchableOpacity
+            style={[styles.addCard, { borderColor: theme.colors.neonGreen }]}
+            onPress={pickAndUploadPhoto}
+            activeOpacity={0.85}
+          >
+            <Feather name="plus" size={34} color={theme.colors.neonGreen} />
+            <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen, marginTop: 8 }}>
+              Add Photo
+            </Typography>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </View>
@@ -200,22 +223,6 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  header: {
-    paddingTop: 60,
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#F2F2F2',
-  },
   content: {
     paddingHorizontal: 16,
     paddingBottom: 140,
@@ -259,17 +266,12 @@ const styles = StyleSheet.create({
   },
   addCard: {
     width: '48%',
-    borderWidth: 1,
+    minHeight: 160,
+    borderWidth: 2,
+    borderStyle: 'dashed',
     borderRadius: 14,
     padding: 12,
-    gap: 8,
-  },
-  urlInput: {
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });
-
