@@ -97,10 +97,13 @@ export const requestOtp = async (req: Request, res: Response) => {
       await sendOtpSms(normalizedPhone, code);
     }
 
+    if (!smsConfigured) {
+      console.log(`[DEV] Verification OTP for ${normalizedPhone}: ${code}`);
+    }
+
     return res.json({
       message: 'OTP sent',
       expires_in_seconds: OTP_TTL_SECONDS,
-      ...(smsConfigured ? {} : { dev_code: code, delivery: 'dev-bypass' }),
     });
   } catch (error) {
     console.error('Request OTP error', error);
@@ -197,57 +200,53 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const verifyLocation = (req: AuthRequest, res: Response) => {
-  const doWork = async () => {
-    try {
-      const userId = req.userId!;
-      const { lat, lng, city } = req.body;
-      if (typeof lat !== 'number' || typeof lng !== 'number') {
-        return res.status(400).json({ error: 'lat and lng required' });
-      }
-
-      let resolvedCity = city || null;
-      if (!resolvedCity && GOOGLE_MAPS_API_KEY) {
-        try {
-          const geoResponse = await fetch(
-            `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
-          );
-          if (geoResponse.ok) {
-            const geoJson = (await geoResponse.json()) as any;
-            const loc = geoJson.results?.[0];
-            const cityComponent = loc?.address_components?.find((c: any) =>
-              c.types?.includes('locality')
-            );
-            resolvedCity = cityComponent?.long_name || loc?.formatted_address || null;
-          }
-        } catch (geoError) {
-          console.error('Geocode lookup failed', geoError);
-        }
-      }
-
-      await pool.query(
-        `INSERT INTO verification_status (user_id, location_verified, location_lat, location_lng, location_city, updated_at)
-         VALUES ($1, TRUE, $2, $3, $4, NOW())
-         ON CONFLICT (user_id) DO UPDATE SET location_verified = TRUE, location_lat = $2, location_lng = $3, location_city = $4, updated_at = NOW()`,
-        [userId, lat, lng, resolvedCity]
-      );
-
-      // Store coordinates on user record to support distance-based matching
-      await pool.query(
-        `UPDATE users
-         SET latitude = $1, longitude = $2, city = COALESCE($3, city), updated_at = NOW()
-         WHERE id = $4`,
-        [lat, lng, resolvedCity, userId]
-      );
-
-      res.json({ message: 'Location verified', city: resolvedCity });
-    } catch (error) {
-      console.error('Verify location error', error);
-      res.status(500).json({ error: 'Failed to verify location' });
+export const verifyLocation = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const { lat, lng, city } = req.body;
+    if (typeof lat !== 'number' || typeof lng !== 'number') {
+      return res.status(400).json({ error: 'lat and lng required' });
     }
-  };
 
-  void doWork();
+    let resolvedCity = city || null;
+    if (!resolvedCity && GOOGLE_MAPS_API_KEY) {
+      try {
+        const geoResponse = await fetch(
+          `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
+        );
+        if (geoResponse.ok) {
+          const geoJson = (await geoResponse.json()) as any;
+          const loc = geoJson.results?.[0];
+          const cityComponent = loc?.address_components?.find((c: any) =>
+            c.types?.includes('locality')
+          );
+          resolvedCity = cityComponent?.long_name || loc?.formatted_address || null;
+        }
+      } catch (geoError) {
+        console.error('Geocode lookup failed', geoError);
+      }
+    }
+
+    await pool.query(
+      `INSERT INTO verification_status (user_id, location_verified, location_lat, location_lng, location_city, updated_at)
+       VALUES ($1, TRUE, $2, $3, $4, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET location_verified = TRUE, location_lat = $2, location_lng = $3, location_city = $4, updated_at = NOW()`,
+      [userId, lat, lng, resolvedCity]
+    );
+
+    // Store coordinates on user record to support distance-based matching
+    await pool.query(
+      `UPDATE users
+       SET latitude = $1, longitude = $2, city = COALESCE($3, city), updated_at = NOW()
+       WHERE id = $4`,
+      [lat, lng, resolvedCity, userId]
+    );
+
+    res.json({ message: 'Location verified', city: resolvedCity });
+  } catch (error) {
+    console.error('Verify location error', error);
+    res.status(500).json({ error: 'Failed to verify location' });
+  }
 };
 
 export const getVerificationStatus = (req: AuthRequest, res: Response) => {

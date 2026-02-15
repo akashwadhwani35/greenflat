@@ -46,7 +46,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
 
   try {
     const userId = req.userId!;
-    const { target_user_id, is_on_grid } = req.body;
+    const { target_user_id, is_on_grid, is_superlike } = req.body;
 
     if (!target_user_id) {
       return res.status(400).json({ error: 'Target user ID is required' });
@@ -141,10 +141,29 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'You have already liked this user' });
     }
 
+    // Superlike costs 5 credits
+    if (is_superlike) {
+      try {
+        await consumeCredits(
+          userId,
+          5,
+          'superlike',
+          { target_user_id },
+          client
+        );
+      } catch (error: any) {
+        await client.query('ROLLBACK');
+        if (error.message === 'INSUFFICIENT_CREDITS') {
+          return res.status(402).json({ error: 'Not enough credits. Superlikes cost 5 credits.' });
+        }
+        throw error;
+      }
+    }
+
     // Create the like
     await client.query(
-      'INSERT INTO likes (liker_id, liked_id, is_on_grid) VALUES ($1, $2, $3)',
-      [userId, target_user_id, is_on_grid]
+      'INSERT INTO likes (liker_id, liked_id, is_on_grid, is_superlike) VALUES ($1, $2, $3, $4)',
+      [userId, target_user_id, is_on_grid, Boolean(is_superlike)]
     );
 
     // Update activity limits
@@ -179,7 +198,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       // Create a match
       const matchResult = await client.query(
         `INSERT INTO matches (user1_id, user2_id)
-         VALUES (LEAST($1, $2), GREATEST($1, $2))
+         VALUES (LEAST($1::int, $2::int), GREATEST($1::int, $2::int))
          ON CONFLICT (user1_id, user2_id) DO NOTHING
          RETURNING id`,
         [userId, target_user_id]
@@ -222,9 +241,10 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     await client.query('COMMIT');
 
     res.json({
-      message: 'Profile liked successfully',
+      message: is_superlike ? 'Superlike sent!' : 'Profile liked successfully',
       is_match: isMatch,
       match_id: matchId,
+      is_superlike: Boolean(is_superlike),
       likes_remaining: {
         on_grid: Math.max(0, dailyLimits.on_grid_likes - currentLimits.on_grid_likes_count),
         off_grid: Math.max(0, dailyLimits.off_grid_likes - currentLimits.off_grid_likes_count),
@@ -281,6 +301,7 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
       `SELECT
          l.id,
          l.is_on_grid,
+         l.is_superlike,
          l.is_compliment,
          l.compliment_message,
          l.created_at,
@@ -300,7 +321,7 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
            WHERE (b.blocker_id = $1 AND b.blocked_id = liker.id)
               OR (b.blocker_id = liker.id AND b.blocked_id = $1)
          )
-       ORDER BY l.created_at DESC
+       ORDER BY l.is_superlike DESC, l.created_at DESC
        LIMIT 50`,
       [userId]
     );
@@ -308,6 +329,7 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
     const likes = result.rows.map((row: any) => ({
       id: row.id,
       is_on_grid: row.is_on_grid,
+      is_superlike: row.is_superlike,
       is_compliment: row.is_compliment,
       compliment_message: row.compliment_message,
       created_at: row.created_at,

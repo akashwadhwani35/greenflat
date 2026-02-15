@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, View, TouchableOpacity, Image, ActivityIndicator, RefreshControl, TextInput } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
@@ -24,6 +25,7 @@ type Props = {
   token: string;
   apiBaseUrl: string;
   currentUserId: number;
+  socket: Socket | null;
 };
 
 export const ConversationsScreen: React.FC<Props> = ({
@@ -31,7 +33,8 @@ export const ConversationsScreen: React.FC<Props> = ({
   onOpenConversation,
   token,
   apiBaseUrl,
-  currentUserId
+  currentUserId,
+  socket,
 }) => {
   const theme = useTheme();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -63,11 +66,60 @@ export const ConversationsScreen: React.FC<Props> = ({
 
   useEffect(() => {
     fetchConversations();
-
-    // Auto-refresh every 5 seconds
-    const interval = setInterval(() => fetchConversations(true), 5000);
-    return () => clearInterval(interval);
   }, []);
+
+  // Socket listener for real-time conversation updates
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleConversationUpdated = (data: {
+      matchId: number;
+      lastMessage: string;
+      lastMessageTime: string;
+    }) => {
+      setConversations((prev) => {
+        const idx = prev.findIndex((c) => c.match_id === data.matchId);
+        if (idx === -1) {
+          // New conversation — do a full refresh to get complete data
+          fetchConversations(true);
+          return prev;
+        }
+        const updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          last_message: data.lastMessage,
+          last_message_time: data.lastMessageTime,
+          unread_count: updated[idx].unread_count + 1,
+        };
+        // Re-sort: most recent first
+        updated.sort((a, b) => {
+          const timeA = a.last_message_time || a.matched_at;
+          const timeB = b.last_message_time || b.matched_at;
+          return new Date(timeB).getTime() - new Date(timeA).getTime();
+        });
+        return updated;
+      });
+    };
+
+    const handleMessagesRead = (data: { matchId: number; readBy: number }) => {
+      // If the current user just read messages, reset unread count for that conversation
+      if (data.readBy === currentUserId) {
+        setConversations((prev) =>
+          prev.map((c) =>
+            c.match_id === data.matchId ? { ...c, unread_count: 0 } : c
+          )
+        );
+      }
+    };
+
+    socket.on('conversation:updated', handleConversationUpdated);
+    socket.on('messages:read', handleMessagesRead);
+
+    return () => {
+      socket.off('conversation:updated', handleConversationUpdated);
+      socket.off('messages:read', handleMessagesRead);
+    };
+  }, [socket, currentUserId]);
 
   const onRefresh = () => {
     setRefreshing(true);

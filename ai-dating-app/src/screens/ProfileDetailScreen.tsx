@@ -11,7 +11,10 @@ type ProfileDetailScreenProps = {
   onClose: () => void;
   onSwipeLeft: () => void;
   onSwipeRight: () => void;
+  onSuperlike?: () => void;
   onSendCompliment?: (targetUserId: number, content: string) => Promise<void> | void;
+  onBlock?: (targetUserId: number, name: string) => void;
+  onReport?: (targetUserId: number, name: string) => void;
 };
 
 const fallbackPhoto = require('../../assets/icon.png');
@@ -63,6 +66,9 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   onSwipeLeft,
   onSwipeRight,
   onSendCompliment,
+  onSuperlike,
+  onBlock,
+  onReport,
 }) => {
   const theme = useTheme();
   const [sendingComplimentKey, setSendingComplimentKey] = useState<string | null>(null);
@@ -233,17 +239,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
               <TouchableOpacity onPress={onSwipeLeft} style={styles.roundButton} activeOpacity={0.8}>
                 <Feather name="x" size={24} color="#222222" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.starButton} activeOpacity={0.8}>
+              <TouchableOpacity style={styles.starButton} activeOpacity={0.8} onPress={onSuperlike}>
                 <Feather name="star" size={22} color="#111111" />
               </TouchableOpacity>
               <TouchableOpacity onPress={onSwipeRight} style={styles.roundButton} activeOpacity={0.8}>
                 <Feather name="heart" size={22} color="#222222" />
               </TouchableOpacity>
             </View>
-            <TouchableOpacity activeOpacity={0.75}>
+            <TouchableOpacity activeOpacity={0.75} onPress={() => onBlock?.(match.id, name)}>
               <Typography variant="small" style={styles.blockText}>Block</Typography>
             </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.75}>
+            <TouchableOpacity activeOpacity={0.75} onPress={() => onReport?.(match.id, name)}>
               <Typography variant="small" style={styles.reportText}>Report</Typography>
             </TouchableOpacity>
           </View>

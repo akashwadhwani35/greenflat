@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { PERSONALITY_TRAITS_MAP } from '../utils/constants';
-import { analyzePersonality, generateProfileEmbedding } from '../services/openai.service';
+import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
 
 export const completeProfile = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
@@ -478,6 +478,44 @@ export const updateUserBasics = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Update user basics error:', error);
     res.status(500).json({ error: 'Failed to update profile' });
+  }
+};
+
+export const getBioSuggestions = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(503).json({ error: 'AI features are not configured' });
+    }
+
+    const userResult = await pool.query('SELECT name FROM users WHERE id = $1', [userId]);
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const profileResult = await pool.query(
+      'SELECT interests FROM user_profiles WHERE user_id = $1',
+      [userId]
+    );
+    const personalityResult = await pool.query(
+      'SELECT top_traits FROM personality_responses WHERE user_id = $1',
+      [userId]
+    );
+
+    const name = userResult.rows[0].name || 'User';
+    const interests: string[] = profileResult.rows[0]?.interests || [];
+    const traits: string[] = personalityResult.rows[0]?.top_traits || [];
+
+    if (interests.length === 0 && traits.length === 0) {
+      return res.status(400).json({ error: 'Complete your profile first to get bio suggestions' });
+    }
+
+    const suggestions = await generateBioSuggestions(name, interests, traits);
+    res.json({ suggestions });
+  } catch (error) {
+    console.error('Bio suggestions error:', error);
+    res.status(500).json({ error: 'Failed to generate bio suggestions' });
   }
 };
 

@@ -5,6 +5,7 @@ export type SavedSession = {
   user: {
     id: number;
     name: string;
+    is_admin?: boolean;
   };
 };
 

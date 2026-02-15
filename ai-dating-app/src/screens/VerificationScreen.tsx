@@ -51,7 +51,7 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   };
 
   useEffect(() => {
-    getStatus().catch(() => {});
+    getStatus().catch((err) => console.warn('Failed to load verification status:', err));
   }, []);
 
   const requestOtp = async () => {

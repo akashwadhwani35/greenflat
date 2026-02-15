@@ -62,7 +62,7 @@ export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl
   };
 
   useEffect(() => {
-    refresh().catch(() => {});
+    refresh().catch((err) => console.warn('Failed to load privacy settings:', err));
   }, [apiBaseUrl, token]);
 
   const updateSetting = async (key: keyof PrivacySettings, value: boolean) => {
@@ -160,7 +160,16 @@ export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl
           <Typography variant="body" muted>
             If someone feels off, block or report. Keep conversations on Greenflag until you’re comfortable.
           </Typography>
-          <TouchableOpacity style={styles.reportRow}>
+          <TouchableOpacity
+            style={styles.reportRow}
+            onPress={() => {
+              Alert.alert(
+                'Report a profile',
+                'To report someone, open their profile from your matches or conversations and tap the report button.',
+                [{ text: 'OK' }]
+              );
+            }}
+          >
             <Feather name="flag" size={16} color={theme.colors.error} />
             <Typography variant="small" style={{ color: theme.colors.error }}>
               Report a profile

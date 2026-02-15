@@ -35,7 +35,7 @@ export const ProfileOverviewScreen: React.FC<Props> = ({ onBack, token, apiBaseU
       }
     };
 
-    fetchProfile().catch(() => {});
+    fetchProfile().catch((err) => console.warn('Failed to load profile:', err));
   }, [apiBaseUrl, token]);
 
   const primaryPhoto = profile?.photos?.find((p: any) => p.is_primary) || profile?.photos?.[0];

@@ -34,7 +34,7 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, token, a
         setLoading(false);
       }
     };
-    fetchWallet().catch(() => {});
+    fetchWallet().catch((err) => console.warn('Failed to load wallet:', err));
   }, [token, apiBaseUrl]);
 
   const ledgerRows = useMemo(() => transactions.map((tx) => {

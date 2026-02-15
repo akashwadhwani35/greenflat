@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Switch, View, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -23,6 +23,8 @@ type Props = {
   onOpenAISearch?: () => void;
   onOpenAdvancedSearch?: () => void;
   onOpenWallet?: () => void;
+  onOpenAdmin?: () => void;
+  isAdmin?: boolean;
   onLogout?: () => void;
   token?: string;
   apiBaseUrl?: string;
@@ -46,6 +48,8 @@ export const SettingsScreen: React.FC<Props> = ({
   onOpenAISearch,
   onOpenAdvancedSearch,
   onOpenWallet,
+  onOpenAdmin,
+  isAdmin,
   onLogout,
   token,
   apiBaseUrl,
@@ -53,8 +57,50 @@ export const SettingsScreen: React.FC<Props> = ({
 }) => {
   const theme = useTheme();
   const [deleting, setDeleting] = useState(false);
+  const [privacySettings, setPrivacySettings] = useState({
+    hide_distance: false,
+    incognito_mode: false,
+    show_online_status: true,
+  });
+
+  useEffect(() => {
+    if (!token || !apiBaseUrl) return;
+    fetch(`${apiBaseUrl}/privacy/settings`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.settings) {
+          setPrivacySettings((prev) => ({ ...prev, ...data.settings }));
+        }
+      })
+      .catch((err) => console.warn('Failed to load privacy settings:', err));
+  }, [token, apiBaseUrl]);
+
+  const updateToggle = async (key: keyof typeof privacySettings, value: boolean) => {
+    if (!token || !apiBaseUrl) return;
+    const previous = privacySettings;
+    setPrivacySettings((prev) => ({ ...prev, [key]: value }));
+    try {
+      const response = await fetch(`${apiBaseUrl}/privacy/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ [key]: value }),
+      });
+      if (!response.ok) {
+        throw new Error('Update failed');
+      }
+    } catch {
+      setPrivacySettings(previous);
+      Alert.alert('Error', 'Could not update setting. Please try again.');
+    }
+  };
 
   const menuItems = [
+    ...(isAdmin ? [{ title: 'Admin dashboard', subtitle: 'Moderate users and reports', icon: 'shield', action: onOpenAdmin }] : []),
     { title: 'Your profile', subtitle: 'Preview how your profile looks', icon: 'user', action: onOpenProfile },
     { title: 'Profile & prompts', subtitle: 'Edit bio, interests, prompts', icon: 'user', action: onOpenProfileEdit },
     { title: 'Photos', subtitle: 'Add, reorder, set primary', icon: 'image', action: onOpenPhotos },
@@ -94,33 +140,47 @@ export const SettingsScreen: React.FC<Props> = ({
         <View style={styles.card}>
           <View style={styles.toggleRow}>
             <Typography variant="body">Hide distance</Typography>
-            <Feather name="toggle-right" size={32} color={theme.colors.brand} />
+            <Switch
+              value={privacySettings.hide_distance}
+              onValueChange={(v) => updateToggle('hide_distance', v)}
+              trackColor={{ false: theme.colors.muted, true: theme.colors.brand }}
+            />
           </View>
           <View style={styles.toggleRow}>
             <Typography variant="body">Incognito mode</Typography>
-            <Feather name="toggle-left" size={32} color={theme.colors.muted} />
+            <Switch
+              value={privacySettings.incognito_mode}
+              onValueChange={(v) => updateToggle('incognito_mode', v)}
+              trackColor={{ false: theme.colors.muted, true: theme.colors.brand }}
+            />
           </View>
           <View style={styles.toggleRow}>
-            <Typography variant="body">Cool down</Typography>
-            <Feather name="toggle-left" size={32} color={theme.colors.muted} />
+            <Typography variant="body">Show online status</Typography>
+            <Switch
+              value={privacySettings.show_online_status}
+              onValueChange={(v) => updateToggle('show_online_status', v)}
+              trackColor={{ false: theme.colors.muted, true: theme.colors.brand }}
+            />
           </View>
         </View>
 
-        <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-          <Typography variant="h2">QA shortcuts</Typography>
-          <Typography variant="small" muted>
-            Jump to screens to validate UI quickly.
-          </Typography>
-          <View style={{ gap: 10, marginTop: 6 }}>
-            {onOpenLikesInbox ? <Button label="Open Likes inbox" variant="secondary" onPress={onOpenLikesInbox} fullWidth /> : null}
-            {onOpenMatches ? <Button label="Open Matches" variant="secondary" onPress={onOpenMatches} fullWidth /> : null}
-            {onOpenConversations ? <Button label="Open Chats" variant="secondary" onPress={onOpenConversations} fullWidth /> : null}
-            {onOpenAISearch ? <Button label="Open AI Search" variant="secondary" onPress={onOpenAISearch} fullWidth /> : null}
-            {onOpenAdvancedSearch ? <Button label="Open Filters" variant="secondary" onPress={onOpenAdvancedSearch} fullWidth /> : null}
-            {onOpenWallet ? <Button label="Open Wallet" variant="secondary" onPress={onOpenWallet} fullWidth /> : null}
-            {onOpenNotifications ? <Button label="Open Notifications" variant="secondary" onPress={onOpenNotifications} fullWidth /> : null}
+        {__DEV__ && (
+          <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <Typography variant="h2">QA shortcuts</Typography>
+            <Typography variant="small" muted>
+              Jump to screens to validate UI quickly.
+            </Typography>
+            <View style={{ gap: 10, marginTop: 6 }}>
+              {onOpenLikesInbox ? <Button label="Open Likes inbox" variant="secondary" onPress={onOpenLikesInbox} fullWidth /> : null}
+              {onOpenMatches ? <Button label="Open Matches" variant="secondary" onPress={onOpenMatches} fullWidth /> : null}
+              {onOpenConversations ? <Button label="Open Chats" variant="secondary" onPress={onOpenConversations} fullWidth /> : null}
+              {onOpenAISearch ? <Button label="Open AI Search" variant="secondary" onPress={onOpenAISearch} fullWidth /> : null}
+              {onOpenAdvancedSearch ? <Button label="Open Filters" variant="secondary" onPress={onOpenAdvancedSearch} fullWidth /> : null}
+              {onOpenWallet ? <Button label="Open Wallet" variant="secondary" onPress={onOpenWallet} fullWidth /> : null}
+              {onOpenNotifications ? <Button label="Open Notifications" variant="secondary" onPress={onOpenNotifications} fullWidth /> : null}
+            </View>
           </View>
-        </View>
+        )}
 
         <Button label="Log out" variant="secondary" onPress={onLogout || onBack} fullWidth />
         <Button

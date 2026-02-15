@@ -51,7 +51,7 @@ export const NotificationsScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl
         setPrefs((prev) => ({ ...prev, ...body.preferences }));
       }
     };
-    load().catch(() => {});
+    load().catch((err) => console.warn('Failed to load notification preferences:', err));
   }, [apiBaseUrl, token]);
 
   const allDisabled = useMemo(() => Object.values(prefs).every((v) => !v), [prefs]);

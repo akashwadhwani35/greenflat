@@ -49,7 +49,7 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
       }
     };
 
-    fetchLikes().catch(() => {});
+    fetchLikes().catch((err) => console.warn('Failed to load likes:', err));
   }, [apiBaseUrl, token]);
 
   useEffect(() => {
@@ -61,7 +61,7 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
         setNotificationsEnabled(null);
       }
     };
-    refreshNotificationStatus().catch(() => {});
+    refreshNotificationStatus().catch((err) => console.warn('Failed to refresh notification status:', err));
   }, []);
 
   return (

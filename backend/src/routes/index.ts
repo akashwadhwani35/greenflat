@@ -1,6 +1,6 @@
 import express from 'express';
-import { signup, login } from '../controllers/authController';
-import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount } from '../controllers/profileController';
+import { signup, login, forgotPassword, resetPassword } from '../controllers/authController';
+import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount, getBioSuggestions } from '../controllers/profileController';
 import { searchMatches, refreshOffGrid, getUserDetails, unmatch } from '../controllers/matchController';
 import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment } from '../controllers/likeController';
 import { authenticate } from '../middleware/auth';
@@ -26,15 +26,19 @@ import {
 } from '../controllers/privacyController';
 import { getNotificationPreferences, updateNotificationPreferences } from '../controllers/notificationsController';
 import { getMediaCapabilities, getUploadSignature } from '../controllers/mediaController';
+import adminRouter from './admin';
+import { loginLimiter, signupLimiter, forgotPasswordLimiter, resetPasswordLimiter } from '../middleware/rateLimit';
 
 const router = express.Router();
 
 // Public routes
 router.post('/geocode', publicGeocode);
 
-// Auth routes
-router.post('/auth/signup', signup);
-router.post('/auth/login', login);
+// Auth routes (rate limited)
+router.post('/auth/signup', signupLimiter, signup);
+router.post('/auth/login', loginLimiter, login);
+router.post('/auth/forgot-password', forgotPasswordLimiter, forgotPassword);
+router.post('/auth/reset-password', resetPasswordLimiter, resetPassword);
 
 // Profile routes (protected)
 router.post('/profile/complete', authenticate, completeProfile);
@@ -45,6 +49,7 @@ router.post('/profile/photo/primary', authenticate, setPrimaryPhoto);
 router.post('/profile/photo/reorder', authenticate, reorderPhoto);
 router.post('/profile/basic', authenticate, updateUserBasics);
 router.post('/profile/boost', authenticate, activateBoost);
+router.get('/profile/bio-suggestions', authenticate, getBioSuggestions);
 router.delete('/profile/me', authenticate, deleteAccount);
 
 // Match routes (protected)
@@ -98,5 +103,8 @@ router.delete('/messages/:messageId', authenticate, deleteMessage);
 
 // AI routes (protected)
 router.post('/ai/sidekick', authenticate, sidekick);
+
+// Admin routes
+router.use('/admin', adminRouter);
 
 export default router;

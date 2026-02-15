@@ -183,6 +183,7 @@ const calculateMatchPercentage = (
     totalFactors += 15;
   }
 
+  if (totalFactors === 0) return 1;
   return Math.min(Math.round((matchScore / totalFactors) * 100), 99);
 };
 
@@ -406,10 +407,14 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       .map((candidate: any) => {
         let distance_km: number | null = null;
         if (hasUserLocation) {
-          const candLat = Number(candidate.latitude);
-          const candLng = Number(candidate.longitude);
-          if (Number.isFinite(candLat) && Number.isFinite(candLng)) {
-            distance_km = haversineDistanceKm(currentUserLat, currentUserLng, candLat, candLng);
+          const rawLat = candidate.latitude;
+          const rawLng = candidate.longitude;
+          if (rawLat != null && rawLng != null) {
+            const candLat = Number(rawLat);
+            const candLng = Number(rawLng);
+            if (Number.isFinite(candLat) && Number.isFinite(candLng)) {
+              distance_km = haversineDistanceKm(currentUserLat, currentUserLng, candLat, candLng);
+            }
           }
         }
 

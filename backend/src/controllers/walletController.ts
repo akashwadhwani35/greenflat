@@ -38,13 +38,34 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
     const userId = req.userId!;
-    const { plan } = req.body as { plan?: 'starter' | 'premium' | 'boost' };
+    const { plan, idempotency_key } = req.body as { plan?: 'starter' | 'premium' | 'boost'; idempotency_key?: string };
 
     if (!plan) {
       return res.status(400).json({ error: 'plan is required' });
     }
 
     await client.query('BEGIN');
+
+    // Idempotency check: reject duplicate purchases with same key
+    if (idempotency_key) {
+      const existing = await client.query(
+        `SELECT id FROM credit_transactions
+         WHERE user_id = $1 AND metadata->>'idempotency_key' = $2`,
+        [userId, idempotency_key]
+      );
+      if (existing.rows.length > 0) {
+        await client.query('ROLLBACK');
+        const result = await pool.query(
+          'SELECT credit_balance, is_premium, premium_expires_at, boost_expires_at FROM users WHERE id = $1',
+          [userId]
+        );
+        return res.json({
+          message: 'Purchase already applied',
+          wallet: result.rows[0],
+          duplicate: true,
+        });
+      }
+    }
 
     if (plan === 'starter') {
       await client.query(
@@ -56,7 +77,7 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
       await client.query(
         `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
          VALUES ($1, $2, 'credit', 'starter_purchase', $3)`,
-        [userId, 10, JSON.stringify({ source: 'checkout' })]
+        [userId, 10, JSON.stringify({ source: 'checkout', ...(idempotency_key ? { idempotency_key } : {}) })]
       );
     } else if (plan === 'premium') {
       await client.query(
@@ -71,7 +92,7 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
       await client.query(
         `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
          VALUES ($1, $2, 'credit', 'premium_purchase', $3)`,
-        [userId, 30, JSON.stringify({ source: 'checkout', premium_days: 30 })]
+        [userId, 30, JSON.stringify({ source: 'checkout', premium_days: 30, ...(idempotency_key ? { idempotency_key } : {}) })]
       );
     } else if (plan === 'boost') {
       await client.query(

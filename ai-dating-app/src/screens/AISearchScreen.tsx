@@ -190,7 +190,7 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
       }
     };
 
-    loadHistory().catch(() => {});
+    loadHistory().catch((err) => console.warn('Failed to load search history:', err));
   }, []);
 
   const saveHistory = async (next: SearchHistoryItem[]) => {

@@ -21,10 +21,14 @@ CREATE TABLE IF NOT EXISTS users (
     cooldown_enabled BOOLEAN DEFAULT FALSE,
     cooldown_until TIMESTAMP,
     push_token TEXT,
+    -- DEPRECATED: privacy settings moved to user_privacy_settings table.
+    -- These columns are kept for backwards compatibility but no longer written to.
     hide_distance BOOLEAN DEFAULT FALSE,
     hide_city BOOLEAN DEFAULT FALSE,
     incognito_mode BOOLEAN DEFAULT FALSE,
     show_online_status BOOLEAN DEFAULT TRUE,
+    is_admin BOOLEAN DEFAULT FALSE,
+    is_banned BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -98,6 +102,7 @@ CREATE TABLE IF NOT EXISTS likes (
     liker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     liked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     is_on_grid BOOLEAN DEFAULT TRUE,
+    is_superlike BOOLEAN DEFAULT FALSE,
     is_compliment BOOLEAN DEFAULT FALSE,
     compliment_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -205,6 +210,8 @@ CREATE TABLE IF NOT EXISTS reports (
     reported_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     reason TEXT NOT NULL,
     status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'reviewed', 'resolved')),
+    admin_notes TEXT,
+    reviewed_by INTEGER REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

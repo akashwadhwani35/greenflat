@@ -9,10 +9,11 @@ import { useTheme } from '../theme/ThemeProvider';
 type Props = {
   apiBaseUrl: string;
   onBack: () => void;
-  onSuccess: (payload: { token: string; user: { id: number; name: string } }) => void;
+  onSuccess: (payload: { token: string; user: { id: number; name: string; is_admin?: boolean } }) => void;
+  onForgotPassword?: () => void;
 };
 
-export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess }) => {
+export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, onForgotPassword }) => {
   const theme = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,7 +33,7 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess }) 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Login failed');
       if (!data.token || !data.user?.id) throw new Error('Login response missing token');
-      onSuccess({ token: data.token, user: { id: data.user.id, name: data.user.name || 'friend' } });
+      onSuccess({ token: data.token, user: { id: data.user.id, name: data.user.name || 'friend', is_admin: data.user.is_admin } });
     } catch (error: any) {
       Alert.alert('Login failed', error.message || 'Please try again.');
     } finally {
@@ -73,6 +74,14 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess }) 
             />
             <Button label="Sign in" onPress={submit} fullWidth disabled={!canSubmit || loading} loading={loading} />
           </View>
+
+          {onForgotPassword ? (
+            <TouchableOpacity onPress={onForgotPassword} style={{ alignSelf: 'center', marginTop: 14 }}>
+              <Typography variant="small" style={{ color: theme.colors.brand }}>
+                Forgot password?
+              </Typography>
+            </TouchableOpacity>
+          ) : null}
 
           <Typography variant="tiny" muted align="center" style={{ marginTop: 14 }}>
             Use your registered account credentials to sign in.

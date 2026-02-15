@@ -36,7 +36,7 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   };
 
   useEffect(() => {
-    fetchPhotos().catch(() => {});
+    fetchPhotos().catch((err) => console.warn('Failed to load photos:', err));
   }, [apiBaseUrl, token]);
 
   const uploadPhoto = async (is_primary = false, urlInput?: string) => {

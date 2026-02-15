@@ -3,8 +3,10 @@ import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput } from 'rea
 import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisplay_600SemiBold, RedHatDisplay_700Bold } from '@expo-google-fonts/red-hat-display';
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
+import { useSocket } from './src/hooks/useSocket';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { PostOnboardingScreen } from './src/screens/PostOnboardingScreen';
 import { MatchboardScreen, MatchCandidate } from './src/screens/MatchboardScreen';
@@ -27,6 +29,7 @@ import { VerificationScreen } from './src/screens/VerificationScreen';
 import { PrivacySafetyScreen } from './src/screens/PrivacySafetyScreen';
 import { HelpCenterScreen } from './src/screens/HelpCenterScreen';
 import { TermsScreen } from './src/screens/TermsScreen';
+import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { ProfileOverviewScreen } from './src/screens/ProfileOverviewScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
@@ -35,7 +38,7 @@ import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, sa
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
 
-type Stage = 'welcome' | 'login' | 'onboarding' | 'postOnboarding' | 'matchboard';
+type Stage = 'welcome' | 'login' | 'forgotPassword' | 'onboarding' | 'postOnboarding' | 'matchboard';
 type Overlay =
   | null
   | 'settings'
@@ -54,7 +57,8 @@ type Overlay =
   | 'terms'
   | 'checkout'
   | 'profileOverview'
-  | 'profile';
+  | 'profile'
+  | 'admin';
 
 type OnboardingResult = {
   token: string;
@@ -80,6 +84,7 @@ const AppShell: React.FC = () => {
   const [preferredDiscoverTab, setPreferredDiscoverTab] = useState<'onGrid' | 'offGrid'>('onGrid');
   const [hasCompletedFirstSearch, setHasCompletedFirstSearch] = useState(false);
   const [pendingAISearchCharge, setPendingAISearchCharge] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const applyEntryPointForUser = async (id: number) => {
     const firstSearchDone = await loadFirstSearchDone(id);
@@ -94,7 +99,16 @@ const AppShell: React.FC = () => {
   };
 
   // Register for push notifications
-  usePushNotifications(authToken, API_BASE_URL);
+  const handlePushNavigate = useMemo(() => (screen: string | null) => {
+    if (!screen || stage !== 'matchboard') return;
+    if (screen === 'likes') setOverlay('likes');
+    else if (screen === 'matches') setOverlay('matches');
+    else if (screen === 'conversations') setOverlay('conversations');
+  }, [stage]);
+  usePushNotifications(authToken, API_BASE_URL, handlePushNavigate);
+
+  // Socket.io connection for real-time messaging
+  const { socket } = useSocket({ token: authToken, apiBaseUrl: API_BASE_URL });
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -104,6 +118,7 @@ const AppShell: React.FC = () => {
           setAuthToken(session.token);
           setUserName(session.user.name || '');
           setUserId(session.user.id || null);
+          if (session.user.is_admin) setIsAdmin(true);
           if (session.user.id) {
             await applyEntryPointForUser(session.user.id);
           }
@@ -116,10 +131,11 @@ const AppShell: React.FC = () => {
     bootstrap().catch(() => setBooting(false));
   }, []);
 
-  const persistAuth = async (token: string, user: { id: number; name: string }) => {
+  const persistAuth = async (token: string, user: { id: number; name: string; is_admin?: boolean }) => {
     setAuthToken(token);
     setUserName(user.name || 'friend');
     setUserId(user.id);
+    if (user.is_admin) setIsAdmin(true);
     await saveSession({ token, user });
     await applyEntryPointForUser(user.id);
   };
@@ -139,6 +155,7 @@ const AppShell: React.FC = () => {
     setAuthToken(null);
     setUserId(null);
     setUserName('');
+    setIsAdmin(false);
     setHasCompletedFirstSearch(false);
     setOverlay('aiSearch');
     setActiveTab('ai');
@@ -222,6 +239,54 @@ const AppShell: React.FC = () => {
     }
   };
 
+  const handleSuperlike = async () => {
+    if (!selectedMatch) return;
+    if (!authToken) {
+      Alert.alert('Sign in required', 'Please restart onboarding to continue.');
+      setStage('welcome');
+      return;
+    }
+
+    handleCloseProfile(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/likes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({
+          target_user_id: selectedMatch.id,
+          is_on_grid: selectedMatch.is_on_grid ?? true,
+          is_superlike: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorBody = await response.json().catch(() => ({}));
+        throw new Error(errorBody.error || 'Unable to superlike right now.');
+      }
+
+      const data = await response.json();
+      if (data.is_match && data.match_id) {
+        setMatchedUser({
+          matchId: data.match_id,
+          userId: selectedMatch.id,
+          name: selectedMatch.name,
+          photo: selectedMatch.primary_photo,
+        });
+        setShowMatchModal(true);
+      } else {
+        Alert.alert('Superliked! ⭐', `${selectedMatch.name} will see your superlike at the top of their inbox! (5 credits used)`);
+        setTimeout(() => setSelectedMatch(null), 300);
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Unable to process superlike.');
+      setTimeout(() => setSelectedMatch(null), 300);
+    }
+  };
+
   const handleSendCompliment = async (targetUserId: number, content: string) => {
     if (!authToken) {
       Alert.alert('Sign in required', 'Please restart onboarding to continue.');
@@ -249,6 +314,84 @@ const AppShell: React.FC = () => {
       Alert.alert('Compliment sent', 'Delivered to their Likes inbox. 5 credits used.');
     } catch (error: any) {
       Alert.alert('Could not send compliment', error.message || 'Please try again.');
+    }
+  };
+
+  const handleBlockFromProfile = (targetUserId: number, name: string) => {
+    Alert.alert(
+      'Block user',
+      `Block ${name}? They won't be able to see your profile or contact you.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Block',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const response = await fetch(`${API_BASE_URL}/privacy/block`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${authToken}`,
+                },
+                body: JSON.stringify({ target_user_id: targetUserId }),
+              });
+              const body = await response.json().catch(() => ({}));
+              if (!response.ok) {
+                throw new Error(body.error || 'Unable to block user.');
+              }
+              Alert.alert('Blocked', `${name} has been blocked.`);
+              handleCloseProfile();
+            } catch (error: any) {
+              Alert.alert('Block failed', error.message || 'Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleReportFromProfile = (targetUserId: number, name: string) => {
+    Alert.alert(
+      'Report user',
+      `Why are you reporting ${name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Inappropriate behavior',
+          onPress: () => submitProfileReport(targetUserId, name, 'inappropriate_behavior'),
+        },
+        {
+          text: 'Fake profile',
+          onPress: () => submitProfileReport(targetUserId, name, 'fake_profile'),
+        },
+        {
+          text: 'Harassment',
+          style: 'destructive',
+          onPress: () => submitProfileReport(targetUserId, name, 'harassment'),
+        },
+      ]
+    );
+  };
+
+  const submitProfileReport = async (targetUserId: number, name: string, reason: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/privacy/block`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ target_user_id: targetUserId }),
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || 'Unable to report user.');
+      }
+      Alert.alert('Reported', `Thank you for reporting ${name}. We will review it shortly.`);
+      handleCloseProfile();
+    } catch (error: any) {
+      Alert.alert('Report failed', error.message || 'Please try again.');
     }
   };
 
@@ -309,6 +452,8 @@ const AppShell: React.FC = () => {
             onOpenAISearch={() => setOverlay('aiSearch')}
             onOpenAdvancedSearch={() => setOverlay('advancedSearch')}
             onOpenWallet={() => setOverlay('wallet')}
+            onOpenAdmin={() => setOverlay('admin')}
+            isAdmin={isAdmin}
             onLogout={logout}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
@@ -361,6 +506,7 @@ const AppShell: React.FC = () => {
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             currentUserId={userId!}
+            socket={socket}
             onOpenConversation={(matchId, matchName, targetUserId) => {
               setCurrentConversation({ matchId, matchName, targetUserId });
               setShowMessages(true);
@@ -406,6 +552,8 @@ const AppShell: React.FC = () => {
             onManagePhotos={() => setOverlay('photos')}
           />
         );
+      case 'admin':
+        return <AdminDashboardScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'profile':
         return (
           <ProfileScreen
@@ -442,10 +590,19 @@ const AppShell: React.FC = () => {
           <LoginScreen
             apiBaseUrl={API_BASE_URL}
             onBack={() => setStage('welcome')}
+            onForgotPassword={() => setStage('forgotPassword')}
             onSuccess={async ({ token, user }) => {
+              if (user.is_admin) setIsAdmin(true);
               await persistAuth(token, user);
               setStage('matchboard');
             }}
+          />
+        );
+      case 'forgotPassword':
+        return (
+          <ForgotPasswordScreen
+            apiBaseUrl={API_BASE_URL}
+            onBack={() => setStage('login')}
           />
         );
       case 'onboarding':
@@ -483,7 +640,10 @@ const AppShell: React.FC = () => {
               onClose={handleCloseProfile}
               onSwipeLeft={handleSwipeLeft}
               onSwipeRight={handleSwipeRight}
+              onSuperlike={handleSuperlike}
               onSendCompliment={handleSendCompliment}
+              onBlock={handleBlockFromProfile}
+              onReport={handleReportFromProfile}
             />
 
             {/* Match Modal */}
@@ -566,6 +726,7 @@ const AppShell: React.FC = () => {
                   currentUserId={userId}
                   token={authToken}
                   apiBaseUrl={API_BASE_URL}
+                  socket={socket}
                   onBack={() => {
                     setShowMessages(false);
                     setCurrentConversation(null);

@@ -125,7 +125,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
         // ignore
       }
     };
-    fetchProfile().catch(() => {});
+    fetchProfile().catch((err) => console.warn('Failed to load matchboard profile:', err));
   }, [apiBaseUrl, token]);
 
   const completion = useMemo(() => {

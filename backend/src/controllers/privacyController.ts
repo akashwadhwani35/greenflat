@@ -12,14 +12,16 @@ const loadSettings = async (userId: number) => {
 
   if (result.rows.length > 0) return result.rows[0];
 
-  const fallback = await pool.query(
-    `SELECT hide_distance, hide_city, incognito_mode, show_online_status
-     FROM users
-     WHERE id = $1`,
+  // Create default settings if none exist
+  const inserted = await pool.query(
+    `INSERT INTO user_privacy_settings (user_id)
+     VALUES ($1)
+     ON CONFLICT (user_id) DO NOTHING
+     RETURNING hide_distance, hide_city, incognito_mode, show_online_status`,
     [userId]
   );
 
-  return fallback.rows[0] || {
+  return inserted.rows[0] || {
     hide_distance: false,
     hide_city: false,
     incognito_mode: false,
@@ -62,17 +64,6 @@ export const updatePrivacySettings = async (req: AuthRequest, res: Response) => 
       [userId, hide_distance, hide_city, incognito_mode, show_online_status]
     );
 
-    await pool.query(
-      `UPDATE users
-       SET hide_distance = COALESCE($1, hide_distance),
-           hide_city = COALESCE($2, hide_city),
-           incognito_mode = COALESCE($3, incognito_mode),
-           show_online_status = COALESCE($4, show_online_status),
-           updated_at = NOW()
-       WHERE id = $5`,
-      [hide_distance, hide_city, incognito_mode, show_online_status, userId]
-    );
-
     const settings = await loadSettings(userId);
     return res.json({ message: 'Privacy settings updated', settings });
   } catch (error) {
@@ -103,9 +94,9 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
     const userId = req.userId!;
-    const { target_user_id } = req.body as { target_user_id?: number };
+    const target_user_id = Number(req.body.target_user_id);
 
-    if (!target_user_id || target_user_id === userId) {
+    if (!target_user_id || isNaN(target_user_id) || target_user_id === userId) {
       return res.status(400).json({ error: 'Valid target_user_id is required' });
     }
 
@@ -123,9 +114,19 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
        WHERE (liker_id = $1 AND liked_id = $2) OR (liker_id = $2 AND liked_id = $1)`,
       [userId, target_user_id]
     );
+    // Delete messages first (before match cascade removes the match_id reference)
+    await client.query(
+      `DELETE FROM messages
+       WHERE match_id IN (
+         SELECT id FROM matches
+         WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)
+       )`,
+      [userId, target_user_id]
+    );
+
     await client.query(
       `DELETE FROM matches
-       WHERE (user1_id = LEAST($1, $2) AND user2_id = GREATEST($1, $2))`,
+       WHERE (user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int))`,
       [userId, target_user_id]
     );
 

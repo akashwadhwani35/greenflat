@@ -59,6 +59,7 @@ const drinkerOptions = ['Never', 'Social', 'Regular'];
 const smokerOptions = ['Never', 'Social', 'Regular'];
 const dietOptions = ['Omnivore', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', 'Other'];
 const fitnessOptions = ['Not active', 'Lightly active', 'Active', 'Very active'];
+const interestedInOptions = ['Men', 'Women', 'Everyone'];
 const interestOptions = ['Travel', 'Fitness', 'Music', 'Art', 'Cooking', 'Gaming', 'Reading', 'Sports', 'Movies', 'Technology', 'Photography', 'Dancing'];
 
 const personalityQuestions = [
@@ -84,6 +85,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     // Basic
     name: '',
     identity: '',
+    interestedIn: '' as '' | 'male' | 'female' | 'both',
     dateOfBirth: '',
 
     // Intentions
@@ -174,6 +176,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       case 'basic':
         if (!form.name.trim()) nextErrors.name = 'Tell us your name.';
         if (!form.identity) nextErrors.identity = 'Pick how you identify.';
+        if (!form.interestedIn) nextErrors.interestedIn = 'Tell us who you\'re interested in.';
         if (!form.dateOfBirth) nextErrors.dateOfBirth = 'Select your birth date (18+).';
         break;
       case 'intentions':
@@ -234,7 +237,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   const submitToBackend = async () => {
     const email = resolveEmail();
     const gender = mapIdentityToGender(form.identity || '');
-    const interested_in = gender === 'female' ? 'male' : gender === 'male' ? 'female' : 'both';
+    const interested_in = form.interestedIn;
     const password = form.password;
 
     const signupResponse = await fetch(`${apiBaseUrl}/auth/signup`, {
@@ -294,28 +297,28 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       prompt3: form.prompt3 || null,
       smoker: form.smoker.toLowerCase(),
       drinker: form.drinker.toLowerCase(),
-      diet: form.diet || 'balanced',
-      fitness_level: form.fitnessLevel || 'active',
+      diet: form.diet || null,
+      fitness_level: form.fitnessLevel || null,
       education: null,
       occupation: null,
       relationship_goal: form.lookingFor[0]?.toLowerCase() || 'exploring',
-      family_oriented: true,
-      spiritual: true,
-      open_minded: true,
-      career_focused: true,
+      family_oriented: null,
+      spiritual: null,
+      open_minded: null,
+      career_focused: null,
       self_summary: form.bio,
-      ideal_partner_prompt: form.prompt1 || form.bio || 'Kind, curious, and communicates well.',
-      connection_preferences: form.vibe || 'Open to meaningful connections',
-      dealbreakers: 'Poor communication and unkindness.',
-      growth_journey: 'Investing in emotional fitness and healthy routines.',
-      question1_answer: form.q1 || 'A',
-      question2_answer: form.q2 || 'B',
-      question3_answer: form.q3 || 'C',
-      question4_answer: form.q4 || 'A',
-      question5_answer: form.q5 || 'B',
-      question6_answer: form.q6 || 'C',
-      question7_answer: form.q7 || 'D',
-      question8_answer: form.q8 || 'A',
+      ideal_partner_prompt: form.prompt1 || null,
+      connection_preferences: form.vibe || null,
+      dealbreakers: null,
+      growth_journey: null,
+      question1_answer: form.q1 || null,
+      question2_answer: form.q2 || null,
+      question3_answer: form.q3 || null,
+      question4_answer: form.q4 || null,
+      question5_answer: form.q5 || null,
+      question6_answer: form.q6 || null,
+      question7_answer: form.q7 || null,
+      question8_answer: form.q8 || null,
     };
 
     const completeProfileResponse = await fetch(`${apiBaseUrl}/profile/complete`, {
@@ -331,20 +334,34 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
     // Upload photos
     for (let i = 0; i < form.photos.length; i++) {
-      await fetch(`${apiBaseUrl}/profile/photo`, {
-        method: 'POST',
-        headers: userHeaders,
-        body: JSON.stringify({ photo_url: form.photos[i], is_primary: i === form.primaryPhotoIndex }),
-      }).catch(() => {});
+      try {
+        const photoRes = await fetch(`${apiBaseUrl}/profile/photo`, {
+          method: 'POST',
+          headers: userHeaders,
+          body: JSON.stringify({ photo_url: form.photos[i], is_primary: i === form.primaryPhotoIndex }),
+        });
+        if (!photoRes.ok) {
+          console.warn(`Photo upload ${i + 1} failed: HTTP ${photoRes.status}`);
+        }
+      } catch (err) {
+        console.warn(`Photo upload ${i + 1} error:`, err);
+      }
     }
 
     // Verify location
     if (form.lat !== null && form.lng !== null) {
-      await fetch(`${apiBaseUrl}/verification/location`, {
-        method: 'POST',
-        headers: userHeaders,
-        body: JSON.stringify({ lat: form.lat, lng: form.lng, city: form.city || undefined }),
-      }).catch(() => {});
+      try {
+        const locRes = await fetch(`${apiBaseUrl}/verification/location`, {
+          method: 'POST',
+          headers: userHeaders,
+          body: JSON.stringify({ lat: form.lat, lng: form.lng, city: form.city || undefined }),
+        });
+        if (!locRes.ok) {
+          console.warn(`Location verification failed: HTTP ${locRes.status}`);
+        }
+      } catch (err) {
+        console.warn('Location verification error:', err);
+      }
     }
 
     return { token, userId };
@@ -380,44 +397,32 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
   const selectPhoto = async () => {
     try {
-      console.log('Photo picker initiated...');
-
-      // Request permission
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      console.log('Permission status:', perm.granted);
 
       if (!perm.granted) {
         Alert.alert('Permission needed', 'Allow photo library access to add your photo.');
         return;
       }
 
-      console.log('Launching image picker...');
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 5],
         quality: 0.7,
-        base64: Platform.OS !== 'web', // Don't use base64 on web
+        base64: Platform.OS !== 'web',
       });
 
-      console.log('Image picker result:', { canceled: result.canceled, assetsLength: result.assets?.length });
-
       if (result.canceled || !result.assets?.length) {
-        console.log('Image picker was cancelled or no assets');
         return;
       }
 
       const asset = result.assets[0];
-      console.log('Selected asset:', { uri: asset.uri, type: asset.type });
 
-      // On web, just use the URI directly; on mobile, use base64
       const dataUrl = Platform.OS === 'web'
         ? asset.uri
         : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
 
-      console.log('Adding photo to form...');
       setForm((prev) => ({ ...prev, photos: [...prev.photos, dataUrl] }));
-      console.log('Photo added successfully');
     } catch (error: any) {
       console.error('Photo picker error:', error);
       Alert.alert('Error', `Could not pick a photo: ${error.message || 'Please try again.'}`);
@@ -456,18 +461,14 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
       // Use backend geocoding directly (skip Expo to avoid rate limits)
       try {
-        console.log('Attempting backend geocoding with:', { lat: latitude, lng: longitude, apiBaseUrl });
         const response = await fetch(`${apiBaseUrl}/geocode`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lat: latitude, lng: longitude }),
         });
 
-        console.log('Backend response status:', response.status);
-
         if (response.ok) {
           const data = await response.json();
-          console.log('Backend geocoding success:', data);
           const detectedCity = data.city;
           if (detectedCity) {
             setForm((prev) => ({
@@ -481,12 +482,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           }
         } else {
           const errorData = await response.json();
-          console.log('Backend geocoding error:', errorData);
           setLocationError(`Backend error: ${errorData.error || 'Unknown error'}. Please enter manually.`);
           return;
         }
       } catch (backendError: any) {
-        console.log('Backend geocoding failed:', backendError);
         setLocationError(`Network error: ${backendError.message}. Check if backend is running.`);
         return;
       }
@@ -613,6 +612,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                 setForm((prev) => ({ ...prev, identity: option }))
               , false)}
               {errors.identity ? <Typography variant="small" tone="error">{errors.identity}</Typography> : null}
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Interested in</Typography>
+              {renderChipRow(interestedInOptions, form.interestedIn ? [form.interestedIn === 'male' ? 'Men' : form.interestedIn === 'female' ? 'Women' : 'Everyone'] : [], (option) => {
+                const value = option === 'Men' ? 'male' : option === 'Women' ? 'female' : 'both';
+                setForm((prev) => ({ ...prev, interestedIn: value as 'male' | 'female' | 'both' }));
+              }, false)}
+              {errors.interestedIn ? <Typography variant="small" tone="error">{errors.interestedIn}</Typography> : null}
 
               <TouchableOpacity
                 style={[styles.dateButton, {

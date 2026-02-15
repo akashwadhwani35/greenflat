@@ -40,7 +40,7 @@ export const MatchesListScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, 
       }
     };
 
-    fetchMatches().catch(() => {});
+    fetchMatches().catch((err) => console.warn('Failed to load matches:', err));
   }, [apiBaseUrl, token]);
 
   return (

@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { notifyNewMessage } from '../services/push.service';
 import { DAILY_LIMITS, LIKE_RESET_HOURS } from '../utils/constants';
 import { normalizeMediaMessageUrl, normalizeTextMessage } from '../services/media.service';
+import { getIO } from '../socket';
 
 const checkAndResetLimits = async (userId: number, client: any) => {
   const result = await client.query(
@@ -149,6 +150,30 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       console.error('Failed to send message notification:', err)
     );
 
+    // Emit real-time socket events
+    const io = getIO();
+    if (io) {
+      io.to(`user:${recipientId}`).emit('message:new', {
+        message,
+        matchId: match_id,
+      });
+
+      // Also notify sender's other devices
+      io.to(`user:${userId}`).emit('message:new', {
+        message,
+        matchId: match_id,
+      });
+
+      // Notify both users about conversation update
+      const conversationUpdate = {
+        matchId: match_id,
+        lastMessage: preview,
+        lastMessageTime: message.created_at,
+      };
+      io.to(`user:${recipientId}`).emit('conversation:updated', conversationUpdate);
+      io.to(`user:${userId}`).emit('conversation:updated', conversationUpdate);
+    }
+
     res.json({
       message: 'Message sent successfully',
       data: message,
@@ -275,12 +300,30 @@ export const markAsRead = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { matchId } = req.params;
 
+    // Find the sender(s) whose messages are being marked read
+    const unreadResult = await pool.query(
+      `SELECT DISTINCT sender_id FROM messages
+       WHERE match_id = $1 AND recipient_id = $2 AND is_read = FALSE`,
+      [matchId, userId]
+    );
+
     await pool.query(
       `UPDATE messages
        SET is_read = TRUE
        WHERE match_id = $1 AND recipient_id = $2 AND is_read = FALSE`,
       [matchId, userId]
     );
+
+    // Notify senders that their messages were read
+    const io = getIO();
+    if (io && unreadResult.rows.length > 0) {
+      for (const row of unreadResult.rows) {
+        io.to(`user:${row.sender_id}`).emit('messages:read', {
+          matchId: Number(matchId),
+          readBy: userId,
+        });
+      }
+    }
 
     res.json({ message: 'Messages marked as read' });
   } catch (error) {
@@ -321,6 +364,21 @@ export const deleteMessage = async (req: AuthRequest, res: Response) => {
       `UPDATE messages SET content = '[Message deleted]', is_deleted = TRUE WHERE id = $1`,
       [messageId]
     );
+
+    // Notify both participants via socket
+    const io = getIO();
+    if (io) {
+      const matchId = message.match_id;
+      const recipientId = message.recipient_id;
+      io.to(`user:${recipientId}`).emit('message:deleted', {
+        messageId: Number(messageId),
+        matchId,
+      });
+      io.to(`user:${userId}`).emit('message:deleted', {
+        messageId: Number(messageId),
+        matchId,
+      });
+    }
 
     res.json({ message: 'Message deleted successfully' });
   } catch (error) {

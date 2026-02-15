@@ -396,8 +396,9 @@ describe('GreenFlag backend core flow', () => {
       .set('Authorization', `Bearer ${user.token}`)
       .send({ phone: '+15555555555' });
     expect(otpResponse.status).toBe(200);
-    expect(typeof otpResponse.body.dev_code).toBe('string');
-    expect(otpResponse.body.dev_code).toHaveLength(6);
+    // dev_code is no longer returned in the response (logged to console instead)
+    expect(otpResponse.body.dev_code).toBeUndefined();
+    expect(otpResponse.body.message).toBe('OTP sent');
   });
 
   it('rate limits repeated OTP requests for the same phone', async () => {

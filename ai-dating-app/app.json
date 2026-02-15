@@ -37,9 +37,25 @@
         "ACCESS_FINE_LOCATION",
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
-        "WRITE_EXTERNAL_STORAGE"
+        "WRITE_EXTERNAL_STORAGE",
+        "POST_NOTIFICATIONS"
       ]
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "color": "#3BB273",
+          "defaultChannel": "default"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "GreenFlag needs your location to suggest nearby matches."
+        }
+      ]
+    ],
     "web": {
       "favicon": "./assets/favicon.png"
     },

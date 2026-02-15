@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -19,6 +19,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -40,6 +41,7 @@ type MessagesScreenProps = {
   currentUserId: number;
   token: string;
   apiBaseUrl: string;
+  socket: Socket | null;
   onBack: () => void;
 };
 
@@ -50,6 +52,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   currentUserId,
   token,
   apiBaseUrl,
+  socket,
   onBack,
 }) => {
   const theme = useTheme();
@@ -63,6 +66,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [profileData, setProfileData] = useState<any | null>(null);
   const [androidKeyboardOffset, setAndroidKeyboardOffset] = useState(0);
   const [mediaUploadReady, setMediaUploadReady] = useState<boolean>(true);
+  const [peerTyping, setPeerTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isTypingRef = useRef(false);
   const flatListRef = useRef<FlatList>(null);
 
   const openProfile = async () => {
@@ -209,21 +215,68 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       if (response.ok) {
         Alert.alert('Report Submitted', 'Thank you for your report. We will review it shortly.');
       } else {
-        Alert.alert('Report Submitted', 'Thank you for your report. We will review it shortly.');
+        const body = await response.json().catch(() => ({}));
+        Alert.alert('Report Failed', body.error || 'Unable to submit your report. Please try again.');
       }
     } catch (error) {
-      console.error('Error reporting:', error);
-      Alert.alert('Report Submitted', 'Thank you for your report. We will review it shortly.');
+      Alert.alert('Report Failed', 'Something went wrong. Please check your connection and try again.');
     }
   };
 
   useEffect(() => {
     fetchMessages();
-    // Poll for new messages every 3 seconds
-    const interval = setInterval(fetchMessages, 3000);
     fetchMediaCapabilities();
-    return () => clearInterval(interval);
   }, [matchId]);
+
+  // Socket event listeners — replace polling
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleNewMessage = (data: { message: Message; matchId: number }) => {
+      if (data.matchId !== matchId) return;
+      setMessages((prev) => {
+        // Avoid duplicates
+        if (prev.some((m) => m.id === data.message.id)) return prev;
+        return [...prev, data.message];
+      });
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    };
+
+    const handleMessageDeleted = (data: { messageId: number; matchId: number }) => {
+      if (data.matchId !== matchId) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.messageId ? { ...m, content: '[Message deleted]', is_deleted: true } : m
+        )
+      );
+    };
+
+    const handleMessagesRead = (data: { matchId: number; readBy: number }) => {
+      if (data.matchId !== matchId) return;
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.sender_id === currentUserId && !m.is_read ? { ...m, is_read: true } : m
+        )
+      );
+    };
+
+    const handleTyping = (data: { matchId: number; userId: number; isTyping: boolean }) => {
+      if (data.matchId !== matchId || data.userId === currentUserId) return;
+      setPeerTyping(data.isTyping);
+    };
+
+    socket.on('message:new', handleNewMessage);
+    socket.on('message:deleted', handleMessageDeleted);
+    socket.on('messages:read', handleMessagesRead);
+    socket.on('typing', handleTyping);
+
+    return () => {
+      socket.off('message:new', handleNewMessage);
+      socket.off('message:deleted', handleMessageDeleted);
+      socket.off('messages:read', handleMessagesRead);
+      socket.off('typing', handleTyping);
+    };
+  }, [socket, matchId, currentUserId]);
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -330,6 +383,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
     if (messageType === 'text') {
       setNewMessage('');
+      // Stop typing indicator on send
+      if (socket && targetUserId && isTypingRef.current) {
+        isTypingRef.current = false;
+        socket.emit('typing:stop', { matchId, recipientId: targetUserId });
+      }
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     }
     setSending(true);
 
@@ -351,8 +410,13 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         throw new Error('Failed to send message');
       }
 
-      // Refresh messages
-      await fetchMessages();
+      const body = await response.json().catch(() => ({}));
+      if (body.data) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === body.data.id)) return prev;
+          return [...prev, body.data];
+        });
+      }
 
       // Scroll to bottom
       setTimeout(() => {
@@ -621,6 +685,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         />
       )}
 
+      {/* Typing indicator */}
+      {peerTyping && (
+        <View style={[styles.typingContainer, { backgroundColor: theme.colors.background }]}>
+          <Typography variant="small" style={{ color: theme.colors.muted, fontStyle: 'italic' }}>
+            {matchName} is typing...
+          </Typography>
+        </View>
+      )}
+
       {/* Input Area */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -712,7 +785,22 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             placeholder="Type a message..."
             placeholderTextColor={theme.colors.muted}
             value={newMessage}
-            onChangeText={setNewMessage}
+            onChangeText={(text) => {
+              setNewMessage(text);
+              if (socket && targetUserId) {
+                if (text.length > 0 && !isTypingRef.current) {
+                  isTypingRef.current = true;
+                  socket.emit('typing:start', { matchId, recipientId: targetUserId });
+                }
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => {
+                  if (isTypingRef.current) {
+                    isTypingRef.current = false;
+                    socket.emit('typing:stop', { matchId, recipientId: targetUserId });
+                  }
+                }, 2000);
+              }
+            }}
             multiline
             maxLength={1000}
           />
@@ -837,6 +925,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
     opacity: 0.7,
+  },
+  typingContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 6,
   },
   inputContainer: {
     flexDirection: 'row',
