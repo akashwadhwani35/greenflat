@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 16,
+    paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 32,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },

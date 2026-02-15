@@ -6,7 +6,7 @@ import { Typography } from '../components/Typography';
 
 const glassLogo = require('../../assets/glass-logo.png');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const LOGO_SIZE = Math.min(SCREEN_WIDTH * 0.96, 420);
+const LOGO_SIZE = Math.min(SCREEN_WIDTH * 1.92, 840);
 
 type WelcomeScreenProps = {
   onStart: () => void;

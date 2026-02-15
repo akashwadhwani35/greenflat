@@ -78,13 +78,14 @@ const AppShell: React.FC = () => {
   const [currentConversation, setCurrentConversation] = useState<{ matchId: number; matchName: string; matchPhoto?: string; targetUserId?: number } | null>(null);
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [matchedUser, setMatchedUser] = useState<{ matchId: number; userId: number; name: string; photo?: string } | null>(null);
-  const [overlay, setOverlay] = useState<Overlay>('aiSearch');
+  const [overlay, setOverlay] = useState<Overlay>(null);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({});
-  const [activeTab, setActiveTab] = useState<TabId>('ai');
+  const [activeTab, setActiveTab] = useState<TabId>('explore');
   const [preferredDiscoverTab, setPreferredDiscoverTab] = useState<'onGrid' | 'offGrid'>('onGrid');
   const [hasCompletedFirstSearch, setHasCompletedFirstSearch] = useState(false);
   const [pendingAISearchCharge, setPendingAISearchCharge] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [aiSearchKey, setAiSearchKey] = useState(0);
 
   const applyEntryPointForUser = async (id: number) => {
     const firstSearchDone = await loadFirstSearchDone(id);
@@ -94,6 +95,7 @@ const AppShell: React.FC = () => {
       setActiveTab('explore');
       return;
     }
+    setAiSearchKey((k) => k + 1);
     setOverlay('aiSearch');
     setActiveTab('ai');
   };
@@ -157,8 +159,8 @@ const AppShell: React.FC = () => {
     setUserName('');
     setIsAdmin(false);
     setHasCompletedFirstSearch(false);
-    setOverlay('aiSearch');
-    setActiveTab('ai');
+    setOverlay(null);
+    setActiveTab('explore');
     setPreferredDiscoverTab('onGrid');
     setStage('welcome');
   };
@@ -411,6 +413,7 @@ const AppShell: React.FC = () => {
         setOverlay('likes');
         break;
       case 'ai':
+        setAiSearchKey((k) => k + 1);
         setOverlay('aiSearch');
         break;
       case 'messages':
@@ -681,41 +684,42 @@ const AppShell: React.FC = () => {
         return (
           <View style={{ flex: 1 }}>
             {mainContent}
-            {/* AISearchScreen - Always mounted to preserve chat state */}
-            <View style={{
-              position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              zIndex: overlay === 'aiSearch' ? 50 : -1,
-              opacity: overlay === 'aiSearch' ? 1 : 0,
-              pointerEvents: overlay === 'aiSearch' ? 'auto' : 'none',
-            }}>
-              <AISearchScreen
-                onBack={() => {
-                  setOverlay(null);
-                  setActiveTab('explore');
-                }}
-                onApplySearchQuery={(query) => {
-                  setAdvancedFilters((prev) => ({ ...prev, keywords: query }));
-                  setPendingAISearchCharge(true);
-                  setPreferredDiscoverTab('onGrid');
-                  if (userId && !hasCompletedFirstSearch) {
-                    setHasCompletedFirstSearch(true);
-                    void saveFirstSearchDone(userId);
-                  }
-                  setOverlay(null);
-                  setActiveTab('explore');
-                }}
-                token={authToken!}
-                apiBaseUrl={API_BASE_URL}
-                userName={userName}
-                userProfile={{
-                  relationshipGoal: 'a long-term relationship',
-                }}
-              />
-            </View>
+            {/* AISearchScreen - Fresh instance each time */}
+            {overlay === 'aiSearch' && (
+              <View style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                zIndex: 50,
+              }}>
+                <AISearchScreen
+                  key={aiSearchKey}
+                  onBack={() => {
+                    setOverlay(null);
+                    setActiveTab('explore');
+                  }}
+                  onApplySearchQuery={(query) => {
+                    setAdvancedFilters((prev) => ({ ...prev, keywords: query }));
+                    setPendingAISearchCharge(true);
+                    setPreferredDiscoverTab('onGrid');
+                    if (userId && !hasCompletedFirstSearch) {
+                      setHasCompletedFirstSearch(true);
+                      void saveFirstSearchDone(userId);
+                    }
+                    setOverlay(null);
+                    setActiveTab('explore');
+                  }}
+                  token={authToken!}
+                  apiBaseUrl={API_BASE_URL}
+                  userName={userName}
+                  userProfile={{
+                    relationshipGoal: 'a long-term relationship',
+                  }}
+                />
+              </View>
+            )}
             {/* Messages Screen - Full screen overlay */}
             {showMessages && currentConversation && userId && (
               <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}>

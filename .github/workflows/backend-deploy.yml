@@ -1,0 +1,65 @@
+name: Backend - Build & Deploy to Cloud Run
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Authorize Docker push
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/greenflag/greenflag-api:${{ github.sha }} \
+            -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/greenflag/greenflag-api:latest \
+            ./backend
+
+      - name: Push Docker image
+        run: |
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/greenflag/greenflag-api:${{ github.sha }}
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/greenflag/greenflag-api:latest
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: greenflag-api
+          region: us-central1
+          image: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/greenflag/greenflag-api:${{ github.sha }}
+          env_vars: |
+            NODE_ENV=production
+            OPENAI_MODEL=gpt-4o-mini
+            OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+            JWT_EXPIRES_IN=7d
+            REQUIRE_EXTERNAL_SERVICES=false
+          secrets: |
+            DATABASE_URL=database-url:latest
+            JWT_SECRET=jwt-secret:latest
+            OPENAI_API_KEY=openai-api-key:latest
+            GOOGLE_MAPS_API_KEY=google-maps-api-key:latest
+
+      - name: Show deployed URL
+        run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

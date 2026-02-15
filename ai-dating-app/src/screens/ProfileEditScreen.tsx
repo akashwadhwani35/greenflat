@@ -878,6 +878,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           <PageHeader title="More about you" onBack={() => setActiveModal(null)} />
 
           <ScrollView
+            style={styles.modalScroll}
             contentContainerStyle={styles.moreAboutContent}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
@@ -951,6 +952,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
           {options ? (
             <ScrollView
+              style={styles.modalScroll}
               contentContainerStyle={styles.moreFieldContent}
               showsVerticalScrollIndicator={false}
               nestedScrollEnabled
@@ -1189,7 +1191,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  modalContainer: { flex: 1, minHeight: 0 },
+  modalContainer: { flex: 1 },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1200,7 +1202,7 @@ const styles = StyleSheet.create({
   },
   modalHeaderBtn: { width: 60, alignItems: 'center', justifyContent: 'center' },
   modalSubheader: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16 },
-  modalScroll: { flex: 1, minHeight: 0 },
+  modalScroll: { flex: 1 },
   modalScrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
   modalContent: { paddingHorizontal: 20, paddingTop: 16 },
   categorySection: { marginBottom: 24 },
@@ -1263,7 +1265,7 @@ const styles = StyleSheet.create({
 
   moreAboutContent: {
     paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingBottom: 100,
   },
   moreRow: {
     flexDirection: 'row',
