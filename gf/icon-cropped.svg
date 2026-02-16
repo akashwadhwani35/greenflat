@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xml:space="preserve" width="1024" height="1024" version="1.1" style="shape-rendering:geometricPrecision; text-rendering:geometricPrecision; image-rendering:optimizeQuality; fill-rule:evenodd; clip-rule:evenodd"
+viewBox="4062.4 6592.17 2871.66 2871.66">
+ <defs>
+  <style type="text/css">
+   <![CDATA[
+    .fil0 {fill:#101D13}
+    .fil1 {fill:#ADFF1A}
+   ]]>
+  </style>
+ </defs>
+ <g id="Layer_x0020_1">
+  <rect class="fil0" x="4112.4" y="6642.17" width="2771.66" height="2771.66" rx="383.2" ry="383.2"/>
+  <g id="_3147368847344">
+   <rect class="fil1" transform="matrix(0.871602 -0.282147 0.291667 0.953828 4793.49 7708.37)" width="252.44" height="1102.52"/>
+   <polygon class="fil1" points="4911.12,7487.2 5254.56,7375 5323.32,7599.9 4979.89,7712.09 "/>
+   <polygon class="fil1" points="5224.43,7480.86 5567.86,7368.66 5636.63,7593.56 5293.2,7705.76 "/>
+   <polygon class="fil1" points="5595.5,7472.27 6009.56,7333.28 6078.33,7558.17 5664.27,7697.17 "/>
+   <polygon class="fil1" points="5789.48,7408.08 6009.52,7336.85 6202.97,7969.52 5982.94,8040.75 "/>
+   <polygon class="fil1" points="5047.56,8127.58 5390.99,8015.39 5459.76,8240.28 5116.33,8352.48 "/>
+   <polygon class="fil1" points="5360.87,8121.24 5704.3,8009.05 5773.07,8233.94 5429.64,8346.14 "/>
+   <polygon class="fil1" points="5731.94,8112.65 6012.22,8018.57 6081,8243.47 5800.71,8337.56 "/>
+  </g>
+ </g>
+</svg>
