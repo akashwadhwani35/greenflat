@@ -6,7 +6,7 @@ import { Typography } from '../components/Typography';
 
 const glassLogo = require('../../assets/glass-logo.png');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const LOGO_SIZE = Math.min(SCREEN_WIDTH * 1.92, 840);
+const LOGO_SIZE = Math.min(SCREEN_WIDTH * 1.75, 740);
 
 type WelcomeScreenProps = {
   onStart: () => void;
@@ -226,13 +226,13 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 20,
-    paddingBottom: Platform.OS === 'ios' ? 50 : 40,
+    paddingTop: Platform.OS === 'ios' ? 44 : (StatusBar.currentHeight || 0) + 10,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 24,
     paddingHorizontal: 24,
   },
   header: {
     alignItems: 'center',
-    paddingTop: 20,
+    paddingTop: 10,
   },
   brandName: {
     fontSize: 32,
@@ -245,6 +245,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
+    overflow: 'hidden',
+    marginTop: 55,
   },
   logoWrap: {
     width: '100%',
@@ -257,12 +259,12 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   bottomSection: {
-    gap: 20,
+    gap: 14,
     alignItems: 'center',
   },
   headlineContainer: {
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 4,
   },
   headline: {
     fontSize: 36,
