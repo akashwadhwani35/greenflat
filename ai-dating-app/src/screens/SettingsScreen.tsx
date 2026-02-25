@@ -108,7 +108,7 @@ export const SettingsScreen: React.FC<Props> = ({
     { title: 'Privacy & safety', subtitle: 'Visibility, block/report, incognito', icon: 'eye', action: onOpenPrivacy },
     { title: 'Notifications', subtitle: 'Manage pushes and device settings', icon: 'bell', action: onOpenNotifications },
     { title: 'Support', subtitle: 'Send us your issue or feedback', icon: 'help-circle', action: onOpenHelp },
-    { title: 'Plans', subtitle: 'Upgrade, tokens, boosts', icon: 'credit-card', action: onOpenCheckout },
+    { title: 'Tokens', subtitle: 'Buy tokens, boost your profile', icon: 'credit-card', action: onOpenCheckout },
   ];
 
   return (

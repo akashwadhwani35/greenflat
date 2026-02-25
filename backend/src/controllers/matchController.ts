@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { DAILY_LIMITS } from '../utils/constants';
+import { DAILY_LIMITS, TOKEN_COSTS } from '../utils/constants';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
 import { consumeCredits, getCreditBalance } from '../services/credits.service';
@@ -645,13 +645,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       try {
         remainingCredits = await consumeCredits(
           userId,
-          1,
+          TOKEN_COSTS.AI_SEARCH,
           'ai_search',
           { search_query: normalizedSearchQuery, on_grid_results: onGridWithReasons.length }
         );
       } catch (error: any) {
         if (error.message === 'INSUFFICIENT_CREDITS') {
-          return res.status(402).json({ error: 'Not enough credits. AI Search costs 1 credit.' });
+          return res.status(402).json({ error: 'Not enough tokens. AI Search costs 1 token.' });
         }
         throw error;
       }

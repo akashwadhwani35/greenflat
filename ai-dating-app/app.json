@@ -2,6 +2,7 @@
   "expo": {
     "name": "Greenflag",
     "slug": "greenflag",
+    "scheme": "greenflag",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

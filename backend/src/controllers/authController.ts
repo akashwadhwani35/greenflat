@@ -1,11 +1,170 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt, { Secret, SignOptions } from 'jsonwebtoken';
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import pool from '../config/database';
 import { JWT_CONFIG, DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
 
 const OTP_TTL_SECONDS = 300;
+const DEFAULT_GOOGLE_DOB = '1995-01-01';
+const DEFAULT_GOOGLE_CITY = 'Unknown';
+
+type AuthUserRow = {
+  id: number;
+  email: string;
+  name: string;
+  gender: string;
+  interested_in: string;
+  city: string;
+  is_verified: boolean;
+  is_premium: boolean;
+  credit_balance: number | string | null;
+  cooldown_enabled: boolean;
+  is_admin?: boolean | null;
+  is_banned?: boolean | null;
+  google_sub?: string | null;
+};
+
+type GoogleTokenInfo = {
+  aud: string;
+  email: string;
+  email_verified?: string | boolean;
+  exp: string;
+  given_name?: string;
+  iss: string;
+  name?: string;
+  picture?: string;
+  sub: string;
+};
+
+const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
+
+const buildUserPayload = (user: AuthUserRow) => ({
+  id: user.id,
+  email: user.email,
+  name: user.name,
+  gender: user.gender,
+  interested_in: user.interested_in,
+  city: user.city,
+  is_verified: user.is_verified,
+  is_premium: user.is_premium,
+  credit_balance: Number(user.credit_balance || 0),
+  cooldown_enabled: user.cooldown_enabled,
+  is_admin: user.is_admin || false,
+});
+
+const signAuthToken = (userId: number) =>
+  jwt.sign(
+    { userId },
+    JWT_CONFIG.secret,
+    { expiresIn: JWT_CONFIG.expiresIn } as any
+  );
+
+const initializeUserDefaults = async (client: any, userId: number) => {
+  await client.query(
+    `INSERT INTO user_activity_limits (user_id)
+     VALUES ($1)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId]
+  );
+
+  await client.query(
+    `INSERT INTO user_privacy_settings (user_id, hide_distance, hide_city, incognito_mode, show_online_status)
+     VALUES ($1, FALSE, FALSE, FALSE, TRUE)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId]
+  );
+
+  await client.query(
+    `INSERT INTO user_notification_preferences (
+       user_id, likes, matches, messages, daily_picks, product_updates
+     ) VALUES ($1, TRUE, TRUE, TRUE, TRUE, TRUE)
+     ON CONFLICT (user_id) DO NOTHING`,
+    [userId]
+  );
+};
+
+const getAllowedGoogleClientIds = (): string[] => {
+  const raw = [process.env.GOOGLE_OAUTH_CLIENT_IDS, process.env.GOOGLE_OAUTH_CLIENT_ID]
+    .filter((value): value is string => Boolean(value && value.trim()))
+    .join(',');
+
+  const ids = raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  return [...new Set(ids)];
+};
+
+const verifyGoogleIdToken = async (idToken: string): Promise<GoogleTokenInfo> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+      {
+        method: 'GET',
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      }
+    );
+
+    const body = (await response.json().catch(() => null)) as GoogleTokenInfo | null;
+    if (!response.ok || !body) {
+      throw new Error('INVALID_GOOGLE_TOKEN');
+    }
+
+    const email = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
+    const sub = typeof body.sub === 'string' ? body.sub.trim() : '';
+    const audience = typeof body.aud === 'string' ? body.aud.trim() : '';
+    const issuer = typeof body.iss === 'string' ? body.iss.trim() : '';
+    const expiryMs = Number(body.exp) * 1000;
+
+    if (!email || !sub || !audience || !issuer || !Number.isFinite(expiryMs)) {
+      throw new Error('INVALID_GOOGLE_TOKEN');
+    }
+
+    if (!GOOGLE_ISSUERS.has(issuer)) {
+      throw new Error('INVALID_GOOGLE_ISSUER');
+    }
+
+    const emailVerified = String(body.email_verified || '').toLowerCase() === 'true';
+    if (!emailVerified) {
+      throw new Error('UNVERIFIED_GOOGLE_EMAIL');
+    }
+
+    if (expiryMs <= Date.now()) {
+      throw new Error('EXPIRED_GOOGLE_TOKEN');
+    }
+
+    const allowedClientIds = getAllowedGoogleClientIds();
+    if (allowedClientIds.length === 0 && process.env.NODE_ENV === 'production') {
+      throw new Error('MISSING_GOOGLE_AUDIENCE_CONFIG');
+    }
+    if (allowedClientIds.length > 0 && !allowedClientIds.includes(audience)) {
+      throw new Error('GOOGLE_AUDIENCE_MISMATCH');
+    }
+
+    return {
+      ...body,
+      email,
+      sub,
+      aud: audience,
+      iss: issuer,
+    };
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      throw new Error('GOOGLE_TOKEN_TIMEOUT');
+    }
+    if (error instanceof Error) throw error;
+    throw new Error('GOOGLE_TOKEN_VERIFY_FAILED');
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 export const signup = async (req: Request, res: Response) => {
   const client = await pool.connect();
@@ -54,52 +213,15 @@ export const signup = async (req: Request, res: Response) => {
 
     const user = userResult.rows[0];
 
-    // Initialize user activity limits
-    await client.query(
-      `INSERT INTO user_activity_limits (user_id)
-       VALUES ($1)`,
-      [user.id]
-    );
-
-    await client.query(
-      `INSERT INTO user_privacy_settings (user_id, hide_distance, hide_city, incognito_mode, show_online_status)
-       VALUES ($1, FALSE, FALSE, FALSE, TRUE)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [user.id]
-    );
-
-    await client.query(
-      `INSERT INTO user_notification_preferences (
-         user_id, likes, matches, messages, daily_picks, product_updates
-       ) VALUES ($1, TRUE, TRUE, TRUE, TRUE, TRUE)
-       ON CONFLICT (user_id) DO NOTHING`,
-      [user.id]
-    );
+    await initializeUserDefaults(client, user.id);
 
     await client.query('COMMIT');
 
-    // Generate JWT token
-    const token = jwt.sign(
-      { userId: user.id },
-      JWT_CONFIG.secret,
-      { expiresIn: JWT_CONFIG.expiresIn } as any
-    );
+    const token = signAuthToken(user.id);
 
     res.status(201).json({
       message: 'User created successfully',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        gender: user.gender,
-        interested_in: user.interested_in,
-        city: user.city,
-        is_verified: user.is_verified,
-        is_premium: user.is_premium,
-        credit_balance: Number(user.credit_balance || 0),
-        cooldown_enabled: user.cooldown_enabled,
-        is_admin: user.is_admin || false,
-      },
+      user: buildUserPayload(user),
       token,
     });
   } catch (error) {
@@ -142,33 +264,135 @@ export const login = async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      { userId: user.id },
-      JWT_CONFIG.secret,
-      { expiresIn: JWT_CONFIG.expiresIn } as any
-    );
+    const token = signAuthToken(user.id);
 
     res.json({
       message: 'Login successful',
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        gender: user.gender,
-        interested_in: user.interested_in,
-        city: user.city,
-        is_verified: user.is_verified,
-        is_premium: user.is_premium,
-        credit_balance: Number(user.credit_balance || 0),
-        cooldown_enabled: user.cooldown_enabled,
-        is_admin: user.is_admin || false,
-      },
+      user: buildUserPayload(user),
       token,
     });
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Login failed' });
+  }
+};
+
+export const googleAuth = async (req: Request, res: Response) => {
+  const client = await pool.connect();
+
+  try {
+    const idToken = typeof req.body?.id_token === 'string' ? req.body.id_token.trim() : '';
+    if (!idToken) {
+      return res.status(400).json({ error: 'id_token is required' });
+    }
+
+    let tokenInfo: GoogleTokenInfo;
+    try {
+      tokenInfo = await verifyGoogleIdToken(idToken);
+    } catch (verificationError: any) {
+      const code = String(verificationError?.message || 'GOOGLE_TOKEN_VERIFY_FAILED');
+      if (code === 'GOOGLE_AUDIENCE_MISMATCH') {
+        return res.status(401).json({ error: 'Google token audience is not allowed for this app' });
+      }
+      if (code === 'MISSING_GOOGLE_AUDIENCE_CONFIG') {
+        return res.status(503).json({ error: 'Google sign-in is temporarily unavailable' });
+      }
+      if (
+        code === 'INVALID_GOOGLE_TOKEN' ||
+        code === 'INVALID_GOOGLE_ISSUER' ||
+        code === 'UNVERIFIED_GOOGLE_EMAIL' ||
+        code === 'EXPIRED_GOOGLE_TOKEN'
+      ) {
+        return res.status(401).json({ error: 'Invalid Google sign-in token' });
+      }
+      if (code === 'GOOGLE_TOKEN_TIMEOUT') {
+        return res.status(504).json({ error: 'Google token verification timed out. Please try again.' });
+      }
+      console.error('Google token verification failed:', verificationError);
+      return res.status(502).json({ error: 'Unable to verify Google sign-in right now' });
+    }
+
+    const email = tokenInfo.email;
+    const googleSub = tokenInfo.sub;
+    const displayNameSource = tokenInfo.name || tokenInfo.given_name || tokenInfo.email.split('@')[0] || 'GreenFlag User';
+    const displayName = displayNameSource.trim().slice(0, 100) || 'GreenFlag User';
+
+    await client.query('BEGIN');
+
+    const existingUserResult = await client.query(
+      `SELECT id, email, name, gender, interested_in, city, is_verified, is_premium, credit_balance,
+              cooldown_enabled, is_admin, is_banned, google_sub
+       FROM users
+       WHERE email = $1
+       FOR UPDATE`,
+      [email]
+    );
+
+    let user: AuthUserRow;
+    let isNewUser = false;
+
+    if (existingUserResult.rows.length > 0) {
+      user = existingUserResult.rows[0];
+
+      if (user.is_banned) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Your account has been suspended. Contact support@greenflag.app for assistance.' });
+      }
+
+      const existingGoogleSub = user.google_sub ? String(user.google_sub) : '';
+      if (existingGoogleSub && existingGoogleSub !== googleSub) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This email is already linked to another Google account.',
+        });
+      }
+
+      if (!existingGoogleSub) {
+        const linkResult = await client.query(
+          `UPDATE users
+           SET google_sub = $2, updated_at = NOW()
+           WHERE id = $1
+           RETURNING id, email, name, gender, interested_in, city, is_verified,
+                     is_premium, credit_balance, cooldown_enabled, is_admin, is_banned, google_sub`,
+          [user.id, googleSub]
+        );
+        user = linkResult.rows[0];
+      }
+    } else {
+      isNewUser = true;
+      const randomPassword = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await bcrypt.hash(randomPassword, 10);
+      const cooldown_enabled = DAILY_LIMITS.male.cooldown_enabled_default;
+
+      const userResult = await client.query(
+        `INSERT INTO users (
+           email, password_hash, name, gender, interested_in, date_of_birth, city,
+           cooldown_enabled, auth_provider, google_sub
+         )
+         VALUES ($1, $2, $3, 'other', 'both', $4, $5, $6, 'google', $7)
+         RETURNING id, email, name, gender, interested_in, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin`,
+        [email, passwordHash, displayName, DEFAULT_GOOGLE_DOB, DEFAULT_GOOGLE_CITY, cooldown_enabled, googleSub]
+      );
+
+      user = userResult.rows[0];
+      await initializeUserDefaults(client, user.id);
+    }
+
+    await client.query('COMMIT');
+
+    const token = signAuthToken(user.id);
+    return res.json({
+      message: 'Google authentication successful',
+      user: buildUserPayload(user),
+      token,
+      is_new_user: isNewUser,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Google auth error:', error);
+    return res.status(500).json({ error: 'Google authentication failed' });
+  } finally {
+    client.release();
   }
 };
 

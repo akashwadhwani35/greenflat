@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS } from '../utils/constants';
+import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
 import { notifyLikeReceived, notifyMatch } from '../services/push.service';
 import { consumeCredits } from '../services/credits.service';
 
@@ -124,7 +124,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         try {
           await consumeCredits(
             userId,
-            5,
+            TOKEN_COSTS.SUPER_LIKE,
             'superlike',
             { target_user_id, upgraded_existing_like: true },
             client
@@ -132,7 +132,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         } catch (error: any) {
           await client.query('ROLLBACK');
           if (error.message === 'INSUFFICIENT_CREDITS') {
-            return res.status(402).json({ error: 'Not enough credits. Superlikes cost 5 credits.' });
+            return res.status(402).json({ error: 'Not enough tokens. Super Likes cost 4 tokens.' });
           }
           throw error;
         }
@@ -183,12 +183,12 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Superlike costs 5 credits
+    // Superlike costs tokens
     if (is_superlike) {
       try {
         await consumeCredits(
           userId,
-          5,
+          TOKEN_COSTS.SUPER_LIKE,
           'superlike',
           { target_user_id },
           client
@@ -196,7 +196,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       } catch (error: any) {
         await client.query('ROLLBACK');
         if (error.message === 'INSUFFICIENT_CREDITS') {
-          return res.status(402).json({ error: 'Not enough credits. Superlikes cost 5 credits.' });
+          return res.status(402).json({ error: 'Not enough tokens. Super Likes cost 4 tokens.' });
         }
         throw error;
       }
@@ -427,7 +427,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     try {
       remainingCredits = await consumeCredits(
         userId,
-        5,
+        TOKEN_COSTS.COMPLIMENT,
         'compliment_send',
         { target_user_id, preview: complimentText.slice(0, 80) },
         client
@@ -435,7 +435,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     } catch (error: any) {
       await client.query('ROLLBACK');
       if (error.message === 'INSUFFICIENT_CREDITS') {
-        return res.status(402).json({ error: 'Not enough credits. Compliments cost 5 credits.' });
+        return res.status(402).json({ error: 'Not enough tokens. Compliments cost 6 tokens.' });
       }
       throw error;
     }

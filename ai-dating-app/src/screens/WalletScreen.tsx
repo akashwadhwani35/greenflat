@@ -14,15 +14,15 @@ type Props = {
 
 const ACTION_COSTS = {
   aiSearch: 1,
-  compliment: 10,
-  greenFlag: 7,
+  compliment: 6,
+  greenFlag: 4,
   boost: 20,
 } as const;
 
 const PACKS = [
   { id: '15', amount: 15, centsEach: 26, price: '$3.99' },
   { id: '40', amount: 40, centsEach: 22, price: '$8.99' },
-  { id: '95', amount: 95, centsEach: 17, price: '$15.99' },
+  { id: '95', amount: 95, centsEach: 18, price: '$16.99' },
   { id: '260', amount: 260, centsEach: 15, price: '$39.99' },
 ] as const;
 
@@ -58,7 +58,7 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, token, a
   const actionRows = useMemo(() => ([
     { label: 'AI Searches', value: Math.floor(balance / ACTION_COSTS.aiSearch) },
     { label: 'Compliments', value: Math.floor(balance / ACTION_COSTS.compliment) },
-    { label: 'GreenFlags', value: Math.floor(balance / ACTION_COSTS.greenFlag) },
+    { label: 'Super Likes', value: Math.floor(balance / ACTION_COSTS.greenFlag) },
     { label: 'Boost', value: Math.floor(balance / ACTION_COSTS.boost) },
   ]), [balance]);
 

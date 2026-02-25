@@ -1,5 +1,5 @@
 import express from 'express';
-import { signup, login, forgotPassword, resetPassword } from '../controllers/authController';
+import { signup, login, googleAuth, forgotPassword, resetPassword } from '../controllers/authController';
 import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount, getBioSuggestions } from '../controllers/profileController';
 import { searchMatches, refreshOffGrid, getUserDetails, unmatch } from '../controllers/matchController';
 import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment } from '../controllers/likeController';
@@ -38,6 +38,7 @@ router.post('/geocode', publicGeocode);
 // Auth routes (rate limited)
 router.post('/auth/signup', signupLimiter, signup);
 router.post('/auth/login', loginLimiter, login);
+router.post('/auth/google', loginLimiter, googleAuth);
 router.post('/auth/forgot-password', forgotPasswordLimiter, forgotPassword);
 router.post('/auth/reset-password', resetPasswordLimiter, resetPassword);
 

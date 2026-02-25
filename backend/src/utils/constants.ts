@@ -32,6 +32,13 @@ export const PREMIUM_BENEFITS = {
   search_shine: true,
 };
 
+export const TOKEN_COSTS = {
+  AI_SEARCH: 1,
+  SUPER_LIKE: 4,
+  COMPLIMENT: 6,
+  BOOST: 20,
+} as const;
+
 // Personality Traits Mapping
 export const PERSONALITY_TRAITS_MAP: Record<string, string[]> = {
   A: ['Funny', 'Playful', 'Positive', 'Outgoing', 'Social', 'Adventurous', 'Spontaneous', 'Charismatic', 'Witty', 'Free-spirited'],

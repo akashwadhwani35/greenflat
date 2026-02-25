@@ -204,7 +204,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
       } else {
         const body = await response.json().catch(() => ({}));
         if (response.status === 402) {
-          Alert.alert('Not enough credits', body.error || 'AI Search costs 1 credit.');
+          Alert.alert('Not enough tokens', body.error || 'AI Search costs 1 token.');
         }
       }
     } catch (error) {

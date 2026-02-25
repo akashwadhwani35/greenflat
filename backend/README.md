@@ -58,6 +58,8 @@ DATABASE_URL=postgresql://username:password@localhost:5432/ai_dating_app
 JWT_SECRET=your_secure_secret_key_here
 JWT_EXPIRES_IN=7d
 NODE_ENV=development
+# Optional: allow Google Sign in
+# GOOGLE_OAUTH_CLIENT_IDS=your-android.apps.googleusercontent.com,your-ios.apps.googleusercontent.com,your-web.apps.googleusercontent.com
 ```
 
 ### 4. Run the Server
@@ -81,6 +83,7 @@ npm start
 
 - `POST /api/auth/signup` - Create new user account
 - `POST /api/auth/login` - Login user
+- `POST /api/auth/google` - Login or sign up with Google ID token
 
 ### Profile Management (Protected)
 

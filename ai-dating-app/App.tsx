@@ -279,7 +279,7 @@ const AppShell: React.FC = () => {
         });
         setShowMatchModal(true);
       } else {
-        Alert.alert('Superliked! ⭐', `${selectedMatch.name} will see your superlike at the top of their inbox! (5 credits used)`);
+        Alert.alert('Superliked! ⭐', `${selectedMatch.name} will see your superlike at the top of their inbox! (4 tokens used)`);
         setTimeout(() => setSelectedMatch(null), 300);
       }
     } catch (error: any) {
@@ -312,7 +312,7 @@ const AppShell: React.FC = () => {
         throw new Error(body.error || 'Unable to send compliment.');
       }
 
-      Alert.alert('Compliment sent', 'Delivered to their Likes inbox. 5 credits used.');
+      Alert.alert('Compliment sent', 'Delivered to their Likes inbox. 6 tokens used.');
     } catch (error: any) {
       Alert.alert('Could not send compliment', error.message || 'Please try again.');
     }
@@ -553,8 +553,10 @@ const AppShell: React.FC = () => {
             {...overlayProps}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
+            onOpenSettings={() => setOverlay('settings')}
             onEditProfile={() => setOverlay('profileEdit')}
             onManagePhotos={() => setOverlay('photos')}
+            onSessionExpired={logout}
           />
         );
       case 'admin':
@@ -565,8 +567,10 @@ const AppShell: React.FC = () => {
             {...overlayProps}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
+            onOpenSettings={() => setOverlay('settings')}
             onEditProfile={() => setOverlay('profileEdit')}
             onManagePhotos={() => setOverlay('photos')}
+            onSessionExpired={logout}
           />
         );
       default:

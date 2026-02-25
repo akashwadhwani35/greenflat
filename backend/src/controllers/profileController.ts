@@ -1,12 +1,11 @@
 import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { PERSONALITY_TRAITS_MAP } from '../utils/constants';
+import { PERSONALITY_TRAITS_MAP, TOKEN_COSTS } from '../utils/constants';
 import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
 import { consumeCredits } from '../services/credits.service';
 
 const BOOST_DURATION_HOURS = 6;
-const BOOST_TOKEN_COST = 20;
 
 export const completeProfile = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
@@ -348,23 +347,23 @@ export const activateBoost = async (req: AuthRequest, res: Response) => {
     let chargedTokens = 0;
     let remainingCredits = currentCreditBalance;
     if (!hasPaidPlan) {
-      if (currentCreditBalance < BOOST_TOKEN_COST) {
+      if (currentCreditBalance < TOKEN_COSTS.BOOST) {
         await client.query('ROLLBACK');
         return res.status(402).json({
-          error: `Boost requires Premium or ${BOOST_TOKEN_COST} tokens.`,
-          required_tokens: BOOST_TOKEN_COST,
+          error: `Boost requires Premium or ${TOKEN_COSTS.BOOST} tokens.`,
+          required_tokens: TOKEN_COSTS.BOOST,
           credit_balance: currentCreditBalance,
         });
       }
 
       remainingCredits = await consumeCredits(
         userId,
-        BOOST_TOKEN_COST,
+        TOKEN_COSTS.BOOST,
         'boost_activation',
         { source: 'profile_boost' },
         client
       );
-      chargedTokens = BOOST_TOKEN_COST;
+      chargedTokens = TOKEN_COSTS.BOOST;
     }
 
     const updateResult = await client.query(

@@ -16,6 +16,9 @@ type ProfileDetailScreenProps = {
   onSendCompliment?: (targetUserId: number, content: string) => Promise<void> | void;
   onBlock?: (targetUserId: number, name: string) => void;
   onReport?: (targetUserId: number, name: string) => void;
+  onHeaderRightPress?: () => void;
+  headerRightIcon?: React.ComponentProps<typeof Feather>['name'];
+  headerRightAccessibilityLabel?: string;
   embedded?: boolean;
   hideActionButtons?: boolean;
 };
@@ -129,6 +132,9 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   onSuperlike,
   onBlock,
   onReport,
+  onHeaderRightPress,
+  headerRightIcon,
+  headerRightAccessibilityLabel,
   embedded = false,
   hideActionButtons = false,
 }) => {
@@ -212,6 +218,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   };
 
   const showSafetyButton = !hideActionButtons && Boolean(onBlock || onReport);
+  const showCustomRightButton = Boolean(onHeaderRightPress && headerRightIcon);
 
   const content = (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -226,7 +233,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           <Feather name="arrow-left" size={20} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
-        {showSafetyButton ? (
+        {showCustomRightButton ? (
+          <TouchableOpacity
+            style={[styles.headerIconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+            activeOpacity={0.75}
+            onPress={onHeaderRightPress}
+            accessibilityRole="button"
+            accessibilityLabel={headerRightAccessibilityLabel || 'Header action'}
+          >
+            <Feather name={headerRightIcon as any} size={18} color={theme.colors.text} />
+          </TouchableOpacity>
+        ) : showSafetyButton ? (
           <TouchableOpacity
             style={[styles.headerIconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
             activeOpacity={0.75}

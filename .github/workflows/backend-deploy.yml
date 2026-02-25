@@ -60,6 +60,7 @@ jobs:
             JWT_SECRET=jwt-secret:latest
             OPENAI_API_KEY=openai-api-key:latest
             GOOGLE_MAPS_API_KEY=google-maps-api-key:latest
+            GOOGLE_OAUTH_CLIENT_IDS=google-oauth-client-ids:latest
 
       - name: Show deployed URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

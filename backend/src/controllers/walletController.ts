@@ -2,7 +2,12 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 
-const BOOST_DURATION_HOURS = 6;
+const TOKEN_PACKS: Record<string, number> = {
+  '15': 399,
+  '40': 899,
+  '95': 1699,
+  '260': 3999,
+};
 
 export const getWalletSummary = async (req: AuthRequest, res: Response) => {
   try {
@@ -40,11 +45,14 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
     const userId = req.userId!;
-    const { plan, idempotency_key } = req.body as { plan?: 'starter' | 'premium' | 'boost'; idempotency_key?: string };
+    const { pack_id, idempotency_key } = req.body as { pack_id?: string; idempotency_key?: string };
 
-    if (!plan) {
-      return res.status(400).json({ error: 'plan is required' });
+    if (!pack_id || !TOKEN_PACKS[pack_id]) {
+      return res.status(400).json({ error: 'Valid pack_id is required (15, 40, 95, or 260)' });
     }
+
+    const tokenAmount = Number(pack_id);
+    const priceCents = TOKEN_PACKS[pack_id];
 
     await client.query('BEGIN');
 
@@ -69,42 +77,18 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    if (plan === 'starter') {
-      await client.query(
-        `UPDATE users
-         SET credit_balance = credit_balance + 10, updated_at = NOW()
-         WHERE id = $1`,
-        [userId]
-      );
-      await client.query(
-        `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
-         VALUES ($1, $2, 'credit', 'starter_purchase', $3)`,
-        [userId, 10, JSON.stringify({ source: 'checkout', ...(idempotency_key ? { idempotency_key } : {}) })]
-      );
-    } else if (plan === 'premium') {
-      await client.query(
-        `UPDATE users
-         SET is_premium = TRUE,
-             premium_expires_at = NOW() + INTERVAL '30 days',
-             credit_balance = credit_balance + 30,
-             updated_at = NOW()
-         WHERE id = $1`,
-        [userId]
-      );
-      await client.query(
-        `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
-         VALUES ($1, $2, 'credit', 'premium_purchase', $3)`,
-        [userId, 30, JSON.stringify({ source: 'checkout', premium_days: 30, ...(idempotency_key ? { idempotency_key } : {}) })]
-      );
-    } else if (plan === 'boost') {
-      await client.query(
-        `UPDATE users
-         SET boost_expires_at = NOW() + INTERVAL '${BOOST_DURATION_HOURS} hours',
-             updated_at = NOW()
-         WHERE id = $1`,
-        [userId]
-      );
-    }
+    await client.query(
+      `UPDATE users
+       SET credit_balance = credit_balance + $2, updated_at = NOW()
+       WHERE id = $1`,
+      [userId, tokenAmount]
+    );
+
+    await client.query(
+      `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
+       VALUES ($1, $2, 'credit', 'token_pack_purchase', $3)`,
+      [userId, tokenAmount, JSON.stringify({ source: 'checkout', pack_id, price_cents: priceCents, ...(idempotency_key ? { idempotency_key } : {}) })]
+    );
 
     const result = await client.query(
       'SELECT credit_balance, is_premium, premium_expires_at, boost_expires_at FROM users WHERE id = $1',
@@ -113,7 +97,7 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
 
     await client.query('COMMIT');
     return res.json({
-      message: 'Purchase applied successfully',
+      message: 'Tokens added to your wallet.',
       wallet: result.rows[0],
     });
   } catch (error) {

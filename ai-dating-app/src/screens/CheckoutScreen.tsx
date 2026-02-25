@@ -12,65 +12,66 @@ type Props = {
   onPurchased?: () => void;
 };
 
-const plans = [
-  { id: 'starter' as const, title: 'Starter', price: '$4.99', detail: '10 AI searches + likes boost' },
-  { id: 'premium' as const, title: 'Premium', price: '$14.99', detail: '30 AI searches, rewinds, read receipts' },
-  { id: 'boost' as const, title: 'Boost', price: '$2.99', detail: 'Highlight your profile for 6 hours' },
+const packs = [
+  { id: '15' as const, amount: 15, price: '$3.99', centsEach: 26 },
+  { id: '40' as const, amount: 40, price: '$8.99', centsEach: 22 },
+  { id: '95' as const, amount: 95, price: '$16.99', centsEach: 18 },
+  { id: '260' as const, amount: 260, price: '$39.99', centsEach: 15 },
 ];
 
 export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onPurchased }) => {
   const theme = useTheme();
-  const [selectedPlan, setSelectedPlan] = useState<typeof plans[number]['id'] | null>(null);
-  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [selectedPackId, setSelectedPackId] = useState<typeof packs[number]['id'] | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const applyPurchase = async (plan: typeof plans[number]['id']) => {
+  const applyPurchase = async (packId: typeof packs[number]['id']) => {
     try {
-      setLoadingPlan(plan);
+      setLoading(true);
       const response = await fetch(`${apiBaseUrl}/wallet/purchase`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({ pack_id: packId }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(body.error || 'Purchase failed');
       }
-      Alert.alert('Success', 'Your plan is now active.');
+      Alert.alert('Success', 'Tokens added to your wallet.');
       onPurchased?.();
     } catch (error: any) {
       Alert.alert('Purchase failed', error?.message || 'Please try again.');
     } finally {
-      setLoadingPlan(null);
+      setLoading(false);
     }
   };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <PageHeader title="Get more" onBack={onBack} />
+      <PageHeader title="Get Tokens" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {plans.map((plan) => (
+        {packs.map((pack) => (
           <View
-            key={plan.title}
+            key={pack.id}
             style={[
               styles.card,
               {
-                borderColor: selectedPlan === plan.id ? theme.colors.neonGreen : theme.colors.border,
-                backgroundColor: selectedPlan === plan.id ? theme.colors.secondaryHighlight : 'transparent',
+                borderColor: selectedPackId === pack.id ? theme.colors.neonGreen : theme.colors.border,
+                backgroundColor: selectedPackId === pack.id ? theme.colors.secondaryHighlight : 'transparent',
               },
             ]}
           >
             <View style={{ flex: 1, gap: 4 }}>
-              <Typography variant="bodyStrong">{plan.title}</Typography>
+              <Typography variant="bodyStrong">{pack.amount} GFT</Typography>
               <Typography variant="small" muted>
-                {plan.detail}
+                {pack.centsEach}¢ each
               </Typography>
             </View>
-            <Typography variant="h2">{plan.price}</Typography>
-            <Button label="Select" onPress={() => setSelectedPlan(plan.id)} />
+            <Typography variant="h2">{pack.price}</Typography>
+            <Button label="Select" onPress={() => setSelectedPackId(pack.id)} />
           </View>
         ))}
 
@@ -82,13 +83,13 @@ export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onP
           <Button
             label="Confirm purchase"
             onPress={() => {
-              if (!selectedPlan) {
-                Alert.alert('Pick a plan', 'Please select a plan first.');
+              if (!selectedPackId) {
+                Alert.alert('Select a pack', 'Please select a token pack first.');
                 return;
               }
-              void applyPurchase(selectedPlan);
+              void applyPurchase(selectedPackId);
             }}
-            loading={Boolean(loadingPlan)}
+            loading={loading}
             fullWidth
           />
         </View>
