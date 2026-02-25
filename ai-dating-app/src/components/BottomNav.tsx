@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
   },
   badgeText: {
     fontSize: 10,
-    fontWeight: '700',
+    fontFamily: 'RedHatDisplay_700Bold',
     lineHeight: 12,
   },
   // AI Flag Icon styles (matching PostOnboardingScreen)

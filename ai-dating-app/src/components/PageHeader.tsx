@@ -2,6 +2,7 @@ import React from 'react';
 import { Platform, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from './Typography';
+import { useTheme } from '../theme/ThemeProvider';
 
 type Props = {
   title: string;
@@ -10,12 +11,18 @@ type Props = {
 };
 
 export const PageHeader: React.FC<Props> = ({ title, onBack, right }) => {
+  const theme = useTheme();
   return (
     <View style={styles.header}>
-      <TouchableOpacity onPress={onBack} style={styles.backButton} accessibilityRole="button" activeOpacity={0.8}>
-        <Feather name="arrow-left" size={22} color="#FFFFFF" />
+      <TouchableOpacity
+        onPress={onBack}
+        style={[styles.backButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+        accessibilityRole="button"
+        activeOpacity={0.8}
+      >
+        <Feather name="arrow-left" size={22} color={theme.colors.text} />
       </TouchableOpacity>
-      <Typography variant="h1" style={styles.title}>
+      <Typography variant="h1" style={[styles.title, { color: theme.colors.text }]}>
         {title}
       </Typography>
       {right ? <View style={styles.right}>{right}</View> : null}
@@ -38,13 +45,9 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1B2920',
     borderWidth: 1,
-    borderColor: '#4D4D4D',
   },
-  title: {
-    color: '#FFFFFF',
-  },
+  title: {},
   right: {
     marginLeft: 'auto',
   },

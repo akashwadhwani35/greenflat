@@ -32,7 +32,6 @@ import { TermsScreen } from './src/screens/TermsScreen';
 import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { ProfileOverviewScreen } from './src/screens/ProfileOverviewScreen';
-import { ProfileScreen } from './src/screens/ProfileScreen';
 import { AISearchScreen } from './src/screens/AISearchScreen';
 import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession } from './src/utils/session';
 
@@ -522,6 +521,9 @@ const AppShell: React.FC = () => {
           <AdvancedSearchScreen
             {...overlayProps}
             initialFilters={advancedFilters}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onOpenCheckout={() => setOverlay('checkout')}
             onApply={(filters) => {
               setAdvancedFilters(filters);
               setOverlay(null);
@@ -540,7 +542,7 @@ const AppShell: React.FC = () => {
       case 'privacySafety':
         return <PrivacySafetyScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'helpCenter':
-        return <HelpCenterScreen {...overlayProps} onOpenTerms={() => setOverlay('terms')} />;
+        return <HelpCenterScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'terms':
         return <TermsScreen {...overlayProps} />;
       case 'checkout':
@@ -559,17 +561,12 @@ const AppShell: React.FC = () => {
         return <AdminDashboardScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'profile':
         return (
-          <ProfileScreen
-            onBack={() => {
-              setOverlay(null);
-              setActiveTab('explore');
-            }}
-            onOpenSettings={() => setOverlay('settings')}
-            onEditProfile={() => setOverlay('profileEdit')}
-            onManagePhotos={() => setOverlay('photos')}
-            onOpenCheckout={() => setOverlay('checkout')}
+          <ProfileOverviewScreen
+            {...overlayProps}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
+            onEditProfile={() => setOverlay('profileEdit')}
+            onManagePhotos={() => setOverlay('photos')}
           />
         );
       default:
@@ -738,7 +735,7 @@ const AppShell: React.FC = () => {
                 />
               </View>
             )}
-            {!showMessages && (
+            {!showMessages && overlay !== 'aiSearch' && !showProfileModal && (
               <BottomNav
                 activeTab={activeTab}
                 onTabChange={handleTabChange}

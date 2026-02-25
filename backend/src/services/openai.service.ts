@@ -240,6 +240,54 @@ export const analyzePersonality = async (
   top_traits: string[];
   compatibility_tips: string;
 }> => {
+  const normalizeSecondPersonSummary = (value: unknown): string => {
+    const fallback = 'You have a unique personality!';
+    if (typeof value !== 'string') return fallback;
+
+    let summary = value.trim().replace(/\s+/g, ' ');
+    if (!summary) return fallback;
+
+    summary = summary
+      .replace(/^(the individual|this individual|the user|this person)\s+/i, '')
+      .replace(/^(they|he|she)\s+(are|is)\s+/i, '');
+
+    if (!/^you\b/i.test(summary)) {
+      if (/^(are|have|tend|show|value|prefer|communicate|approach|bring)\b/i.test(summary)) {
+        summary = `You ${summary}`;
+      } else {
+        summary = `You are ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+      }
+    }
+
+    summary = summary
+      .replace(/^you\s+is\b/i, 'You are')
+      .replace(/^you\s+has\b/i, 'You have');
+
+    return `${summary.charAt(0).toUpperCase()}${summary.slice(1)}`;
+  };
+
+  const normalizeSecondPersonTip = (value: unknown): string => {
+    const fallback = 'You would match well with someone who shares your values.';
+    if (typeof value !== 'string') return fallback;
+
+    let tip = value.trim().replace(/\s+/g, ' ');
+    if (!tip) return fallback;
+
+    tip = tip
+      .replace(/^(the individual|this individual|the user|this person)\s+/i, '')
+      .replace(/^(they|he|she)\s+(would|will|can|should|tend to)\s+/i, '');
+
+    if (!/^you\b/i.test(tip)) {
+      if (/^(would|will|can|should|match|benefit)\b/i.test(tip)) {
+        tip = `You ${tip}`;
+      } else {
+        tip = `You ${tip.charAt(0).toLowerCase()}${tip.slice(1)}`;
+      }
+    }
+
+    return `${tip.charAt(0).toUpperCase()}${tip.slice(1)}`;
+  };
+
   const prompt = `Based only on the two inputs below, provide personality insights.
 
 Input 1: Personality quiz answers (A/B/C/D)
@@ -251,6 +299,9 @@ ${aboutYouText || 'No text provided'}
 Important:
 - Use ONLY these two inputs.
 - Do NOT infer from photos, location, age, interests outside Input 2, or any other profile fields.
+- Write in SECOND PERSON.
+- The summary MUST start with "You are".
+- Do NOT use third-person phrasing like "The individual is", "This person is", or "They are".
 
 Quiz context:
 - A answers → Funny, Playful, Adventurous, Spontaneous
@@ -260,9 +311,9 @@ Quiz context:
 
 Return JSON with:
 {
-  "summary": "A 2-3 sentence personality summary",
+  "summary": "A 2-3 sentence personality summary that starts with 'You are'",
   "top_traits": ["trait1", "trait2", "trait3"],
-  "compatibility_tips": "One sentence on what type of person they'd match with"
+  "compatibility_tips": "One sentence in second person"
 }
 
 Only return the JSON object.`;
@@ -280,7 +331,16 @@ Only return the JSON object.`;
       throw new Error('No response from OpenAI');
     }
 
-    return JSON.parse(content);
+    const parsed = JSON.parse(content);
+    const topTraits = Array.isArray(parsed?.top_traits)
+      ? parsed.top_traits.filter((trait: unknown) => typeof trait === 'string' && trait.trim().length > 0).map((trait: string) => trait.trim()).slice(0, 6)
+      : [];
+
+    return {
+      summary: normalizeSecondPersonSummary(parsed?.summary),
+      top_traits: topTraits,
+      compatibility_tips: normalizeSecondPersonTip(parsed?.compatibility_tips),
+    };
   } catch (error) {
     console.error('Error analyzing personality:', error);
     return {
@@ -509,5 +569,83 @@ Return JSON: {"isAdult": true/false, "confidence": 0-1, "reasoning": "short reas
   } catch (error) {
     console.error('Vision age check error:', error);
     return { isAdult: false, confidence: 0, reasoning: 'Vision check failed' };
+  }
+};
+
+/**
+ * Selfie verification against profile photo:
+ * - selfie has one clear face
+ * - selfie appears 18+
+ * - selfie person matches profile primary photo person
+ */
+export const analyzeSelfieAgainstProfile = async (
+  selfieUrl: string,
+  profilePhotoUrl: string
+): Promise<{ isAdult: boolean; isMatch: boolean; confidence: number; reasoning: string }> => {
+  if (!process.env.OPENAI_API_KEY) {
+    return {
+      isAdult: false,
+      isMatch: false,
+      confidence: 0,
+      reasoning: 'OpenAI API key not configured',
+    };
+  }
+
+  const prompt = `You are verifying a dating app selfie against a profile photo.
+Image 1 is the newly captured selfie.
+Image 2 is the user's profile photo.
+
+Rules:
+1) Selfie (image 1) must contain exactly one clear face.
+2) The person in image 1 must appear 18+.
+3) The primary person in image 1 and image 2 must be the same person.
+If uncertain on any rule, set booleans to false.
+
+Return strict JSON:
+{"isAdult": true/false, "isMatch": true/false, "confidence": 0-1, "reasoning": "short reason"}`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: VISION_MODEL,
+      temperature: 0,
+      max_tokens: 180,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            {
+              type: 'image_url',
+              image_url: { url: selfieUrl },
+            },
+            {
+              type: 'image_url',
+              image_url: { url: profilePhotoUrl },
+            },
+          ],
+        },
+      ],
+      response_format: { type: 'json_object' },
+    });
+
+    const content = response.choices[0].message.content;
+    if (!content) {
+      throw new Error('No vision response');
+    }
+    const parsed = JSON.parse(content);
+    return {
+      isAdult: Boolean(parsed.isAdult),
+      isMatch: Boolean(parsed.isMatch),
+      confidence: Number(parsed.confidence) || 0,
+      reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : 'No reasoning provided',
+    };
+  } catch (error) {
+    console.error('Vision selfie/profile match error:', error);
+    return {
+      isAdult: false,
+      isMatch: false,
+      confidence: 0,
+      reasoning: 'Vision check failed',
+    };
   }
 };

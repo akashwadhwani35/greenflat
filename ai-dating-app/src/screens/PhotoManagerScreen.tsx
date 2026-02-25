@@ -190,13 +190,34 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
                       onPress={() => handleSetPrimary(item.id)}
                     />
                     <View style={styles.row}>
-                      <TouchableOpacity style={styles.iconButtonSmall} onPress={() => handleReorder(item.id, 'up')} accessibilityRole="button">
-                        <Feather name="arrow-up" size={16} color={theme.colors.text} />
+                      <TouchableOpacity
+                        style={[
+                          styles.iconButtonSmall,
+                          { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline },
+                        ]}
+                        onPress={() => handleReorder(item.id, 'up')}
+                        accessibilityRole="button"
+                      >
+                        <Feather name="arrow-up" size={16} color={theme.colors.neonGreen} />
                       </TouchableOpacity>
-                      <TouchableOpacity style={styles.iconButtonSmall} onPress={() => handleReorder(item.id, 'down')} accessibilityRole="button">
-                        <Feather name="arrow-down" size={16} color={theme.colors.text} />
+                      <TouchableOpacity
+                        style={[
+                          styles.iconButtonSmall,
+                          { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline },
+                        ]}
+                        onPress={() => handleReorder(item.id, 'down')}
+                        accessibilityRole="button"
+                      >
+                        <Feather name="arrow-down" size={16} color={theme.colors.neonGreen} />
                       </TouchableOpacity>
-                      <TouchableOpacity style={styles.iconButtonSmall} onPress={() => handleDelete(item.id)} accessibilityRole="button">
+                      <TouchableOpacity
+                        style={[
+                          styles.iconButtonSmall,
+                          { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline },
+                        ]}
+                        onPress={() => handleDelete(item.id)}
+                        accessibilityRole="button"
+                      >
                         <Feather name="trash" size={16} color={theme.colors.error} />
                       </TouchableOpacity>
                     </View>
@@ -257,7 +278,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F7F7F7',
+    borderWidth: 1,
   },
   row: {
     flexDirection: 'row',

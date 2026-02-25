@@ -236,7 +236,6 @@ const styles = StyleSheet.create({
   },
   brandName: {
     fontSize: 32,
-    fontWeight: '700',
     color: '#000000',
     fontFamily: 'RedHatDisplay_700Bold',
   },
@@ -268,7 +267,6 @@ const styles = StyleSheet.create({
   },
   headline: {
     fontSize: 36,
-    fontWeight: '700',
     color: '#000000',
     textAlign: 'center',
     fontFamily: 'RedHatDisplay_700Bold',
@@ -284,7 +282,6 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: '#FFFFFF',
     fontSize: 18,
-    fontWeight: '600',
     fontFamily: 'RedHatDisplay_600SemiBold',
   },
   loginLink: {
@@ -296,7 +293,6 @@ const styles = StyleSheet.create({
     fontFamily: 'RedHatDisplay_400Regular',
   },
   loginTextUnderline: {
-    fontWeight: '600',
     textDecorationLine: 'underline',
     fontFamily: 'RedHatDisplay_600SemiBold',
   },
@@ -310,7 +306,6 @@ const styles = StyleSheet.create({
     fontFamily: 'RedHatDisplay_400Regular',
   },
   termsLink: {
-    fontWeight: '600',
     fontFamily: 'RedHatDisplay_600SemiBold',
   },
   termsWrap: {
@@ -349,7 +344,6 @@ const styles = StyleSheet.create({
   },
   modalSectionTitle: {
     fontSize: 15,
-    fontWeight: '600',
     fontFamily: 'RedHatDisplay_600SemiBold',
     marginTop: 6,
   },

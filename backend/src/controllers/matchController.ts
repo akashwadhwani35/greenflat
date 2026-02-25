@@ -248,6 +248,35 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const shouldChargeForAISearch = chargeCredits && normalizedSearchQuery.length > 0 && is_on_grid !== false;
 
     const currentUser = currentUserResult.rows[0];
+    const premiumExpiresAt = currentUser.premium_expires_at ? new Date(currentUser.premium_expires_at).getTime() : null;
+    const hasPaidPlan = Boolean(currentUser.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > Date.now());
+    const hasFilterValue = (value: unknown) => {
+      if (typeof value === 'string') return value.trim().length > 0;
+      if (Array.isArray(value)) return value.length > 0;
+      return value !== undefined && value !== null;
+    };
+    const paidFilterKeys: Array<keyof SearchFilters> = [
+      'ethnicity',
+      'minHeight',
+      'maxHeight',
+      'dating_intentions',
+      'have_kids',
+      'drugs',
+      'smoker',
+      'smoking_habit',
+      'marijuana',
+      'drinker',
+      'politics',
+      'education_level',
+    ];
+    const activePaidFilters = paidFilterKeys.filter((key) => hasFilterValue((filters as any)[key]));
+    if (!hasPaidPlan && activePaidFilters.length > 0) {
+      return res.status(402).json({
+        error: 'Paid plan required for advanced filters.',
+        paid_filters: activePaidFilters,
+      });
+    }
+
     const userAge = calculateAge(currentUser.date_of_birth);
     const currentUserPersonaEmbedding = parseEmbedding((currentUser as any).persona_embedding);
     const currentUserLat = Number((currentUser as any).latitude);
@@ -308,10 +337,17 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         AND blocked_rel.id IS NULL
     `;
 
-    // Seeker preference: interested_in='both' should not collapse results.
-    if (currentUser.interested_in !== 'both') {
+    const requestedInterestedIn =
+      typeof enhancedFilters.interested_in === 'string' &&
+      ['male', 'female', 'both'].includes(enhancedFilters.interested_in)
+        ? enhancedFilters.interested_in
+        : undefined;
+    const effectiveInterestedIn = requestedInterestedIn || currentUser.interested_in;
+
+    // Seeker preference (can be overridden by filter): interested_in='both' should not collapse results.
+    if (effectiveInterestedIn !== 'both') {
       baseQuery += ` AND u.gender = $${paramIndex}`;
-      queryParams.push(currentUser.interested_in);
+      queryParams.push(effectiveInterestedIn);
       paramIndex++;
     }
 
@@ -344,10 +380,17 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Apply height filter
+    // Apply minimum height filter
     if (enhancedFilters.minHeight) {
       baseQuery += ` AND p.height >= $${paramIndex}`;
       queryParams.push(enhancedFilters.minHeight);
+      paramIndex++;
+    }
+
+    // Apply maximum height filter
+    if (enhancedFilters.maxHeight) {
+      baseQuery += ` AND p.height <= $${paramIndex}`;
+      queryParams.push(enhancedFilters.maxHeight);
       paramIndex++;
     }
 
@@ -359,8 +402,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     }
     // Note: City filtering is now optional - profiles from all cities will show if no city filter is specified
 
-    // Apply smoker filter
-    if (enhancedFilters.smoker !== undefined) {
+    // Apply smoking habit filter
+    if (enhancedFilters.smoking_habit && enhancedFilters.smoking_habit.trim().length > 0) {
+      baseQuery += ` AND LOWER(p.smoking_habit) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.smoking_habit);
+      paramIndex++;
+    } else if (enhancedFilters.smoker !== undefined) {
+      // Backwards-compatible boolean smoker filter.
       baseQuery += ` AND p.smoker = $${paramIndex}`;
       queryParams.push(enhancedFilters.smoker);
       paramIndex++;
@@ -373,10 +421,61 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       paramIndex++;
     }
 
+    const relationshipGoalFilter = enhancedFilters.relationship_goal || enhancedFilters.dating_intentions;
+
     // Apply relationship goal filter
-    if (enhancedFilters.relationship_goal) {
+    if (relationshipGoalFilter) {
       baseQuery += ` AND p.relationship_goal = $${paramIndex}`;
-      queryParams.push(enhancedFilters.relationship_goal);
+      queryParams.push(relationshipGoalFilter);
+      paramIndex++;
+    }
+
+    // Apply religion filter
+    if (enhancedFilters.religion) {
+      baseQuery += ` AND LOWER(p.religion) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.religion);
+      paramIndex++;
+    }
+
+    // Apply children filter
+    if (enhancedFilters.have_kids) {
+      baseQuery += ` AND LOWER(p.have_kids) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.have_kids);
+      paramIndex++;
+    }
+
+    // Apply politics filter
+    if (enhancedFilters.politics) {
+      baseQuery += ` AND LOWER(p.politics) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.politics);
+      paramIndex++;
+    }
+
+    // Apply education filter
+    if (enhancedFilters.education_level) {
+      baseQuery += ` AND LOWER(COALESCE(p.education_level, p.education, '')) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.education_level);
+      paramIndex++;
+    }
+
+    // Apply ethnicity filter
+    if (enhancedFilters.ethnicity) {
+      baseQuery += ` AND LOWER(p.ethnicity) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.ethnicity);
+      paramIndex++;
+    }
+
+    // Apply drugs filter
+    if (enhancedFilters.drugs) {
+      baseQuery += ` AND LOWER(p.drugs) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.drugs);
+      paramIndex++;
+    }
+
+    // Apply marijuana filter
+    if (enhancedFilters.marijuana) {
+      baseQuery += ` AND LOWER(p.marijuana) = LOWER($${paramIndex})`;
+      queryParams.push(enhancedFilters.marijuana);
       paramIndex++;
     }
 
@@ -458,6 +557,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       return b.match_percentage - a.match_percentage;
     });
 
+    const shuffleCandidates = (items: any[]) => [...items].sort(() => Math.random() - 0.5);
+    const prioritizeBoostedCandidates = (items: any[]) => {
+      const boosted = items.filter((candidate: any) => candidate.boost_active);
+      const nonBoosted = items.filter((candidate: any) => !candidate.boost_active);
+      return [...shuffleCandidates(boosted), ...shuffleCandidates(nonBoosted)];
+    };
+
     // If specific type requested (for refresh), return only that type
     let onGridMatches: any[];
     let offGridMatches: any[];
@@ -468,17 +574,17 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       onGridMatches = scoredCandidates.slice(0, requestedLimit);
       offGridMatches = [];
     } else if (is_on_grid === false) {
-      // Only return off-grid matches (randomized for exploration)
-      const shuffledCandidates = scoredCandidates.sort(() => Math.random() - 0.5);
+      // Off-grid remains exploratory, but boosted profiles stay prioritized.
+      const prioritizedOffGrid = prioritizeBoostedCandidates(scoredCandidates);
       const requestedLimit = limit || offGridCount;
-      offGridMatches = shuffledCandidates.slice(0, requestedLimit);
+      offGridMatches = prioritizedOffGrid.slice(0, requestedLimit);
       onGridMatches = [];
     } else {
       // Return both types (default behavior)
       onGridMatches = scoredCandidates.slice(0, onGridCount);
       const offGridCandidates = scoredCandidates.slice(onGridCount);
-      const shuffledOffGrid = offGridCandidates.sort(() => Math.random() - 0.5);
-      offGridMatches = shuffledOffGrid.slice(0, offGridCount);
+      const prioritizedOffGrid = prioritizeBoostedCandidates(offGridCandidates);
+      offGridMatches = prioritizedOffGrid.slice(0, offGridCount);
     }
 
     // Generate AI match reasons for on-grid matches (top matches only)

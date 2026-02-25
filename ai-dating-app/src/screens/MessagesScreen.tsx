@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   FlatList,
-  ScrollView,
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -22,6 +21,8 @@ import * as ImagePicker from 'expo-image-picker';
 import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { ProfileDetailScreen } from './ProfileDetailScreen';
+import { MatchCandidate } from './MatchboardScreen';
 
 type Message = {
   id: number;
@@ -45,6 +46,15 @@ type MessagesScreenProps = {
   onBack: () => void;
 };
 
+type ProfileDetailCandidate = MatchCandidate & {
+  bio?: string;
+  relationship_goal?: string;
+  interests?: string[];
+  photos?: string[];
+};
+
+type MediaUploadProvider = 'cloudinary' | 'local' | 'none';
+
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   matchId,
   matchName,
@@ -62,10 +72,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [sending, setSending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
-  const [profileLoading, setProfileLoading] = useState(false);
   const [profileData, setProfileData] = useState<any | null>(null);
   const [androidKeyboardOffset, setAndroidKeyboardOffset] = useState(0);
-  const [mediaUploadReady, setMediaUploadReady] = useState<boolean>(true);
+  const [mediaUploadProvider, setMediaUploadProvider] = useState<MediaUploadProvider>('local');
   const [peerTyping, setPeerTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isTypingRef = useRef(false);
@@ -79,7 +88,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
 
     try {
-      setProfileLoading(true);
       const response = await fetch(`${apiBaseUrl}/matches/user/${targetUserId}`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -96,10 +104,36 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     } catch (error) {
       console.error('Error loading profile:', error);
       Alert.alert('Error', 'Unable to open profile right now.');
-    } finally {
-      setProfileLoading(false);
     }
   };
+
+  const fullProfileMatch: ProfileDetailCandidate | null = (() => {
+    const user = profileData?.user;
+    if (!user) return null;
+
+    const photos = Array.isArray(profileData?.photos) ? profileData.photos : [];
+    const primaryPhoto = photos.find((photo: any) => photo?.is_primary) || photos[0];
+    const interests = Array.isArray(user?.interests) ? user.interests : [];
+
+    return {
+      id: Number(user.id || targetUserId || 0),
+      name: user.name || matchName,
+      age: typeof user.age === 'number' ? user.age : undefined,
+      city: user.city || 'Unknown city',
+      match_percentage: 0,
+      match_reason: typeof user.bio === 'string' ? user.bio : '',
+      match_highlights: interests.slice(0, 3),
+      suggested_openers: [],
+      primary_photo: typeof primaryPhoto?.photo_url === 'string' ? primaryPhoto.photo_url : undefined,
+      is_verified: Boolean(user.is_verified),
+      bio: typeof user.bio === 'string' ? user.bio : '',
+      relationship_goal: typeof user.relationship_goal === 'string' ? user.relationship_goal : undefined,
+      interests,
+      photos: photos
+        .map((photo: any) => photo?.photo_url)
+        .filter((url: unknown): url is string => typeof url === 'string' && url.length > 0),
+    };
+  })();
 
   const handleUnmatch = () => {
     setShowMenu(false);
@@ -321,17 +355,77 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!response.ok) {
-        setMediaUploadReady(false);
         return;
       }
       const body = await response.json();
-      setMediaUploadReady(body?.capabilities?.upload_provider === 'cloudinary');
+      const provider = body?.capabilities?.upload_provider;
+      if (provider === 'cloudinary' || provider === 'local') {
+        setMediaUploadProvider(provider);
+      } else {
+        setMediaUploadProvider('none');
+      }
     } catch {
-      setMediaUploadReady(false);
+      // Keep best-effort local fallback when capability endpoint is unavailable.
     }
   };
 
-  const uploadMediaAsset = async (
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+          return;
+        }
+        reject(new Error('Unable to encode media payload'));
+      };
+      reader.onerror = () => reject(new Error('Unable to read media payload'));
+      reader.readAsDataURL(blob);
+    });
+
+  const buildLocalDataUrl = async (
+    asset: ImagePicker.ImagePickerAsset,
+    mediaType: 'image' | 'voice'
+  ): Promise<string> => {
+    const fallbackMimeType = mediaType === 'image' ? 'image/jpeg' : 'video/mp4';
+    const mimeType = asset.mimeType || fallbackMimeType;
+
+    if (mediaType === 'image' && asset.base64) {
+      return `data:${mimeType};base64,${asset.base64}`;
+    }
+
+    const fileResponse = await fetch(asset.uri);
+    if (!fileResponse.ok) {
+      throw new Error('Failed to read selected media');
+    }
+    const blob = await fileResponse.blob();
+    return blobToDataUrl(blob);
+  };
+
+  const uploadViaLocal = async (
+    asset: ImagePicker.ImagePickerAsset,
+    mediaType: 'image' | 'voice'
+  ): Promise<string> => {
+    const dataUrl = await buildLocalDataUrl(asset, mediaType);
+    const response = await fetch(`${apiBaseUrl}/media/upload-local`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        data_url: dataUrl,
+        media_type: mediaType,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || typeof body?.url !== 'string') {
+      throw new Error(body?.error || 'Failed to upload media');
+    }
+    return body.url as string;
+  };
+
+  const uploadViaCloudinary = async (
     asset: ImagePicker.ImagePickerAsset,
     mediaType: 'image' | 'voice'
   ): Promise<string> => {
@@ -373,6 +467,28 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
 
     return uploadBody.secure_url as string;
+  };
+
+  const uploadMediaAsset = async (
+    asset: ImagePicker.ImagePickerAsset,
+    mediaType: 'image' | 'voice'
+  ): Promise<string> => {
+    const firstAttempt = mediaUploadProvider === 'cloudinary' ? uploadViaCloudinary : uploadViaLocal;
+    const secondAttempt = mediaUploadProvider === 'cloudinary' ? uploadViaLocal : uploadViaCloudinary;
+
+    try {
+      return await firstAttempt(asset, mediaType);
+    } catch (primaryError) {
+      try {
+        return await secondAttempt(asset, mediaType);
+      } catch (secondaryError: any) {
+        throw new Error(
+          secondaryError?.message ||
+          (primaryError as any)?.message ||
+          'Media upload is not available right now'
+        );
+      }
+    }
   };
 
   const sendMessage = async (payload?: { content: string; message_type: 'text' | 'image' | 'voice' }) => {
@@ -588,70 +704,22 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         </Pressable>
       </Modal>
 
-      <Modal
+      <ProfileDetailScreen
+        match={fullProfileMatch}
         visible={showProfile}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowProfile(false)}
-      >
-        <View style={styles.profileOverlay}>
-          <View style={[styles.profileSheet, { backgroundColor: theme.colors.deepBlack, borderColor: theme.colors.border }]}>
-            <View style={styles.profileHeaderRow}>
-              <Typography variant="h2" style={{ color: theme.colors.text }}>
-                {profileData?.user?.name || matchName}
-              </Typography>
-              <TouchableOpacity onPress={() => setShowProfile(false)} style={styles.profileCloseButton}>
-                <Feather name="x" size={22} color={theme.colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            {profileLoading ? (
-              <View style={styles.profileLoadingContainer}>
-                <ActivityIndicator size="small" color={theme.colors.neonGreen} />
-              </View>
-            ) : (
-              <ScrollView contentContainerStyle={styles.profileContent} showsVerticalScrollIndicator={false}>
-                <Image
-                  source={profileData?.photos?.[0]?.photo_url ? { uri: profileData.photos[0].photo_url } : require('../../assets/icon.png')}
-                  style={styles.profileHeroImage}
-                />
-
-                <Typography variant="small" style={{ color: theme.colors.muted }}>
-                  {profileData?.user?.city || 'Unknown city'} {profileData?.user?.age ? `• ${profileData.user.age}` : ''}
-                </Typography>
-
-                {profileData?.user?.bio ? (
-                  <Typography variant="body" style={{ color: theme.colors.text, marginTop: 12 }}>
-                    {profileData.user.bio}
-                  </Typography>
-                ) : null}
-
-                {Array.isArray(profileData?.user?.interests) && profileData.user.interests.length > 0 ? (
-                  <View style={styles.profileTagWrap}>
-                    {profileData.user.interests.slice(0, 10).map((interest: string) => (
-                      <View key={interest} style={[styles.profileTag, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-                        <Typography variant="tiny" style={{ color: theme.colors.text }}>
-                          {interest}
-                        </Typography>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-
-                <TouchableOpacity
-                  style={[styles.profileActionButton, { backgroundColor: theme.colors.neonGreen }]}
-                  onPress={() => setShowProfile(false)}
-                  activeOpacity={0.85}
-                >
-                  <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
-                    Back to chat
-                  </Typography>
-                </TouchableOpacity>
-              </ScrollView>
-            )}
-          </View>
-        </View>
-      </Modal>
+        onClose={() => setShowProfile(false)}
+        onSwipeLeft={() => setShowProfile(false)}
+        onSwipeRight={() => setShowProfile(false)}
+        onSuperlike={() => setShowProfile(false)}
+        onBlock={() => {
+          setShowProfile(false);
+          handleBlock();
+        }}
+        onReport={() => {
+          setShowProfile(false);
+          handleReport();
+        }}
+      />
 
       {/* Messages List */}
       {loading ? (
@@ -712,14 +780,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           <TouchableOpacity
             style={styles.attachButton}
             onPress={async () => {
-              if (!mediaUploadReady) {
-                Alert.alert('Media unavailable', 'Media upload is not configured right now.');
-                return;
-              }
               const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsEditing: true,
                 quality: 0.5,
+                base64: true,
               });
               if (!result.canceled && result.assets[0]) {
                 try {
@@ -735,16 +800,12 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             }}
             disabled={sending}
           >
-            <Feather name="image" size={22} color={theme.colors.muted} />
+            <Feather name="image" size={22} color={theme.colors.text} />
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.attachButton}
             onPress={async () => {
-              if (!mediaUploadReady) {
-                Alert.alert('Media unavailable', 'Media upload is not configured right now.');
-                return;
-              }
               const permission = await ImagePicker.requestCameraPermissionsAsync();
               if (!permission.granted) {
                 Alert.alert('Camera required', 'Allow camera access to capture a quick voice/video note.');
@@ -753,8 +814,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               const result = await ImagePicker.launchCameraAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Videos,
                 allowsEditing: false,
-                videoMaxDuration: 20,
-                quality: 0.4,
+                videoMaxDuration: mediaUploadProvider === 'local' ? 8 : 20,
+                quality: mediaUploadProvider === 'local' ? 0.3 : 0.4,
               });
               if (!result.canceled && result.assets[0]) {
                 try {
@@ -770,7 +831,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             }}
             disabled={sending}
           >
-            <Feather name="mic" size={22} color={theme.colors.muted} />
+            <Feather name="mic" size={22} color={theme.colors.text} />
           </TouchableOpacity>
 
           <TextInput
@@ -988,67 +1049,5 @@ const styles = StyleSheet.create({
   menuDivider: {
     height: 1,
     marginHorizontal: 16,
-  },
-  profileOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'flex-end',
-  },
-  profileSheet: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderWidth: 1,
-    borderBottomWidth: 0,
-    maxHeight: '85%',
-    paddingBottom: Platform.OS === 'ios' ? 28 : 16,
-  },
-  profileHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 10,
-  },
-  profileCloseButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileLoadingContainer: {
-    paddingVertical: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  profileContent: {
-    paddingHorizontal: 20,
-    paddingBottom: 18,
-    gap: 10,
-  },
-  profileHeroImage: {
-    width: '100%',
-    height: 260,
-    borderRadius: 18,
-    backgroundColor: '#222',
-  },
-  profileTagWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 6,
-  },
-  profileTag: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  profileActionButton: {
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 12,
   },
 });

@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
-import { analyzeSelfieAge } from '../services/openai.service';
+import { analyzeSelfieAgainstProfile } from '../services/openai.service';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
 
 const OTP_TTL_SECONDS = 300;
@@ -10,13 +10,43 @@ const OTP_REQUEST_LIMIT_PER_HOUR = 5;
 const OTP_VERIFY_MAX_ATTEMPTS = 5;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 
+const DEFAULT_COUNTRY_CODE = process.env.OTP_DEFAULT_COUNTRY_CODE || '+1';
+
 const normalizePhone = (raw: unknown): string | null => {
   if (typeof raw !== 'string') return null;
-  const stripped = raw.replace(/[^\d+]/g, '');
-  if (!stripped.startsWith('+')) return null;
-  const digits = stripped.slice(1);
-  if (!/^\d{8,15}$/.test(digits)) return null;
-  return `+${digits}`;
+  const value = raw.trim();
+  if (!value) return null;
+
+  const plusPrefixed = value.startsWith('+');
+  const digitsOnly = value.replace(/\D/g, '');
+
+  if (!digitsOnly) return null;
+
+  let normalized = '';
+  if (plusPrefixed) {
+    normalized = `+${digitsOnly}`;
+  } else if (digitsOnly.length === 10) {
+    // Default to US when users enter a local 10-digit number.
+    normalized = `${DEFAULT_COUNTRY_CODE}${digitsOnly}`;
+  } else {
+    // Accept international numbers entered without a plus sign.
+    normalized = `+${digitsOnly}`;
+  }
+
+  const normalizedDigits = normalized.startsWith('+') ? normalized.slice(1) : normalized;
+  if (!/^\d{8,15}$/.test(normalizedDigits)) return null;
+  return `+${normalizedDigits}`;
+};
+
+const normalizeOtpCode = (raw: unknown): string | null => {
+  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+  const digits = String(raw).replace(/\D/g, '');
+  return /^\d{6}$/.test(digits) ? digits : null;
+};
+
+const maskPhone = (phone: string) => {
+  if (phone.length <= 4) return phone;
+  return `${'*'.repeat(Math.max(0, phone.length - 4))}${phone.slice(-4)}`;
 };
 
 const getOrCreateVerificationStatus = async (userId: number) => {
@@ -39,7 +69,7 @@ export const requestOtp = async (req: Request, res: Response) => {
   try {
     const normalizedPhone = normalizePhone((req.body as any)?.phone);
     if (!normalizedPhone) {
-      return res.status(400).json({ error: 'Phone is required' });
+      return res.status(400).json({ error: 'Phone must include a valid country/area number' });
     }
 
     const smsConfigured = isSmsConfigured();
@@ -104,6 +134,8 @@ export const requestOtp = async (req: Request, res: Response) => {
     return res.json({
       message: 'OTP sent',
       expires_in_seconds: OTP_TTL_SECONDS,
+      phone_hint: maskPhone(normalizedPhone),
+      normalized_phone: normalizedPhone,
     });
   } catch (error) {
     console.error('Request OTP error', error);
@@ -114,10 +146,14 @@ export const requestOtp = async (req: Request, res: Response) => {
 export const verifyOtp = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
+    if (!userId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
     const normalizedPhone = normalizePhone((req.body as any)?.phone);
-    const { code } = req.body;
-    if (!normalizedPhone || !code) {
-      return res.status(400).json({ error: 'Phone and code are required' });
+    const normalizedCode = normalizeOtpCode((req.body as any)?.code);
+    if (!normalizedPhone || !normalizedCode) {
+      return res.status(400).json({ error: 'Phone and a valid 6-digit code are required' });
     }
     const otpResult = await pool.query(
       'SELECT * FROM otp_codes WHERE phone = $1',
@@ -127,7 +163,7 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
     const record = otpResult.rows[0];
-    if (record.code !== code) {
+    if (record.code !== normalizedCode) {
       const nextAttempts = Number(record.verify_attempts || 0) + 1;
       if (nextAttempts >= OTP_VERIFY_MAX_ATTEMPTS) {
         await pool.query('DELETE FROM otp_codes WHERE phone = $1', [normalizedPhone]);
@@ -171,15 +207,32 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'photo_url is required' });
     }
 
-    const result = await analyzeSelfieAge(photo_url);
-    if (!result.isAdult || result.confidence < 0.6) {
+    const profilePhotoResult = await pool.query(
+      `SELECT photo_url
+       FROM photos
+       WHERE user_id = $1
+       ORDER BY is_primary DESC, order_index ASC, id ASC
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (profilePhotoResult.rows.length === 0 || !profilePhotoResult.rows[0].photo_url) {
+      return res.status(400).json({ error: 'Upload a profile photo before selfie verification' });
+    }
+
+    const profilePhotoUrl = profilePhotoResult.rows[0].photo_url as string;
+    const result = await analyzeSelfieAgainstProfile(photo_url, profilePhotoUrl);
+    if (!result.isAdult || !result.isMatch || result.confidence < 0.6) {
       await pool.query(
         `INSERT INTO verification_status (user_id, face_status, age_verified, updated_at)
          VALUES ($1, 'failed', FALSE, NOW())
          ON CONFLICT (user_id) DO UPDATE SET face_status = 'failed', age_verified = FALSE, updated_at = NOW()`,
         [userId]
       );
-      return res.status(400).json({ error: 'Age verification failed', reasoning: result.reasoning });
+      const errorMessage = !result.isMatch
+        ? 'Selfie does not match your profile photo'
+        : 'Age verification failed';
+      return res.status(400).json({ error: errorMessage, reasoning: result.reasoning });
     }
 
     await pool.query(

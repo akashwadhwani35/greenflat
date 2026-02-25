@@ -1,6 +1,7 @@
 import request from 'supertest';
 import type { Server } from 'http';
 import app from '../index';
+import pool from '../config/database';
 
 type SignupOverrides = Partial<{
   email: string;
@@ -257,6 +258,105 @@ describe('GreenFlag backend core flow', () => {
     expect(walletResponse.body.credit_balance).toBe(60);
   });
 
+  it('activates boost for non-premium users by consuming 20 credits for 6 hours', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `boost_tokens_${Date.now()}@example.com`,
+      name: 'Boost Token User',
+    });
+
+    const boostResponse = await agent
+      .post('/api/profile/boost')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({});
+
+    expect(boostResponse.status).toBe(200);
+    expect(boostResponse.body.boost_active).toBe(true);
+    expect(boostResponse.body.charged_tokens).toBe(20);
+    expect(boostResponse.body.credit_balance).toBe(30);
+
+    const boostExpiresAt = new Date(boostResponse.body.boost_expires_at).getTime();
+    const diffHours = (boostExpiresAt - Date.now()) / (1000 * 60 * 60);
+    expect(diffHours).toBeGreaterThan(5.8);
+    expect(diffHours).toBeLessThan(6.2);
+  });
+
+  it('rejects boost when user lacks premium and has insufficient tokens', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `boost_insufficient_${Date.now()}@example.com`,
+      name: 'No Boost Credits',
+    });
+
+    await pool.query('UPDATE users SET credit_balance = 5 WHERE id = $1', [user.userId]);
+
+    const boostResponse = await agent
+      .post('/api/profile/boost')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({});
+
+    expect(boostResponse.status).toBe(402);
+    expect(boostResponse.body.error).toMatch(/Premium or 20 tokens/i);
+    expect(boostResponse.body.required_tokens).toBe(20);
+    expect(boostResponse.body.credit_balance).toBe(5);
+  });
+
+  it('shows GreenFlag likes at the top of incoming likes and supports upgrading an existing like', async () => {
+    const receiver = await signupAndCompleteProfile({
+      email: `incoming_receiver_${Date.now()}@example.com`,
+      name: 'Receiver',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const regularLiker = await signupAndCompleteProfile({
+      email: `incoming_regular_${Date.now()}@example.com`,
+      name: 'Regular Liker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const greenFlagLiker = await signupAndCompleteProfile({
+      email: `incoming_greenflag_${Date.now()}@example.com`,
+      name: 'GreenFlag Liker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    const regularLike = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${regularLiker.token}`)
+      .send({ target_user_id: receiver.userId, is_on_grid: true });
+    expect(regularLike.status).toBe(200);
+
+    const greenFlagLike = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${greenFlagLiker.token}`)
+      .send({ target_user_id: receiver.userId, is_on_grid: true, is_superlike: true });
+    expect(greenFlagLike.status).toBe(200);
+    expect(greenFlagLike.body.is_superlike).toBe(true);
+
+    const incomingLikesBeforeUpgrade = await agent
+      .get('/api/likes/incoming')
+      .set('Authorization', `Bearer ${receiver.token}`);
+    expect(incomingLikesBeforeUpgrade.status).toBe(200);
+    expect(incomingLikesBeforeUpgrade.body.likes.length).toBeGreaterThanOrEqual(2);
+    expect(incomingLikesBeforeUpgrade.body.likes[0].user.id).toBe(greenFlagLiker.userId);
+    expect(incomingLikesBeforeUpgrade.body.likes[0].is_superlike).toBe(true);
+
+    const upgradeRegularLikeToGreenFlag = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${regularLiker.token}`)
+      .send({ target_user_id: receiver.userId, is_on_grid: true, is_superlike: true });
+    expect(upgradeRegularLikeToGreenFlag.status).toBe(200);
+    expect(upgradeRegularLikeToGreenFlag.body.is_superlike).toBe(true);
+
+    const incomingLikesAfterUpgrade = await agent
+      .get('/api/likes/incoming')
+      .set('Authorization', `Bearer ${receiver.token}`);
+    expect(incomingLikesAfterUpgrade.status).toBe(200);
+    expect(incomingLikesAfterUpgrade.body.likes.length).toBeGreaterThanOrEqual(2);
+    expect(incomingLikesAfterUpgrade.body.likes[0].user.id).toBe(regularLiker.userId);
+    expect(incomingLikesAfterUpgrade.body.likes[0].is_superlike).toBe(true);
+    expect(incomingLikesAfterUpgrade.body.likes[1].is_superlike).toBe(true);
+  });
+
   it('deletes account and invalidates login', async () => {
     const email = `delete_${Date.now()}@example.com`;
     const user = await signupAndCompleteProfile({ email, name: 'Delete Me' });
@@ -330,11 +430,33 @@ describe('GreenFlag backend core flow', () => {
     expect(getSettings.status).toBe(200);
     expect(getSettings.body.settings.incognito_mode).toBe(true);
 
+    const matchId = await createMutualMatch(userA.token, userA.userId, userB.token, userB.userId);
+
+    const initialMessage = await agent
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ match_id: matchId, content: 'hello before block' });
+    expect(initialMessage.status).toBe(200);
+
     const blockResponse = await agent
       .post('/api/privacy/block')
       .set('Authorization', `Bearer ${userA.token}`)
       .send({ target_user_id: userB.userId });
     expect(blockResponse.status).toBe(200);
+
+    const blockedConversations = await agent
+      .get('/api/conversations')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(blockedConversations.status).toBe(200);
+    expect(
+      blockedConversations.body.conversations.some((c: any) => c.match_id === matchId)
+    ).toBe(false);
+
+    const blockedSend = await agent
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ match_id: matchId, content: 'should fail while blocked' });
+    expect(blockedSend.status).toBe(403);
 
     const blockedList = await agent
       .get('/api/privacy/blocked')
@@ -360,6 +482,26 @@ describe('GreenFlag backend core flow', () => {
       .set('Authorization', `Bearer ${userA.token}`);
     expect(blockedAfter.status).toBe(200);
     expect(blockedAfter.body.blocked_users.length).toBe(0);
+
+    const conversationsAfterUnblock = await agent
+      .get('/api/conversations')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(conversationsAfterUnblock.status).toBe(200);
+    const restored = conversationsAfterUnblock.body.conversations.find((c: any) => c.match_id === matchId);
+    expect(restored).toBeTruthy();
+    expect(restored.last_message).toBeNull();
+
+    const messagesAfterUnblock = await agent
+      .get(`/api/messages/${matchId}`)
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(messagesAfterUnblock.status).toBe(200);
+    expect(messagesAfterUnblock.body.messages).toEqual([]);
+
+    const sendAfterUnblock = await agent
+      .post('/api/messages')
+      .set('Authorization', `Bearer ${userA.token}`)
+      .send({ match_id: matchId, content: 'hello after unblock' });
+    expect(sendAfterUnblock.status).toBe(200);
   });
 
   it('persists notification preferences server-side', async () => {
@@ -399,6 +541,41 @@ describe('GreenFlag backend core flow', () => {
     // dev_code is no longer returned in the response (logged to console instead)
     expect(otpResponse.body.dev_code).toBeUndefined();
     expect(otpResponse.body.message).toBe('OTP sent');
+  });
+
+  it('verifies OTP with normalized phone format and persists verified status', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `otp_verify_${Date.now()}@example.com`,
+      name: 'Otp Verify User',
+    });
+
+    const requestResponse = await agent
+      .post('/api/verification/otp/request')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ phone: '(555) 123-4567' });
+    expect(requestResponse.status).toBe(200);
+    expect(requestResponse.body.normalized_phone).toBe('+15551234567');
+
+    const otpRecord = await pool.query(
+      'SELECT code FROM otp_codes WHERE phone = $1',
+      [requestResponse.body.normalized_phone]
+    );
+    expect(otpRecord.rows.length).toBe(1);
+    const code = String(otpRecord.rows[0].code);
+
+    const verifyResponse = await agent
+      .post('/api/verification/otp/verify')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ phone: '5551234567', code: ` ${code} ` });
+    expect(verifyResponse.status).toBe(200);
+    expect(verifyResponse.body.status.otp_verified).toBe(true);
+    expect(verifyResponse.body.status.phone).toBe('+15551234567');
+
+    const statusResponse = await agent
+      .get('/api/verification/status')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(statusResponse.status).toBe(200);
+    expect(statusResponse.body.status.otp_verified).toBe(true);
   });
 
   it('rate limits repeated OTP requests for the same phone', async () => {

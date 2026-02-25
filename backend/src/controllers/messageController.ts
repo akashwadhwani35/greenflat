@@ -65,10 +65,12 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
 
     let normalizedContent: string;
     try {
+      const requestHost = req.get('host') || undefined;
+      const allowHttpForRequestHost = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim() !== 'https' && req.protocol !== 'https';
       normalizedContent =
         message_type === 'text'
           ? normalizeTextMessage(content)
-          : normalizeMediaMessageUrl(content);
+          : normalizeMediaMessageUrl(content, { requestHost, allowHttpForRequestHost });
     } catch (validationError: any) {
       return res.status(400).json({ error: validationError?.message || 'Invalid message content' });
     }
@@ -114,6 +116,19 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     const match = matchResult.rows[0];
     const recipientId = match.user1_id === userId ? match.user2_id : match.user1_id;
     const senderName = match.user1_id === userId ? match.user1_name : match.user2_name;
+
+    const blockResult = await client.query(
+      `SELECT 1
+       FROM blocks
+       WHERE (blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1)
+       LIMIT 1`,
+      [userId, recipientId]
+    );
+    if (blockResult.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'You cannot message this user due to privacy settings' });
+    }
 
     // Insert the message
     const messageResult = await client.query(
@@ -248,7 +263,24 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
 
     const result = await pool.query(
-      `SELECT
+      `WITH last_messages AS (
+         SELECT DISTINCT ON (msg.match_id)
+           msg.match_id,
+           msg.content,
+           msg.created_at,
+           msg.sender_id
+         FROM messages msg
+         ORDER BY msg.match_id, msg.created_at DESC, msg.id DESC
+       ),
+       unread_counts AS (
+         SELECT
+           msg.match_id,
+           COUNT(*)::int AS unread_count
+         FROM messages msg
+         WHERE msg.recipient_id = $1 AND msg.is_read = FALSE
+         GROUP BY msg.match_id
+       )
+       SELECT
         m.id as match_id,
         m.matched_at,
         m.last_message_at,
@@ -259,26 +291,20 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
         last_msg.content as last_message,
         last_msg.created_at as last_message_time,
         last_msg.sender_id as last_message_sender_id,
-        (SELECT COUNT(*) FROM messages WHERE match_id = m.id AND recipient_id = $1 AND is_read = FALSE) as unread_count
+        COALESCE(unread.unread_count, 0) as unread_count
        FROM matches m
        JOIN users other_user ON (
          (m.user1_id = $1 AND other_user.id = m.user2_id) OR
          (m.user2_id = $1 AND other_user.id = m.user1_id)
        )
        LEFT JOIN photos other_photo ON other_photo.user_id = other_user.id AND other_photo.is_primary = TRUE
-       LEFT JOIN LATERAL (
-         SELECT content, created_at, sender_id
-         FROM messages
-         WHERE match_id = m.id
-         ORDER BY created_at DESC
-         LIMIT 1
-       ) last_msg ON true
-       WHERE m.user1_id = $1 OR m.user2_id = $1
-         AND NOT EXISTS (
-           SELECT 1 FROM blocks b
-           WHERE (b.blocker_id = $1 AND b.blocked_id = other_user.id)
-              OR (b.blocker_id = other_user.id AND b.blocked_id = $1)
-         )
+       LEFT JOIN last_messages last_msg ON last_msg.match_id = m.id
+       LEFT JOIN unread_counts unread ON unread.match_id = m.id
+       LEFT JOIN blocks blocked_rel
+         ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = other_user.id)
+          OR (blocked_rel.blocker_id = other_user.id AND blocked_rel.blocked_id = $1))
+       WHERE (m.user1_id = $1 OR m.user2_id = $1)
+         AND blocked_rel.id IS NULL
        ORDER BY COALESCE(m.last_message_at, m.matched_at) DESC`,
       [userId]
     );

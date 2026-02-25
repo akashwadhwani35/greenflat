@@ -1,5 +1,15 @@
-import React, { useState } from 'react';
-import { ScrollView, StyleSheet, View, TextInput, TouchableOpacity, Platform, StatusBar } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Platform,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Typography } from '../components/Typography';
@@ -9,50 +19,212 @@ import { useTheme } from '../theme/ThemeProvider';
 export type AdvancedFilters = {
   minAge?: string;
   maxAge?: string;
-  minHeight?: string;
-  city?: string;
-  relationship_goal?: string;
-  smoker?: boolean;
-  drinker?: string;
   distance_km?: string;
+  interested_in?: 'male' | 'female' | 'both' | '';
+  religion?: string;
+  relationship_goal?: string;
+
+  ethnicity?: string;
+  minHeight?: string;
+  maxHeight?: string;
+  dating_intentions?: string;
+  have_kids?: string;
+  drugs?: string;
+  smoking_habit?: string;
+  marijuana?: string;
+  drinker?: string;
+  politics?: string;
+  education_level?: string;
+
+  // Kept for AI flow compatibility (not editable in this screen).
   keywords?: string;
+  city?: string;
 };
 
 type Props = {
   onBack: () => void;
   initialFilters?: AdvancedFilters;
   onApply: (filters: AdvancedFilters) => void;
+  token: string;
+  apiBaseUrl: string;
+  onOpenCheckout?: () => void;
 };
 
-const goalOptions = [
-  { value: 'serious', label: 'Serious', icon: 'heart' },
-  { value: 'long-term', label: 'Long-term', icon: 'users' },
-  { value: 'casual', label: 'Casual', icon: 'coffee' },
-  { value: 'friendship', label: 'Friends', icon: 'smile' },
+type Option = {
+  value: string;
+  label: string;
+  icon?: string;
+};
+
+const RELIGION_OPTIONS: Option[] = [
+  { value: 'religious', label: 'Religious' },
+  { value: 'spiritual', label: 'Spiritual' },
+  { value: 'agnostic', label: 'Agnostic' },
+  { value: 'atheist', label: 'Atheist' },
 ];
 
-const drinkerOptions = [
+const RELATIONSHIP_TYPE_OPTIONS: Option[] = [
+  { value: 'long-term', label: 'Long-term', icon: 'users' },
+  { value: 'serious', label: 'Serious', icon: 'heart' },
+  { value: 'casual', label: 'Casual', icon: 'coffee' },
+  { value: 'friendship', label: 'Friendship', icon: 'smile' },
+];
+
+const DATING_INTENTION_OPTIONS: Option[] = [
+  { value: 'long-term', label: 'Long-term' },
+  { value: 'serious', label: 'Serious' },
+  { value: 'casual', label: 'Casual' },
+  { value: 'friendship', label: 'Friendship' },
+];
+
+const CHILDREN_OPTIONS: Option[] = [
+  { value: 'no', label: 'No children' },
+  { value: 'have kids', label: 'Have children' },
+  { value: 'want kids', label: 'Want children' },
+];
+
+const SMOKING_OPTIONS: Option[] = [
+  { value: 'never', label: 'Never' },
+  { value: 'social', label: 'Socially' },
+  { value: 'regular', label: 'Regularly' },
+];
+
+const DRINKING_OPTIONS: Option[] = [
   { value: 'never', label: 'Never' },
   { value: 'rarely', label: 'Rarely' },
   { value: 'social', label: 'Socially' },
   { value: 'often', label: 'Often' },
 ];
 
-export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, onApply }) => {
+const USAGE_OPTIONS: Option[] = [
+  { value: 'never', label: 'Never' },
+  { value: 'sometimes', label: 'Sometimes' },
+  { value: 'often', label: 'Often' },
+];
+
+const POLITICS_OPTIONS: Option[] = [
+  { value: 'liberal', label: 'Liberal' },
+  { value: 'moderate', label: 'Moderate' },
+  { value: 'conservative', label: 'Conservative' },
+  { value: 'apolitical', label: 'Apolitical' },
+];
+
+const EDUCATION_OPTIONS: Option[] = [
+  { value: 'high school', label: 'High school' },
+  { value: 'undergraduate', label: 'Undergraduate' },
+  { value: 'postgraduate', label: 'Postgraduate' },
+  { value: 'phd', label: 'PhD' },
+  { value: 'other', label: 'Other' },
+];
+
+const PAID_FILTER_KEYS: Array<keyof AdvancedFilters> = [
+  'ethnicity',
+  'minHeight',
+  'maxHeight',
+  'dating_intentions',
+  'have_kids',
+  'drugs',
+  'smoking_habit',
+  'marijuana',
+  'drinker',
+  'politics',
+  'education_level',
+];
+
+const isNonEmptyValue = (value: unknown) => {
+  if (typeof value === 'string') return value.trim().length > 0;
+  return value !== undefined && value !== null;
+};
+
+export const AdvancedSearchScreen: React.FC<Props> = ({
+  onBack,
+  initialFilters,
+  onApply,
+  token,
+  apiBaseUrl,
+  onOpenCheckout,
+}) => {
   const theme = useTheme();
   const [filters, setFilters] = useState<AdvancedFilters>(initialFilters || {});
+  const [hasPaidPlan, setHasPaidPlan] = useState(false);
+  const [loadingPlan, setLoadingPlan] = useState(true);
 
-  const update = (key: keyof AdvancedFilters, value: string | boolean | undefined) => {
+  useEffect(() => {
+    const loadPlanStatus = async () => {
+      try {
+        setLoadingPlan(true);
+        const response = await fetch(`${apiBaseUrl}/profile/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (!response.ok) {
+          setHasPaidPlan(false);
+          return;
+        }
+
+        const data = await response.json();
+        const user = data?.user || {};
+        const premiumExpiresAt = user.premium_expires_at ? new Date(user.premium_expires_at).getTime() : null;
+        const activePaidPlan = Boolean(user.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > Date.now());
+        setHasPaidPlan(activePaidPlan);
+      } catch {
+        setHasPaidPlan(false);
+      } finally {
+        setLoadingPlan(false);
+      }
+    };
+
+    void loadPlanStatus();
+  }, [apiBaseUrl, token]);
+
+  const update = (key: keyof AdvancedFilters, value: string | undefined, isPaidFilter = false) => {
+    if (isPaidFilter && !hasPaidPlan) {
+      Alert.alert('Paid filter', 'This filter is available on paid plans only.');
+      return;
+    }
+
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
-  const hasActiveFilters = Object.values(filters).some(v => v !== undefined && v !== '');
+  const hasActiveVisibleFilters = useMemo(
+    () =>
+      Object.entries(filters).some(([key, value]) => {
+        if (key === 'keywords') return false;
+        return isNonEmptyValue(value);
+      }),
+    [filters]
+  );
+
+  const clearVisibleFilters = () => {
+    setFilters((prev) => ({
+      keywords: prev.keywords,
+    }));
+  };
+
+  const applyFilters = () => {
+    const nextFilters: AdvancedFilters = { ...filters };
+    delete nextFilters.city;
+    if (!hasPaidPlan) {
+      PAID_FILTER_KEYS.forEach((key) => {
+        delete (nextFilters as any)[key];
+      });
+    }
+    onApply(nextFilters);
+  };
+
+  const onPressPaidLocked = () => {
+    if (hasPaidPlan) return;
+    if (onOpenCheckout) {
+      onOpenCheckout();
+      return;
+    }
+    Alert.alert('Paid filters', 'Upgrade to a paid plan to unlock these filters.');
+  };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}> 
       <StatusBar barStyle="light-content" />
 
-      {/* Background gradient */}
       <LinearGradient
         colors={[theme.colors.deepBlack, theme.colors.darkBlack]}
         style={styles.gradient}
@@ -60,7 +232,6 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
         end={{ x: 0, y: 1 }}
       />
 
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
@@ -75,12 +246,44 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
         <View style={{ width: 44 }} />
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Age Range Section */}
-        <Section title="Age range" icon="calendar">
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Section title="Free filters" icon="unlock">
+          <Typography variant="small" style={{ color: theme.colors.muted }}>
+            Available on all plans
+          </Typography>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 12 }}>Interested in gender</Typography>
+          <View style={styles.chipGrid}>
+            <ChipToggle
+              label="Men"
+              icon="user"
+              active={filters.interested_in === 'male'}
+              onPress={() => update('interested_in', filters.interested_in === 'male' ? '' : 'male')}
+            />
+            <ChipToggle
+              label="Women"
+              icon="user"
+              active={filters.interested_in === 'female'}
+              onPress={() => update('interested_in', filters.interested_in === 'female' ? '' : 'female')}
+            />
+            <ChipToggle
+              label="Everyone"
+              icon="users"
+              active={filters.interested_in === 'both'}
+              onPress={() => update('interested_in', filters.interested_in === 'both' ? '' : 'both')}
+            />
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Max distance (km)</Typography>
+          <Input
+            placeholder="e.g. 25"
+            keyboardType="numeric"
+            value={filters.distance_km}
+            onChangeText={(text) => update('distance_km', text)}
+            leftIcon="navigation"
+          />
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Age group</Typography>
           <View style={styles.rangeRow}>
             <View style={{ flex: 1 }}>
               <Input
@@ -102,152 +305,241 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
               />
             </View>
           </View>
-        </Section>
 
-        {/* Location Section */}
-        <Section title="Location" icon="map-pin">
-          <Input
-            placeholder="City or area"
-            value={filters.city}
-            onChangeText={(text) => update('city', text)}
-            leftIcon="search"
-          />
-          <View style={{ marginTop: 12 }}>
-            <Input
-              placeholder="Distance (km)"
-              keyboardType="numeric"
-              value={filters.distance_km}
-              onChangeText={(text) => update('distance_km', text)}
-              leftIcon="navigation"
-            />
-          </View>
-        </Section>
-
-        {/* Height Section */}
-        <Section title="Minimum height" icon="arrow-up">
-          <Input
-            placeholder="Height in cm"
-            keyboardType="numeric"
-            value={filters.minHeight}
-            onChangeText={(text) => update('minHeight', text)}
-          />
-        </Section>
-
-        {/* Relationship Goal Section */}
-        <Section title="Looking for" icon="target">
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Religion</Typography>
           <View style={styles.chipGrid}>
-            {goalOptions.map((option) => {
-              const selected = filters.relationship_goal === option.value;
-              return (
-                <TouchableOpacity
-                  key={option.value}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: selected
-                        ? theme.colors.secondaryHighlight
-                        : 'rgba(255, 255, 255, 0.05)',
-                      borderColor: selected
-                        ? theme.colors.secondaryHairline
-                        : theme.colors.border,
-                    },
-                  ]}
-                  onPress={() => update('relationship_goal', selected ? '' : option.value)}
-                  activeOpacity={0.8}
-                >
-                  <Feather
-                    name={option.icon as any}
-                    size={16}
-                    color={theme.colors.text}
-                  />
-                  <Typography
-                    variant="body"
-                    style={{
-                      color: theme.colors.text,
-                      fontWeight: selected ? '600' : '400',
-                    }}
-                  >
-                    {option.label}
-                  </Typography>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </Section>
-
-        {/* Lifestyle Section */}
-        <Section title="Lifestyle" icon="coffee">
-          {/* Smoking */}
-          <Typography variant="small" style={{ color: theme.colors.muted, marginBottom: 10 }}>
-            Smoking
-          </Typography>
-          <View style={styles.chipRow}>
-            <ChipToggle
-              label="Non-smoker only"
-              icon="slash"
-              active={filters.smoker === false}
-              onPress={() => update('smoker', filters.smoker === false ? undefined : false)}
-            />
-            <ChipToggle
-              label="Any"
-              icon="check"
-              active={filters.smoker === undefined}
-              onPress={() => update('smoker', undefined)}
-            />
-          </View>
-
-          {/* Drinking */}
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16, marginBottom: 10 }}>
-            Drinking
-          </Typography>
-          <View style={styles.chipGrid}>
-            {drinkerOptions.map((option) => {
-              const selected = filters.drinker === option.value;
+            {RELIGION_OPTIONS.map((option) => {
+              const selected = filters.religion?.toLowerCase() === option.value;
               return (
                 <ChipToggle
                   key={option.value}
                   label={option.label}
                   active={selected}
-                  onPress={() => update('drinker', selected ? '' : option.value)}
+                  onPress={() => update('religion', selected ? '' : option.value)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Relationship type</Typography>
+          <View style={styles.chipGrid}>
+            {RELATIONSHIP_TYPE_OPTIONS.map((option) => {
+              const selected = filters.relationship_goal === option.value;
+              return (
+                <ChipToggle
+                  key={option.value}
+                  label={option.label}
+                  icon={option.icon}
+                  active={selected}
+                  onPress={() => update('relationship_goal', selected ? '' : option.value)}
                 />
               );
             })}
           </View>
         </Section>
 
-        {/* Keywords Section */}
-        <Section title="Personality keywords" icon="zap">
-          <Typography variant="small" style={{ color: theme.colors.muted, marginBottom: 12, lineHeight: 20 }}>
-            Add traits you're looking for. Our AI will find matches based on these.
-          </Typography>
+        <Section title="Paid plan filters" icon="lock">
+          {loadingPlan ? (
+            <View style={styles.planLoaderRow}>
+              <ActivityIndicator size="small" color={theme.colors.neonGreen} />
+              <Typography variant="small" style={{ color: theme.colors.muted, marginLeft: 8 }}>
+                Checking plan access...
+              </Typography>
+            </View>
+          ) : !hasPaidPlan ? (
+            <View style={[styles.lockCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}> 
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
+                Upgrade to unlock paid filters
+              </Typography>
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 6 }}>
+                Ethnicity, height, intentions, children, lifestyle and education filters are paid-plan only.
+              </Typography>
+              <View style={{ marginTop: 12 }}>
+                <Button label="View plans" onPress={onPressPaidLocked} fullWidth />
+              </View>
+            </View>
+          ) : null}
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 10 }}>Ethnicity</Typography>
           <Input
-            placeholder="e.g., mindful, adventurous, creative"
-            value={filters.keywords}
-            onChangeText={(text) => update('keywords', text)}
-            multiline
-            style={{ minHeight: 80, paddingTop: 14 }}
+            placeholder="e.g. South Asian"
+            value={filters.ethnicity}
+            onChangeText={(text) => update('ethnicity', text, true)}
+            disabled={!hasPaidPlan}
+            onLockedPress={onPressPaidLocked}
           />
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Height (cm)</Typography>
+          <View style={styles.rangeRow}>
+            <View style={{ flex: 1 }}>
+              <Input
+                placeholder="Min"
+                keyboardType="numeric"
+                value={filters.minHeight}
+                onChangeText={(text) => update('minHeight', text, true)}
+                disabled={!hasPaidPlan}
+                onLockedPress={onPressPaidLocked}
+              />
+            </View>
+            <View style={styles.rangeDivider}>
+              <View style={[styles.rangeLine, { backgroundColor: theme.colors.border }]} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Input
+                placeholder="Max"
+                keyboardType="numeric"
+                value={filters.maxHeight}
+                onChangeText={(text) => update('maxHeight', text, true)}
+                disabled={!hasPaidPlan}
+                onLockedPress={onPressPaidLocked}
+              />
+            </View>
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Dating intentions</Typography>
+          <View style={styles.chipGrid}>
+            {DATING_INTENTION_OPTIONS.map((option) => {
+              const selected = filters.dating_intentions === option.value;
+              return (
+                <ChipToggle
+                  key={option.value}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('dating_intentions', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Children</Typography>
+          <View style={styles.chipGrid}>
+            {CHILDREN_OPTIONS.map((option) => {
+              const selected = filters.have_kids?.toLowerCase() === option.value;
+              return (
+                <ChipToggle
+                  key={option.value}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('have_kids', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Drugs</Typography>
+          <View style={styles.chipGrid}>
+            {USAGE_OPTIONS.map((option) => {
+              const selected = filters.drugs === option.value;
+              return (
+                <ChipToggle
+                  key={`drugs-${option.value}`}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('drugs', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Smoking</Typography>
+          <View style={styles.chipGrid}>
+            {SMOKING_OPTIONS.map((option) => {
+              const selected = filters.smoking_habit === option.value;
+              return (
+                <ChipToggle
+                  key={`smoke-${option.value}`}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('smoking_habit', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Marijuana</Typography>
+          <View style={styles.chipGrid}>
+            {USAGE_OPTIONS.map((option) => {
+              const selected = filters.marijuana === option.value;
+              return (
+                <ChipToggle
+                  key={`mj-${option.value}`}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('marijuana', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Drinking</Typography>
+          <View style={styles.chipGrid}>
+            {DRINKING_OPTIONS.map((option) => {
+              const selected = filters.drinker === option.value;
+              return (
+                <ChipToggle
+                  key={`drink-${option.value}`}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('drinker', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Politics</Typography>
+          <View style={styles.chipGrid}>
+            {POLITICS_OPTIONS.map((option) => {
+              const selected = filters.politics === option.value;
+              return (
+                <ChipToggle
+                  key={`politics-${option.value}`}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('politics', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Education</Typography>
+          <View style={styles.chipGrid}>
+            {EDUCATION_OPTIONS.map((option) => {
+              const selected = filters.education_level === option.value;
+              return (
+                <ChipToggle
+                  key={`edu-${option.value}`}
+                  label={option.label}
+                  active={selected}
+                  disabled={!hasPaidPlan}
+                  onPress={() => update('education_level', selected ? '' : option.value, true)}
+                />
+              );
+            })}
+          </View>
         </Section>
       </ScrollView>
 
-      {/* Footer */}
-      <View style={[styles.footer, { backgroundColor: theme.colors.deepBlack }]}>
-        {hasActiveFilters && (
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={() => setFilters({})}
-            activeOpacity={0.8}
-          >
+      <View style={[styles.footer, { backgroundColor: theme.colors.deepBlack }]}> 
+        {hasActiveVisibleFilters ? (
+          <TouchableOpacity style={styles.clearButton} onPress={clearVisibleFilters} activeOpacity={0.8}>
             <Feather name="x" size={16} color={theme.colors.muted} />
             <Typography variant="body" style={{ color: theme.colors.muted, marginLeft: 6 }}>
-              Clear all
+              Clear filters
             </Typography>
           </TouchableOpacity>
-        )}
-        <View style={{ marginTop: hasActiveFilters ? 12 : 0 }}>
+        ) : null}
+
+        <View style={{ marginTop: hasActiveVisibleFilters ? 12 : 0 }}>
           <Button
-            label={hasActiveFilters ? 'Apply filters' : 'Show all matches'}
-            onPress={() => onApply(filters)}
+            label={hasActiveVisibleFilters ? 'Apply filters' : 'Show all matches'}
+            onPress={applyFilters}
             fullWidth
           />
         </View>
@@ -256,21 +548,15 @@ export const AdvancedSearchScreen: React.FC<Props> = ({ onBack, initialFilters, 
   );
 };
 
-const Section: React.FC<{ title: string; icon?: string; children: React.ReactNode }> = ({
-  title,
-  icon,
-  children
-}) => {
+const Section: React.FC<{ title: string; icon: string; children: React.ReactNode }> = ({ title, icon, children }) => {
   const theme = useTheme();
 
   return (
     <View style={styles.section}>
       <View style={styles.sectionHeader}>
-        {icon && (
-          <View style={[styles.sectionIconCircle, { backgroundColor: 'rgba(188, 246, 65, 0.1)' }]}>
-            <Feather name={icon as any} size={18} color={theme.colors.neonGreen} />
-          </View>
-        )}
+        <View style={[styles.sectionIconCircle, { backgroundColor: 'rgba(188, 246, 65, 0.1)' }]}>
+          <Feather name={icon as any} size={18} color={theme.colors.neonGreen} />
+        </View>
         <Typography variant="h2" style={{ color: theme.colors.text }}>
           {title}
         </Typography>
@@ -280,34 +566,36 @@ const Section: React.FC<{ title: string; icon?: string; children: React.ReactNod
   );
 };
 
-const Input: React.FC<TextInput['props'] & { leftIcon?: string }> = (props) => {
+const Input: React.FC<TextInput['props'] & { leftIcon?: string; disabled?: boolean; onLockedPress?: () => void }> = ({
+  leftIcon,
+  disabled,
+  onLockedPress,
+  ...restProps
+}) => {
   const theme = useTheme();
-  const { leftIcon, ...restProps } = props;
 
   return (
     <View style={styles.inputContainer}>
-      {leftIcon && (
-        <Feather
-          name={leftIcon as any}
-          size={18}
-          color={theme.colors.muted}
-          style={styles.inputIcon}
-        />
-      )}
+      {leftIcon ? <Feather name={leftIcon as any} size={18} color={theme.colors.muted} style={styles.inputIcon} /> : null}
       <TextInput
         {...restProps}
+        editable={!disabled}
         style={[
           styles.input,
           {
             borderColor: theme.colors.border,
-            color: theme.colors.text,
-            backgroundColor: 'rgba(255, 255, 255, 0.03)',
+            color: disabled ? theme.colors.muted : theme.colors.text,
+            backgroundColor: disabled ? 'rgba(255, 255, 255, 0.02)' : 'rgba(255, 255, 255, 0.03)',
             paddingLeft: leftIcon ? 42 : 16,
+            opacity: disabled ? 0.65 : 1,
           },
           'style' in restProps ? restProps.style : undefined,
         ]}
         placeholderTextColor={theme.colors.muted}
       />
+      {disabled && onLockedPress ? (
+        <TouchableOpacity style={styles.inputLockOverlay} onPress={onLockedPress} activeOpacity={1} />
+      ) : null}
     </View>
   );
 };
@@ -316,40 +604,33 @@ const ChipToggle: React.FC<{
   label: string;
   icon?: string;
   active: boolean;
+  disabled?: boolean;
   onPress: () => void;
-}> = ({ label, icon, active, onPress }) => {
+}> = ({ label, icon, active, disabled = false, onPress }) => {
   const theme = useTheme();
 
   return (
     <TouchableOpacity
       onPress={onPress}
+      disabled={disabled}
       style={[
         styles.chip,
         {
-          backgroundColor: active
-            ? theme.colors.secondaryHighlight
-            : 'rgba(255, 255, 255, 0.05)',
-          borderColor: active
-            ? theme.colors.secondaryHairline
-            : theme.colors.border,
+          backgroundColor: active ? theme.colors.secondaryHighlight : 'rgba(255, 255, 255, 0.05)',
+          borderColor: active ? theme.colors.secondaryHairline : theme.colors.border,
+          opacity: disabled ? 0.45 : 1,
         },
       ]}
       activeOpacity={0.8}
     >
-      {icon && (
+      {icon ? (
         <Feather
           name={icon as any}
           size={14}
           color={active ? theme.colors.neonGreen : theme.colors.muted}
         />
-      )}
-      <Typography
-        variant="body"
-        style={{
-          color: theme.colors.text,
-          fontWeight: active ? '600' : '400',
-        }}
-      >
+      ) : null}
+      <Typography variant="body" style={{ color: theme.colors.text }}>
         {label}
       </Typography>
     </TouchableOpacity>
@@ -381,16 +662,16 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 120,
+    paddingBottom: 140,
   },
   section: {
-    marginBottom: 32,
+    marginBottom: 30,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sectionIconCircle: {
     width: 36,
@@ -398,6 +679,16 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  planLoaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  lockCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
   },
   rangeRow: {
     flexDirection: 'row',
@@ -429,14 +720,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
-    fontWeight: '400',
+    fontFamily: 'RedHatDisplay_400Regular',
+  },
+  inputLockOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 16,
   },
   chipGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  chipRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
@@ -445,8 +735,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
     borderRadius: 16,
     borderWidth: 1.5,
   },

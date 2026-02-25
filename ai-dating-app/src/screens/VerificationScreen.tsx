@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, TouchableOpacity, TextInput, ActivityIndicator, Alert, Image, Platform } from 'react-native';
+import { ScrollView, StyleSheet, View, ActivityIndicator, Alert, Image, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
 import { Typography } from '../components/Typography';
 import { Button } from '../components/Button';
 import { useTheme } from '../theme/ThemeProvider';
@@ -28,9 +27,6 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   const theme = useTheme();
   const [status, setStatus] = useState<Status | null>(null);
   const [loading, setLoading] = useState(false);
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [city, setCity] = useState('');
   const [selfiePayload, setSelfiePayload] = useState<string | null>(null);
   const [selfiePreview, setSelfiePreview] = useState<string | null>(null);
 
@@ -53,47 +49,6 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
   useEffect(() => {
     getStatus().catch((err) => console.warn('Failed to load verification status:', err));
   }, []);
-
-  const requestOtp = async () => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/verification/otp/request`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ phone }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to send OTP');
-      if (data.dev_code) {
-        Alert.alert('OTP sent (dev)', `Use code: ${data.dev_code}`);
-      } else {
-        Alert.alert('OTP sent', 'Check your phone for the verification code.');
-      }
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to send OTP');
-    }
-  };
-
-  const verifyOtp = async () => {
-    try {
-      const response = await fetch(`${apiBaseUrl}/verification/otp/verify`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ phone, code: otp }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to verify');
-      setStatus(data.status);
-      Alert.alert('Verified', 'Your phone is verified.');
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to verify OTP');
-    }
-  };
 
   const captureSelfie = async () => {
     try {
@@ -125,66 +80,9 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
     }
   };
 
-  const pickSelfie = async () => {
-    try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow photo library access to choose a selfie.');
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [4, 5],
-        quality: 0.7,
-        base64: Platform.OS !== 'web',
-      });
-
-      if (result.canceled || !result.assets?.length) return;
-
-      const asset = result.assets[0];
-      const payload = Platform.OS === 'web'
-        ? asset.uri
-        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
-      setSelfiePayload(payload);
-      setSelfiePreview(asset.uri);
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to choose selfie');
-    }
-  };
-
-  const verifyLocation = async () => {
-    try {
-      const permission = await Location.requestForegroundPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow location access to verify your location.');
-        return;
-      }
-      const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      const latitude = current.coords.latitude;
-      const longitude = current.coords.longitude;
-
-      const response = await fetch(`${apiBaseUrl}/verification/location`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ lat: Number(latitude), lng: Number(longitude), city: city || undefined }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Unable to verify location');
-      await getStatus();
-      Alert.alert('Location verified', 'Your location was recorded.');
-    } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to verify location');
-    }
-  };
-
   const verifySelfie = async () => {
     if (!selfiePayload) {
-      Alert.alert('Selfie required', 'Please capture or upload a selfie first.');
+      Alert.alert('Selfie required', 'Please capture a selfie first.');
       return;
     }
     try {
@@ -215,39 +113,14 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="bodyStrong">Status</Typography>
           <Typography variant="small" muted>
-            Phone: {status?.otp_verified ? 'Verified' : 'Unverified'} | Face: {status?.face_status || 'unverified'} | Location:{' '}
-            {status?.location_verified ? status.location_city || 'verified' : 'unverified'}
+            Face: {status?.face_status || 'unverified'} | Age: {status?.age_verified ? 'Verified' : 'Unverified'}
           </Typography>
-        </View>
-
-        <View style={[styles.card, { borderColor: theme.colors.border }]}>
-          <Typography variant="h2">Phone verification</Typography>
-          <TextInput
-            placeholder="Phone (+1 555...)"
-            value={phone}
-            onChangeText={setPhone}
-            style={[styles.input, { color: theme.colors.text, borderColor: theme.colors.border }]}
-            placeholderTextColor={theme.colors.muted}
-            keyboardType="phone-pad"
-          />
-          <View style={styles.row}>
-            <Button label="Send OTP" onPress={requestOtp} />
-          </View>
-          <TextInput
-            placeholder="OTP"
-            value={otp}
-            onChangeText={setOtp}
-            style={[styles.input, { color: theme.colors.text, borderColor: theme.colors.border }]}
-            placeholderTextColor={theme.colors.muted}
-            keyboardType="number-pad"
-          />
-          <Button label="Verify OTP" onPress={verifyOtp} />
         </View>
 
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="h2">Photo & age verification</Typography>
           <Typography variant="small" muted>
-            Use a clear front-face selfie. We verify one face and 18+ eligibility.
+            Use a clear front-face selfie. AI verifies 18+ and matches it with your profile photo.
           </Typography>
           {selfiePreview ? (
             <Image source={{ uri: selfiePreview }} style={styles.selfiePreview} />
@@ -261,24 +134,8 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
           )}
           <View style={styles.row}>
             <Button label="Capture selfie" onPress={captureSelfie} />
-            <Button label="Upload selfie" variant="secondary" onPress={pickSelfie} />
           </View>
-          <Button label="Verify selfie (AI)" onPress={verifySelfie} />
-        </View>
-
-        <View style={[styles.card, { borderColor: theme.colors.border }]}>
-          <Typography variant="h2">Location</Typography>
-          <Typography variant="small" muted>
-            Use your current device location to verify where you are.
-          </Typography>
-          <TextInput
-            placeholder="City (optional)"
-            value={city}
-            onChangeText={setCity}
-            style={[styles.input, { color: theme.colors.text, borderColor: theme.colors.border }]}
-            placeholderTextColor={theme.colors.muted}
-          />
-          <Button label="Verify location" onPress={verifyLocation} />
+          <Button label="Verify selfie" onPress={verifySelfie} />
         </View>
 
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
@@ -313,13 +170,6 @@ const styles = StyleSheet.create({
   },
   step: {
     gap: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
   },
   row: {
     flexDirection: 'row',

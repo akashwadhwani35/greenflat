@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { createServer, type Server } from 'http';
+import path from 'path';
 import routes from './routes';
 import pool from './config/database';
 import { isCloudinaryConfigured } from './services/media.service';
@@ -47,8 +48,11 @@ app.use(
 );
 
 // Body size limits
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+app.use(express.json({ limit: '12mb' }));
+app.use(express.urlencoded({ extended: true, limit: '12mb' }));
+
+// Local media files (dev/local fallback when Cloudinary is not configured)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Routes
 app.use('/api', routes);

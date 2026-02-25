@@ -74,6 +74,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
         minAge: filters?.minAge ? Number(filters.minAge) : undefined,
         maxAge: filters?.maxAge ? Number(filters.maxAge) : undefined,
         minHeight: filters?.minHeight ? Number(filters.minHeight) : undefined,
+        maxHeight: filters?.maxHeight ? Number(filters.maxHeight) : undefined,
         distance_km: filters?.distance_km ? Number(filters.distance_km) : undefined,
       };
 
@@ -258,7 +259,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
         </View>
 
         <LinearGradient colors={['#e8f5e9', '#ffffff']} style={styles.heroCard}>
-          <View style={[styles.searchContainer, { backgroundColor: theme.colors.surface }]}>
+          <View style={[styles.searchContainer, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
             <View style={styles.searchInputWrapper}>
               <Feather name="search" size={20} color={theme.colors.muted} style={styles.searchIcon} />
               <TextInput
@@ -301,7 +302,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
         ) : null}
 
         <View style={styles.quickLinks}>
-          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.surface }]} onPress={onOpenProfile} activeOpacity={0.9}>
+          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]} onPress={onOpenProfile} activeOpacity={0.9}>
             <Feather name="check-circle" size={18} color={theme.colors.brand} />
             <View style={{ flex: 1 }}>
               <Typography variant="small" style={styles.quickLinkText}>
@@ -310,25 +311,25 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
               <Typography variant="tiny" muted>{completion}% ready</Typography>
             </View>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.surface }]} onPress={onOpenAdvancedSearch} activeOpacity={0.9}>
+          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]} onPress={onOpenAdvancedSearch} activeOpacity={0.9}>
             <Feather name="sliders" size={18} color={theme.colors.brand} />
             <Typography variant="small" style={styles.quickLinkText}>
               Advanced search
             </Typography>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.surface }]} onPress={onOpenLikesInbox} activeOpacity={0.9}>
+          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]} onPress={onOpenLikesInbox} activeOpacity={0.9}>
             <Feather name="heart" size={18} color={theme.colors.brand} />
             <Typography variant="small" style={styles.quickLinkText}>
               Likes inbox
             </Typography>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.surface }]} onPress={onOpenMatches} activeOpacity={0.9}>
+          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]} onPress={onOpenMatches} activeOpacity={0.9}>
             <Feather name="users" size={18} color={theme.colors.brand} />
             <Typography variant="small" style={styles.quickLinkText}>
               Matches
             </Typography>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.surface }]} onPress={onOpenConversations} activeOpacity={0.9}>
+          <TouchableOpacity style={[styles.quickLinkCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]} onPress={onOpenConversations} activeOpacity={0.9}>
             <Feather name="message-circle" size={18} color={theme.colors.brand} />
             <Typography variant="small" style={styles.quickLinkText}>
               Conversations
@@ -449,6 +450,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     letterSpacing: 1,
+    fontFamily: 'RedHatDisplay_700Bold',
   },
   greeting: {
     marginBottom: 4,
@@ -485,6 +487,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderRadius: 16,
+    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -616,6 +619,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 14,
+    borderWidth: 1,
     flexBasis: '48%',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -654,7 +658,7 @@ const styles = StyleSheet.create({
   },
   switchLabel: {
     color: '#D8D2E8',
-    fontWeight: '600',
+    fontFamily: 'RedHatDisplay_600SemiBold',
     letterSpacing: 0.5,
   },
   switchLabelActive: {

@@ -23,6 +23,7 @@ const tables = [
   'otp_request_audit',
   'otp_codes',
   'verification_status',
+  'support_messages',
   'users'
 ];
 

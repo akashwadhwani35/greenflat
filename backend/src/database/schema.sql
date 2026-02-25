@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     height INTEGER, -- in cm
     body_type VARCHAR(50),
+    ethnicity VARCHAR(80),
     interests TEXT[], -- Array of interests
     bio TEXT,
     prompt1 TEXT,
@@ -46,6 +47,8 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     prompt3 TEXT,
     smoker BOOLEAN,
     smoking_habit VARCHAR(50),
+    marijuana VARCHAR(50),
+    drugs VARCHAR(50),
     drinker VARCHAR(50),
     diet VARCHAR(50),
     fitness_level VARCHAR(50),
@@ -216,6 +219,19 @@ CREATE TABLE IF NOT EXISTS reports (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Support Messages
+CREATE TABLE IF NOT EXISTS support_messages (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_email VARCHAR(255),
+    user_name VARCHAR(100),
+    message TEXT NOT NULL,
+    email_delivery_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (email_delivery_status IN ('pending', 'sent', 'failed')),
+    email_delivery_error TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- User Privacy Settings
 CREATE TABLE IF NOT EXISTS user_privacy_settings (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -297,4 +313,5 @@ CREATE INDEX idx_profile_views_viewed_id ON profile_views(viewed_id);
 CREATE INDEX idx_photos_user_id ON photos(user_id);
 CREATE INDEX idx_blocks_blocker_id ON blocks(blocker_id);
 CREATE INDEX idx_blocks_blocked_id ON blocks(blocked_id);
+CREATE INDEX idx_support_messages_created_at ON support_messages(created_at DESC);
 CREATE INDEX idx_otp_request_audit_phone_created_at ON otp_request_audit(phone, created_at DESC);

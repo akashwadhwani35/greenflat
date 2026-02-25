@@ -114,7 +114,7 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
        WHERE (liker_id = $1 AND liked_id = $2) OR (liker_id = $2 AND liked_id = $1)`,
       [userId, target_user_id]
     );
-    // Delete messages first (before match cascade removes the match_id reference)
+    // Clear chat history for this pair but keep the match row so unblocking can restore chat access.
     await client.query(
       `DELETE FROM messages
        WHERE match_id IN (
@@ -125,8 +125,9 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
     );
 
     await client.query(
-      `DELETE FROM matches
-       WHERE (user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int))`,
+      `UPDATE matches
+       SET last_message_at = NULL
+       WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)`,
       [userId, target_user_id]
     );
 

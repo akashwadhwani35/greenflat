@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Animated,
   Image,
+  Modal,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
@@ -154,12 +155,6 @@ const OFF_TOPIC_PATTERNS: RegExp[] = [
 
 const isOffTopicPrompt = (input: string) => OFF_TOPIC_PATTERNS.some((pattern) => pattern.test(input));
 
-const summarizePrompt = (input: string) => {
-  const cleaned = normalizeSpaces(input);
-  if (cleaned.length <= 90) return cleaned;
-  return `${cleaned.slice(0, 87)}...`;
-};
-
 export const AISearchScreen: React.FC<AISearchScreenProps> = ({
   onBack,
   onApplySearchQuery,
@@ -174,6 +169,8 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<SearchHistoryItem[]>([]);
   const [availableKeywords, setAvailableKeywords] = useState<string[]>(SEARCH_KEYWORDS);
+  const [showMatchesFoundPopup, setShowMatchesFoundPopup] = useState(false);
+  const [pendingSearchQuery, setPendingSearchQuery] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
 
   useEffect(() => {
@@ -274,6 +271,42 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
     }, 80);
   };
 
+  const queueSearchFlow = (query: string) => {
+    const normalizedQuery = normalizeSpaces(query);
+    if (!normalizedQuery) return;
+
+    addHistoryItem(normalizedQuery);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-searching`,
+        type: 'ai',
+        text: 'Alright, searching Greenflags for you.',
+        timestamp: new Date(),
+      },
+    ]);
+    setPendingSearchQuery(normalizedQuery);
+    setShowMatchesFoundPopup(true);
+    setIsTyping(false);
+
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+  };
+
+  const handleOpenDiscoverFromPopup = () => {
+    if (!pendingSearchQuery) {
+      setShowMatchesFoundPopup(false);
+      return;
+    }
+
+    const query = pendingSearchQuery;
+    setShowMatchesFoundPopup(false);
+    setPendingSearchQuery(null);
+    onApplySearchQuery?.(query);
+    resetFreshPage();
+  };
+
   const handleValidPrompt = async (trimmed: string, transcript: Message[]) => {
     setIsTyping(true);
 
@@ -297,50 +330,37 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
           throw new Error(body.error || 'Unable to process AI search');
         }
 
-        const aiReply = typeof body.reply === 'string' ? body.reply : `Got it. Looking for ${summarizePrompt(trimmed)}.`;
-        setMessages((prev) => [
-          ...prev,
-          { id: `${Date.now()}-valid`, type: 'ai', text: aiReply, timestamp: new Date() },
-        ]);
-
         if (Array.isArray(body.suggested_prompts) && body.suggested_prompts.length > 0) {
           setAvailableKeywords(body.suggested_prompts.slice(0, 12));
         }
 
-        if (body.should_refresh && typeof body.inferred_search_query === 'string' && body.inferred_search_query.trim().length > 0) {
-          const query = body.inferred_search_query.trim();
-          addHistoryItem(query);
-          onApplySearchQuery?.(query);
-          resetFreshPage();
-        } else {
-          addHistoryItem(trimmed);
-        }
+        const inferredQuery =
+          typeof body.inferred_search_query === 'string' && body.inferred_search_query.trim().length > 0
+            ? body.inferred_search_query.trim()
+            : trimmed;
+
+        // For valid prompts, always confirm search and let user choose when to navigate.
+        queueSearchFlow(inferredQuery);
       } catch (error: any) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `${Date.now()}-valid`,
-            type: 'ai',
-            text: error?.message || 'I hit a snag. Try rephrasing what you want in a partner.',
-            timestamp: new Date(),
-          },
-        ]);
+        console.warn('Sidekick failed, using direct query fallback:', error);
+        queueSearchFlow(trimmed);
       } finally {
         setIsTyping(false);
       }
       return;
     }
 
-    const summary = summarizePrompt(trimmed);
     setMessages((prev) => [
       ...prev,
       {
         id: `${Date.now()}-valid`,
         type: 'ai',
-        text: `Gotcha, you're looking for ${summary}.\n\nI can run this once your account is connected.`,
+        text: 'Alright, searching Greenflags for you.',
         timestamp: new Date(),
       },
     ]);
+    setPendingSearchQuery(trimmed);
+    setShowMatchesFoundPopup(true);
     setIsTyping(false);
     addHistoryItem(trimmed);
   };
@@ -420,7 +440,7 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
               history.map((item) => (
                 <TouchableOpacity
                   key={item.id}
-                  style={[styles.historyCapsule, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}
+                  style={[styles.historyCapsule, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}
                   activeOpacity={0.85}
                   onPress={() => handleSendMessage(item.prompt)}
                 >
@@ -530,7 +550,7 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
                   {availableKeywords.map((keyword) => (
                     <TouchableOpacity
                       key={keyword}
-                      style={[styles.keywordChip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
+                      style={[styles.keywordChip, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
                       onPress={() => {
                         setAvailableKeywords((prev) => prev.filter((item) => item !== keyword));
                         setInputText((prev) => {
@@ -576,6 +596,35 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
           </>
         )}
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={showMatchesFoundPopup}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMatchesFoundPopup(false)}
+      >
+        <View style={styles.matchesPopupBackdrop}>
+          <View
+            style={[
+              styles.matchesPopupCard,
+              { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.secondaryHairline },
+            ]}
+          >
+            <Typography variant="h2" align="center" style={{ color: theme.colors.text }}>
+              We found a few matches for you
+            </Typography>
+            <TouchableOpacity
+              style={[styles.matchesPopupButton, { backgroundColor: theme.colors.neonGreen }]}
+              onPress={handleOpenDiscoverFromPopup}
+              activeOpacity={0.85}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+                View matches
+              </Typography>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -725,5 +774,26 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  matchesPopupBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  matchesPopupCard: {
+    width: '100%',
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    gap: 16,
+  },
+  matchesPopupButton: {
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
   },
 });

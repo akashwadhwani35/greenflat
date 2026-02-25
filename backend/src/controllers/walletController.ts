@@ -2,6 +2,8 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 
+const BOOST_DURATION_HOURS = 6;
+
 export const getWalletSummary = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;
@@ -97,7 +99,7 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
     } else if (plan === 'boost') {
       await client.query(
         `UPDATE users
-         SET boost_expires_at = NOW() + INTERVAL '24 hours',
+         SET boost_expires_at = NOW() + INTERVAL '${BOOST_DURATION_HOURS} hours',
              updated_at = NOW()
          WHERE id = $1`,
         [userId]

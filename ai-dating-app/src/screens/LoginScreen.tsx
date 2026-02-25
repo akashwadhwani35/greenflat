@@ -47,7 +47,7 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
       <View style={styles.header}>
         <TouchableOpacity
           onPress={onBack}
-          style={[styles.iconButton, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}
+          style={[styles.iconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
           accessibilityRole="button"
         >
           <Feather name="arrow-left" size={20} color={theme.colors.text} />

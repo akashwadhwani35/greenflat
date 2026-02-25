@@ -73,27 +73,6 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     // Get daily limits based on gender
     const dailyLimits = user.gender === 'male' ? DAILY_LIMITS.male : DAILY_LIMITS.female;
 
-    // Check if user has exceeded limits
-    if (is_on_grid) {
-      if (limits.on_grid_likes_count >= dailyLimits.on_grid_likes && !user.is_premium) {
-        await client.query('ROLLBACK');
-        return res.status(429).json({
-          error: 'Daily on-grid like limit reached',
-          limit: dailyLimits.on_grid_likes,
-          reset_in_hours: LIKE_RESET_HOURS,
-        });
-      }
-    } else {
-      if (limits.off_grid_likes_count >= dailyLimits.off_grid_likes && !user.is_premium) {
-        await client.query('ROLLBACK');
-        return res.status(429).json({
-          error: 'Daily off-grid like limit reached',
-          limit: dailyLimits.off_grid_likes,
-          reset_in_hours: LIKE_RESET_HOURS,
-        });
-      }
-    }
-
     // Check if target user is in cooldown
     const targetUserResult = await client.query(
       'SELECT cooldown_until FROM users WHERE id = $1',
@@ -132,13 +111,76 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
 
     // Check if already liked
     const existingLike = await client.query(
-      'SELECT id FROM likes WHERE liker_id = $1 AND liked_id = $2',
+      'SELECT id, is_superlike FROM likes WHERE liker_id = $1 AND liked_id = $2',
       [userId, target_user_id]
     );
 
     if (existingLike.rows.length > 0) {
+      const existing = existingLike.rows[0];
+      const alreadySuperliked = Boolean(existing.is_superlike);
+
+      // Allow upgrading an existing like to superlike so it can be prioritized in incoming likes.
+      if (Boolean(is_superlike) && !alreadySuperliked) {
+        try {
+          await consumeCredits(
+            userId,
+            5,
+            'superlike',
+            { target_user_id, upgraded_existing_like: true },
+            client
+          );
+        } catch (error: any) {
+          await client.query('ROLLBACK');
+          if (error.message === 'INSUFFICIENT_CREDITS') {
+            return res.status(402).json({ error: 'Not enough credits. Superlikes cost 5 credits.' });
+          }
+          throw error;
+        }
+
+        await client.query(
+          `UPDATE likes
+           SET is_superlike = TRUE,
+               created_at = NOW()
+           WHERE id = $1`,
+          [existing.id]
+        );
+
+        await client.query('COMMIT');
+        return res.json({
+          message: 'Superlike sent!',
+          is_match: false,
+          match_id: null,
+          is_superlike: true,
+          likes_remaining: {
+            on_grid: Math.max(0, dailyLimits.on_grid_likes - limits.on_grid_likes_count),
+            off_grid: Math.max(0, dailyLimits.off_grid_likes - limits.off_grid_likes_count),
+          },
+        });
+      }
+
       await client.query('ROLLBACK');
       return res.status(400).json({ error: 'You have already liked this user' });
+    }
+
+    // Check if user has exceeded limits (only for new likes, not upgrades).
+    if (is_on_grid) {
+      if (limits.on_grid_likes_count >= dailyLimits.on_grid_likes && !user.is_premium) {
+        await client.query('ROLLBACK');
+        return res.status(429).json({
+          error: 'Daily on-grid like limit reached',
+          limit: dailyLimits.on_grid_likes,
+          reset_in_hours: LIKE_RESET_HOURS,
+        });
+      }
+    } else {
+      if (limits.off_grid_likes_count >= dailyLimits.off_grid_likes && !user.is_premium) {
+        await client.query('ROLLBACK');
+        return res.status(429).json({
+          error: 'Daily off-grid like limit reached',
+          limit: dailyLimits.off_grid_likes,
+          reset_in_hours: LIKE_RESET_HOURS,
+        });
+      }
     }
 
     // Superlike costs 5 credits
@@ -312,16 +354,18 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
          liker.gender,
          liker.interested_in,
          liker.date_of_birth,
-         (SELECT photo_url FROM photos WHERE user_id = liker.id AND is_primary = TRUE LIMIT 1) as primary_photo
+         primary_photo.photo_url as primary_photo
        FROM likes l
        JOIN users liker ON liker.id = l.liker_id
+       LEFT JOIN photos primary_photo
+         ON primary_photo.user_id = liker.id
+        AND primary_photo.is_primary = TRUE
+       LEFT JOIN blocks blocked_rel
+         ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = liker.id)
+          OR (blocked_rel.blocker_id = liker.id AND blocked_rel.blocked_id = $1))
        WHERE l.liked_id = $1
-         AND NOT EXISTS (
-           SELECT 1 FROM blocks b
-           WHERE (b.blocker_id = $1 AND b.blocked_id = liker.id)
-              OR (b.blocker_id = liker.id AND b.blocked_id = $1)
-         )
-       ORDER BY l.is_superlike DESC, l.created_at DESC
+         AND blocked_rel.id IS NULL
+       ORDER BY COALESCE(l.is_superlike, FALSE) DESC, l.created_at DESC
        LIMIT 50`,
       [userId]
     );
@@ -329,7 +373,7 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
     const likes = result.rows.map((row: any) => ({
       id: row.id,
       is_on_grid: row.is_on_grid,
-      is_superlike: row.is_superlike,
+      is_superlike: Boolean(row.is_superlike),
       is_compliment: row.is_compliment,
       compliment_message: row.compliment_message,
       created_at: row.created_at,

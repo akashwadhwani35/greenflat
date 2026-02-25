@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, View, TouchableOpacity, TextInput } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Alert, ScrollView, StyleSheet, View, TextInput } from 'react-native';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
@@ -8,49 +7,55 @@ import { PageHeader } from '../components/PageHeader';
 
 type Props = {
   onBack: () => void;
-  onOpenTerms?: () => void;
+  token: string;
+  apiBaseUrl: string;
 };
 
-const faqs = [
-  { q: 'How do AI searches work?', a: 'Each search uses 1 token and returns curated on-grid matches with reasons.' },
-  { q: 'How do I stay safe?', a: 'Keep chats on the app until you trust the person. Block/report anything off.' },
-  { q: 'How do I boost visibility?', a: 'Complete your profile, verify, and run AI searches with clear intent.' },
-];
-
-export const HelpCenterScreen: React.FC<Props> = ({ onBack, onOpenTerms }) => {
+export const HelpCenterScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }) => {
   const theme = useTheme();
-  const [query, setQuery] = useState('');
   const [details, setDetails] = useState('');
+  const [sending, setSending] = useState(false);
+
+  const submitSupportMessage = async () => {
+    const message = details.trim();
+    if (!message) {
+      Alert.alert('Message required', 'Please write your support query.');
+      return;
+    }
+
+    try {
+      setSending(true);
+      const response = await fetch(`${apiBaseUrl}/support/contact`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ message }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || 'Unable to send your message');
+      }
+
+      setDetails('');
+      Alert.alert('Sent', 'Your message has been sent to support.');
+    } catch (error: any) {
+      Alert.alert('Could not send', error?.message || 'Please try again.');
+    } finally {
+      setSending(false);
+    }
+  };
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <PageHeader title="Help center" onBack={onBack} />
+      <PageHeader title="Support" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.searchBox}>
-          <Feather name="search" size={18} color={theme.colors.muted} />
-          <TextInput
-            placeholder="Search help"
-            style={[styles.searchInput, { color: theme.colors.text }]}
-            placeholderTextColor={theme.colors.muted}
-            value={query}
-            onChangeText={setQuery}
-          />
-        </View>
-
-        {faqs.map((item) => (
-          <View key={item.q} style={[styles.card, { borderColor: theme.colors.border }]}>
-            <Typography variant="bodyStrong">{item.q}</Typography>
-            <Typography variant="small" muted>
-              {item.a}
-            </Typography>
-          </View>
-        ))}
-
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
-          <Typography variant="h2">Contact support</Typography>
+          <Typography variant="h2">Write to support</Typography>
           <Typography variant="small" muted>
-            Tell us what you need help with.
+            Tell us your issue, bug, or feedback.
           </Typography>
           <TextInput
             placeholder="Share more details..."
@@ -62,28 +67,12 @@ export const HelpCenterScreen: React.FC<Props> = ({ onBack, onOpenTerms }) => {
           />
           <Button
             label="Send"
-            onPress={async () => {
-              const subject = encodeURIComponent('GreenFlag Support Request');
-              const body = encodeURIComponent(`Issue:\n${details || query || 'No details provided.'}`);
-              const url = `mailto:support@greenflag.app?subject=${subject}&body=${body}`;
-              try {
-                const supported = await Linking.canOpenURL(url);
-                if (!supported) throw new Error('Email app unavailable');
-                await Linking.openURL(url);
-              } catch {
-                Alert.alert('Unable to open email', 'Please email support@greenflag.app');
-              }
-            }}
+            onPress={submitSupportMessage}
+            loading={sending}
+            disabled={sending || !details.trim()}
             fullWidth
           />
         </View>
-
-        <TouchableOpacity style={styles.linkRow} onPress={onOpenTerms}>
-          <Typography variant="small" style={{ color: theme.colors.brand }}>
-            Terms & Privacy
-          </Typography>
-          <Feather name="chevron-right" size={16} color={theme.colors.brand} />
-        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -95,19 +84,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 140,
     gap: 12,
-  },
-  searchBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
   },
   card: {
     borderWidth: 1,
@@ -122,11 +98,5 @@ const styles = StyleSheet.create({
     minHeight: 90,
     textAlignVertical: 'top',
     fontSize: 16,
-  },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
   },
 });

@@ -151,15 +151,26 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     const minAge = filters.minAge ? Number(filters.minAge) : null;
     const maxAge = filters.maxAge ? Number(filters.maxAge) : null;
     const minHeight = filters.minHeight ? Number(filters.minHeight) : null;
+    const maxHeight = filters.maxHeight ? Number(filters.maxHeight) : null;
     const distance_km = filters.distance_km ? Number(filters.distance_km) : null;
 
     if (Number.isFinite(minAge)) parsed.minAge = minAge;
     if (Number.isFinite(maxAge)) parsed.maxAge = maxAge;
     if (Number.isFinite(minHeight)) parsed.minHeight = minHeight;
+    if (Number.isFinite(maxHeight)) parsed.maxHeight = maxHeight;
+    if (filters.interested_in && filters.interested_in.trim()) parsed.interested_in = filters.interested_in.trim();
     if (filters.city && filters.city.trim()) parsed.city = filters.city.trim();
+    if (filters.religion && filters.religion.trim()) parsed.religion = filters.religion.trim();
     if (filters.relationship_goal && filters.relationship_goal.trim()) parsed.relationship_goal = filters.relationship_goal.trim();
-    if (typeof filters.smoker === 'boolean') parsed.smoker = filters.smoker;
+    if (filters.dating_intentions && filters.dating_intentions.trim()) parsed.dating_intentions = filters.dating_intentions.trim();
+    if (filters.have_kids && filters.have_kids.trim()) parsed.have_kids = filters.have_kids.trim();
+    if (filters.smoking_habit && filters.smoking_habit.trim()) parsed.smoking_habit = filters.smoking_habit.trim();
     if (filters.drinker && filters.drinker.trim()) parsed.drinker = filters.drinker.trim();
+    if (filters.politics && filters.politics.trim()) parsed.politics = filters.politics.trim();
+    if (filters.education_level && filters.education_level.trim()) parsed.education_level = filters.education_level.trim();
+    if (filters.ethnicity && filters.ethnicity.trim()) parsed.ethnicity = filters.ethnicity.trim();
+    if (filters.drugs && filters.drugs.trim()) parsed.drugs = filters.drugs.trim();
+    if (filters.marijuana && filters.marijuana.trim()) parsed.marijuana = filters.marijuana.trim();
     if (Number.isFinite(distance_km)) parsed.distance_km = distance_km;
 
     return parsed;
@@ -362,21 +373,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
               </Typography>
             </View>
 
-            {/* AI Match Reason */}
-            {activeTab === 'onGrid' && match.match_reason && (
-              <View style={styles.matchReasonContainer}>
-                <View style={styles.matchReasonDot}>
-                  <Feather name="zap" size={9} color={theme.colors.neonGreen} />
-                </View>
-                <Typography
-                  variant="tiny"
-                  style={[styles.matchReasonText, { color: theme.colors.text }]}
-                  numberOfLines={1}
-                >
-                  {match.match_reason}
-                </Typography>
-              </View>
-            )}
           </View>
         </TouchableOpacity>
       </Animated.View>
@@ -401,7 +397,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         <View style={styles.headerRight}>
           {/* Wallet Badge */}
           <TouchableOpacity
-            style={[styles.walletBadge, { backgroundColor: theme.colors.charcoal }]}
+            style={[styles.walletBadge, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
             onPress={onOpenWallet}
             activeOpacity={0.8}
           >
@@ -430,7 +426,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
           {/* Filter icon */}
           <TouchableOpacity
-            style={[styles.filterButton, { backgroundColor: theme.colors.charcoal }]}
+            style={[styles.filterButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
             onPress={onOpenFilters}
             activeOpacity={0.8}
           >
@@ -550,7 +546,7 @@ const styles = StyleSheet.create({
   logoText: {
     color: '#FFFFFF',
     fontSize: 24,
-    fontWeight: '700',
+    fontFamily: 'RedHatDisplay_700Bold',
     letterSpacing: -0.5,
   },
   headerRight: {
@@ -565,6 +561,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 24,
+    borderWidth: 1,
   },
   walletIcon: {
     width: 28,
@@ -611,6 +608,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
   },
   rewindIconButton: {
     width: 48,
@@ -692,7 +690,7 @@ const styles = StyleSheet.create({
   },
   matchBadgeText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontFamily: 'RedHatDisplay_700Bold',
     letterSpacing: -0.2,
   },
   verifiedBadge: {
@@ -735,12 +733,12 @@ const styles = StyleSheet.create({
   },
   cardName: {
     fontSize: 19,
-    fontWeight: '700',
+    fontFamily: 'RedHatDisplay_700Bold',
     letterSpacing: -0.3,
   },
   cardAge: {
     fontSize: 17,
-    fontWeight: '500',
+    fontFamily: 'RedHatDisplay_500Medium',
   },
   cardLocationRow: {
     flexDirection: 'row',
@@ -751,28 +749,6 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 13,
     lineHeight: 16,
-  },
-  matchReasonContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  matchReasonDot: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: 'rgba(188, 246, 65, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  matchReasonText: {
-    fontSize: 11,
-    lineHeight: 13,
-    flex: 1,
-    fontWeight: '500',
-    fontStyle: 'italic',
-    opacity: 0.85,
   },
   loadingContainer: {
     flex: 1,

@@ -38,7 +38,6 @@ export const Typography: React.FC<Props> = ({
       style={[
         {
           fontFamily: font.family,
-          fontWeight: font.weight,
           fontSize: font.size,
           lineHeight: font.lineHeight,
           color,

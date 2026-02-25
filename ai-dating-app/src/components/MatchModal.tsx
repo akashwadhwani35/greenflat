@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   },
   matchTitle: {
     fontSize: 42,
-    fontWeight: '800',
+    fontFamily: 'RedHatDisplay_700Bold',
     letterSpacing: -1,
     textShadowColor: 'rgba(173, 255, 26, 0.5)',
     textShadowOffset: { width: 0, height: 0 },

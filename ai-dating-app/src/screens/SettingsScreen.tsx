@@ -107,7 +107,7 @@ export const SettingsScreen: React.FC<Props> = ({
     { title: 'Verification', subtitle: 'Photo / selfie verification', icon: 'shield', action: onOpenVerification },
     { title: 'Privacy & safety', subtitle: 'Visibility, block/report, incognito', icon: 'eye', action: onOpenPrivacy },
     { title: 'Notifications', subtitle: 'Manage pushes and device settings', icon: 'bell', action: onOpenNotifications },
-    { title: 'Support', subtitle: 'FAQ, contact, policies', icon: 'help-circle', action: onOpenHelp },
+    { title: 'Support', subtitle: 'Send us your issue or feedback', icon: 'help-circle', action: onOpenHelp },
     { title: 'Plans', subtitle: 'Upgrade, tokens, boosts', icon: 'credit-card', action: onOpenCheckout },
   ];
 

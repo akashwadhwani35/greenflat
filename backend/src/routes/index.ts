@@ -25,7 +25,8 @@ import {
   unblockUser,
 } from '../controllers/privacyController';
 import { getNotificationPreferences, updateNotificationPreferences } from '../controllers/notificationsController';
-import { getMediaCapabilities, getUploadSignature } from '../controllers/mediaController';
+import { getMediaCapabilities, getUploadSignature, uploadLocalMedia } from '../controllers/mediaController';
+import { submitSupportMessage } from '../controllers/supportController';
 import adminRouter from './admin';
 import { loginLimiter, signupLimiter, forgotPasswordLimiter, resetPasswordLimiter } from '../middleware/rateLimit';
 
@@ -82,6 +83,7 @@ router.post('/notifications/preferences', authenticate, updateNotificationPrefer
 // Media routes
 router.get('/media/capabilities', authenticate, getMediaCapabilities);
 router.post('/media/upload-signature', authenticate, getUploadSignature);
+router.post('/media/upload-local', authenticate, uploadLocalMedia);
 
 // Verification routes
 router.post('/verification/otp/request', authenticate, requestOtp);
@@ -103,6 +105,9 @@ router.delete('/messages/:messageId', authenticate, deleteMessage);
 
 // AI routes (protected)
 router.post('/ai/sidekick', authenticate, sidekick);
+
+// Support routes
+router.post('/support/contact', authenticate, submitSupportMessage);
 
 // Admin routes
 router.use('/admin', adminRouter);

@@ -971,7 +971,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                     </TouchableOpacity>
                     {idx === form.primaryPhotoIndex && (
                       <View style={[styles.primaryBadge, { backgroundColor: theme.colors.neonGreen }]}>
-                        <Typography variant="tiny" style={{ color: theme.colors.deepBlack, fontWeight: '600' }}>Primary</Typography>
+                        <Typography variant="tiny" style={{ color: theme.colors.deepBlack, fontFamily: theme.fonts.bodyStrong.family }}>Primary</Typography>
                       </View>
                     )}
                   </View>

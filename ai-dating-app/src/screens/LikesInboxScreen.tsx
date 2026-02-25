@@ -41,7 +41,15 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
           throw new Error(body.error || 'Unable to load likes');
         }
         const data = await response.json();
-        setLikes(data.likes || []);
+        const incomingLikes = Array.isArray(data.likes) ? data.likes : [];
+        const sortedLikes = [...incomingLikes].sort((a, b) => {
+          const superlikeDiff = Number(Boolean(b?.is_superlike)) - Number(Boolean(a?.is_superlike));
+          if (superlikeDiff !== 0) return superlikeDiff;
+          const aTime = a?.created_at ? new Date(a.created_at).getTime() : 0;
+          const bTime = b?.created_at ? new Date(b.created_at).getTime() : 0;
+          return bTime - aTime;
+        });
+        setLikes(sortedLikes);
       } catch (err: any) {
         setError(err.message || 'Unable to load likes');
       } finally {
@@ -84,7 +92,7 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
 
         {likes.map((item, index) => (
           <View
-            key={index}
+            key={item?.id ?? `like-${index}`}
             style={[styles.card, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
           >
             <Image source={item.user.primary_photo ? { uri: item.user.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />

@@ -29,6 +29,7 @@ export interface UserProfile {
   user_id: number;
   height?: number;
   body_type?: string;
+  ethnicity?: string;
   interests?: string[];
   bio?: string;
   prompt1?: string;
@@ -36,6 +37,8 @@ export interface UserProfile {
   prompt3?: string;
   smoker?: boolean;
   smoking_habit?: string;
+  marijuana?: string;
+  drugs?: string;
   drinker?: string;
   diet?: string;
   fitness_level?: string;
@@ -131,12 +134,22 @@ export interface SearchFilters {
   maxAge?: number;
   minHeight?: number;
   maxHeight?: number;
+  interested_in?: 'male' | 'female' | 'both';
   interests?: string[];
   city?: string;
   distance_km?: number;
   smoker?: boolean;
+  smoking_habit?: string;
   drinker?: string;
+  religion?: string;
+  have_kids?: string;
+  politics?: string;
+  education_level?: string;
+  ethnicity?: string;
+  drugs?: string;
+  marijuana?: string;
   relationship_goal?: string;
+  dating_intentions?: string;
   keywords?: string;
 }
 

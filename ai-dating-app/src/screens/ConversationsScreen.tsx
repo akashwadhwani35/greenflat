@@ -188,7 +188,7 @@ export const ConversationsScreen: React.FC<Props> = ({
             />
           }
         >
-          <View style={[styles.searchContainer, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+          <View style={[styles.searchContainer, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
             <Feather name="search" size={18} color={theme.colors.muted} />
             <TextInput
               style={[styles.searchInput, { color: theme.colors.text }]}
@@ -200,7 +200,7 @@ export const ConversationsScreen: React.FC<Props> = ({
           </View>
 
           {filteredConversations.length === 0 ? (
-            <View style={[styles.row, { borderColor: theme.colors.border, backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.row, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
               <Typography variant="small" style={{ color: theme.colors.muted }}>
                 No conversations found for "{searchQuery}".
               </Typography>
@@ -262,7 +262,7 @@ export const ConversationsScreen: React.FC<Props> = ({
                       variant="small"
                       style={{
                         color: isUnread ? theme.colors.text : theme.colors.muted,
-                        fontWeight: isUnread ? '500' : '400',
+                        fontFamily: isUnread ? theme.fonts.bodyStrong.family : theme.fonts.body.family,
                         flex: 1,
                       }}
                       numberOfLines={1}
@@ -275,7 +275,7 @@ export const ConversationsScreen: React.FC<Props> = ({
                       <View style={[styles.unreadBadge, { backgroundColor: theme.colors.neonGreen }]}>
                         <Typography
                           variant="tiny"
-                          style={{ color: theme.colors.deepBlack, fontWeight: '700', fontSize: 11 }}
+                          style={{ color: theme.colors.deepBlack, fontFamily: theme.fonts.bodyStrong.family, fontSize: 11 }}
                         >
                           {item.unread_count > 9 ? '9+' : item.unread_count}
                         </Typography>

@@ -3,6 +3,10 @@ import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { PERSONALITY_TRAITS_MAP } from '../utils/constants';
 import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
+import { consumeCredits } from '../services/credits.service';
+
+const BOOST_DURATION_HOURS = 6;
+const BOOST_TOKEN_COST = 20;
 
 export const completeProfile = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
@@ -309,52 +313,84 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 };
 
 export const activateBoost = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
   try {
     const userId = req.userId!;
-    const userResult = await pool.query(
-      'SELECT is_premium, premium_expires_at, boost_expires_at FROM users WHERE id = $1',
+    await client.query('BEGIN');
+
+    const userResult = await client.query(
+      'SELECT is_premium, premium_expires_at, boost_expires_at, credit_balance FROM users WHERE id = $1 FOR UPDATE',
       [userId]
     );
 
     if (userResult.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'User not found' });
     }
 
     const user = userResult.rows[0];
     const now = Date.now();
+    const currentCreditBalance = Number(user.credit_balance || 0);
     const premiumExpiresAt = user.premium_expires_at ? new Date(user.premium_expires_at).getTime() : null;
     const hasPaidPlan = Boolean(user.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > now);
 
-    if (!hasPaidPlan) {
-      return res.status(403).json({ error: 'Boost is available only for paid plans' });
-    }
-
     const boostExpiresAt = user.boost_expires_at ? new Date(user.boost_expires_at).getTime() : null;
     if (boostExpiresAt && boostExpiresAt > now) {
+      await client.query('COMMIT');
       return res.json({
         message: 'Boost is already active',
         boost_active: true,
         boost_expires_at: new Date(boostExpiresAt).toISOString(),
+        credit_balance: currentCreditBalance,
       });
     }
 
-    const updateResult = await pool.query(
+    let chargedTokens = 0;
+    let remainingCredits = currentCreditBalance;
+    if (!hasPaidPlan) {
+      if (currentCreditBalance < BOOST_TOKEN_COST) {
+        await client.query('ROLLBACK');
+        return res.status(402).json({
+          error: `Boost requires Premium or ${BOOST_TOKEN_COST} tokens.`,
+          required_tokens: BOOST_TOKEN_COST,
+          credit_balance: currentCreditBalance,
+        });
+      }
+
+      remainingCredits = await consumeCredits(
+        userId,
+        BOOST_TOKEN_COST,
+        'boost_activation',
+        { source: 'profile_boost' },
+        client
+      );
+      chargedTokens = BOOST_TOKEN_COST;
+    }
+
+    const updateResult = await client.query(
       `UPDATE users
-       SET boost_expires_at = NOW() + INTERVAL '24 hours',
+       SET boost_expires_at = NOW() + INTERVAL '${BOOST_DURATION_HOURS} hours',
            updated_at = NOW()
        WHERE id = $1
        RETURNING boost_expires_at`,
       [userId]
     );
 
+    await client.query('COMMIT');
+
     return res.json({
-      message: 'Boost activated for 24 hours',
+      message: `Boost activated for ${BOOST_DURATION_HOURS} hours`,
       boost_active: true,
       boost_expires_at: updateResult.rows[0].boost_expires_at,
+      charged_tokens: chargedTokens,
+      credit_balance: remainingCredits,
     });
   } catch (error) {
+    await client.query('ROLLBACK');
     console.error('Activate boost error:', error);
     return res.status(500).json({ error: 'Failed to activate boost' });
+  } finally {
+    client.release();
   }
 };
 

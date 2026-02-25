@@ -78,6 +78,36 @@ const INTEREST_CATEGORIES = [
   },
 ];
 
+const MAX_INTEREST_SELECTION = 5;
+const ALL_INTEREST_OPTIONS = INTEREST_CATEGORIES.flatMap((category) => category.items);
+const normalizeInterestValue = (value: string) => value.trim().toLowerCase();
+const INTEREST_CANONICAL_MAP = ALL_INTEREST_OPTIONS.reduce((map, interest) => {
+  map.set(normalizeInterestValue(interest), interest);
+  return map;
+}, new Map<string, string>());
+
+const normalizeInterestsForForm = (values: unknown): string[] => {
+  if (!Array.isArray(values)) return [];
+
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const normalizedValue = normalizeInterestValue(value);
+    if (!normalizedValue || seen.has(normalizedValue)) continue;
+
+    const canonical = INTEREST_CANONICAL_MAP.get(normalizedValue);
+    if (!canonical) continue;
+
+    normalized.push(canonical);
+    seen.add(normalizedValue);
+    if (normalized.length >= MAX_INTEREST_SELECTION) break;
+  }
+
+  return normalized;
+};
+
 const LANGUAGE_OPTIONS = [
   'English', 'Hindi', 'Spanish', 'French', 'German', 'Mandarin', 'Japanese',
   'Korean', 'Portuguese', 'Arabic', 'Tamil', 'Telugu', 'Bengali', 'Marathi',
@@ -280,6 +310,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveNotice, setSaveNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [selectedMoreField, setSelectedMoreField] = useState<MoreAboutField | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -311,6 +342,11 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     religion: '',
   });
 
+  const selectedInterests = useMemo(
+    () => new Set(form.interests.map((interest) => normalizeInterestValue(interest))),
+    [form.interests]
+  );
+
   useEffect(() => {
     const fetchProfile = async () => {
       try {
@@ -331,7 +367,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             dateOfBirth: user.date_of_birth || '',
             gender: normalizeGenderForUi(user.gender || ''),
             bio: profile.bio || '',
-            interests: Array.isArray(profile.interests) ? profile.interests : [],
+            interests: normalizeInterestsForForm(profile.interests),
             languages: Array.isArray(profile.languages) ? profile.languages : [],
             pronouns: Array.isArray(profile.pronouns) ? profile.pronouns : [],
             communities: Array.isArray(profile.communities) ? profile.communities : [],
@@ -363,8 +399,40 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     fetchProfile();
   }, [apiBaseUrl, token]);
 
+  useEffect(() => {
+    if (!saveNotice) return;
+    const timeout = setTimeout(() => setSaveNotice(null), 2600);
+    return () => clearTimeout(timeout);
+  }, [saveNotice]);
+
   const toggleArrayItem = (key: 'interests' | 'languages' | 'pronouns' | 'communities', item: string, maxItems?: number) => {
     setForm((prev) => {
+      if (key === 'interests') {
+        const normalizedItem = normalizeInterestValue(item);
+        if (!normalizedItem) return prev;
+
+        const canonicalItem = INTEREST_CANONICAL_MAP.get(normalizedItem) || item.trim();
+        const hasInterest = prev.interests.some(
+          (interest) => normalizeInterestValue(interest) === normalizedItem
+        );
+
+        if (hasInterest) {
+          return {
+            ...prev,
+            interests: prev.interests.filter(
+              (interest) => normalizeInterestValue(interest) !== normalizedItem
+            ),
+          };
+        }
+
+        if (maxItems && prev.interests.length >= maxItems) {
+          Alert.alert('Limit reached', `You can select up to ${maxItems} options.`);
+          return prev;
+        }
+
+        return { ...prev, interests: [...prev.interests, canonicalItem] };
+      }
+
       const currentArray = prev[key];
       if (currentArray.includes(item)) {
         return { ...prev, [key]: currentArray.filter((i) => i !== item) };
@@ -488,11 +556,12 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
   const handleSave = async () => {
     try {
       setSaving(true);
+      setSaveNotice(null);
 
       const snapshotProfile = profileSnapshot?.profile || {};
       const genderApi = normalizeGenderForApi(form.gender);
 
-      await fetch(`${apiBaseUrl}/profile/basic`, {
+      const basicResponse = await fetch(`${apiBaseUrl}/profile/basic`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -502,6 +571,10 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           date_of_birth: form.dateOfBirth || null,
         }),
       });
+      const basicBody = await basicResponse.json().catch(() => ({}));
+      if (!basicResponse.ok) {
+        throw new Error(basicBody.error || 'Unable to save profile basics');
+      }
 
       const payload = {
         height: form.heightCm ? Number(form.heightCm) : snapshotProfile.height || null,
@@ -541,11 +614,30 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
         body: JSON.stringify(payload),
       });
 
-      if (!response.ok) throw new Error('Unable to save profile');
-      Alert.alert('Saved', 'Your profile was updated.');
-      onBack();
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error || 'Unable to save profile');
+      }
+
+      // Keep local snapshot in sync while staying on this page.
+      setProfileSnapshot((prev: any) => ({
+        ...(prev || {}),
+        user: {
+          ...(prev?.user || {}),
+          name: form.name,
+          city: form.city,
+          gender: genderApi || prev?.user?.gender || null,
+          date_of_birth: form.dateOfBirth || prev?.user?.date_of_birth || null,
+        },
+        profile: {
+          ...(prev?.profile || {}),
+          ...(body?.profile || {}),
+        },
+      }));
+
+      setSaveNotice({ tone: 'success', message: 'Profile updated successfully.' });
     } catch (err: any) {
-      Alert.alert('Error', err.message || 'Unable to save profile');
+      setSaveNotice({ tone: 'error', message: err.message || 'Unable to save profile' });
     } finally {
       setSaving(false);
     }
@@ -569,22 +661,22 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
         <View style={styles.modalSubheader}>
           <Typography variant="h1" style={{ color: theme.colors.text }}>
-            Choose up to 5 interests
+            Choose up to {MAX_INTEREST_SELECTION} interests
           </Typography>
           <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 8 }}>
             Select things you enjoy doing
           </Typography>
           <Typography variant="small" style={{ color: theme.colors.neonGreen, marginTop: 8 }}>
-            You've chosen {form.interests.length} out of 5 options
+            You've chosen {form.interests.length} out of {MAX_INTEREST_SELECTION} options
           </Typography>
         </View>
 
         <ScrollView
           style={styles.modalScroll}
-          contentContainerStyle={styles.modalScrollContent}
+          contentContainerStyle={[styles.modalScrollContent, styles.interestsModalScrollContent]}
           showsVerticalScrollIndicator={false}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          keyboardShouldPersistTaps="always"
         >
           {INTEREST_CATEGORIES.map((category) => (
             <View key={category.name} style={styles.categorySection}>
@@ -596,7 +688,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
               </View>
               <View style={styles.chipsWrap}>
                 {category.items.map((item) => {
-                  const isSelected = form.interests.includes(item);
+                  const isSelected = selectedInterests.has(normalizeInterestValue(item));
                   return (
                     <TouchableOpacity
                       key={item}
@@ -607,7 +699,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
                           backgroundColor: isSelected ? theme.colors.secondaryHighlight : 'transparent',
                         },
                       ]}
-                      onPress={() => toggleArrayItem('interests', item, 5)}
+                      onPress={() => toggleArrayItem('interests', item, MAX_INTEREST_SELECTION)}
                     >
                       <Typography variant="small" style={{ color: theme.colors.text }}>{item}</Typography>
                       <Feather name={isSelected ? 'check' : 'plus'} size={14} color={isSelected ? theme.colors.neonGreen : theme.colors.muted} style={{ marginLeft: 6 }} />
@@ -651,7 +743,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           </Typography>
         </View>
 
-        <View style={[styles.searchContainer, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}> 
+        <View style={[styles.searchContainer, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}> 
           <Feather name="search" size={18} color={theme.colors.muted} />
           <TextInput
             style={[styles.searchInput, { color: theme.colors.text }]}
@@ -881,8 +973,9 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             style={styles.modalScroll}
             contentContainerStyle={styles.moreAboutContent}
             showsVerticalScrollIndicator={false}
-            nestedScrollEnabled
-            keyboardShouldPersistTaps="handled"
+            contentInsetAdjustmentBehavior="automatic"
+            keyboardDismissMode="on-drag"
+            keyboardShouldPersistTaps="always"
           >
             <Typography variant="h2" style={{ color: theme.colors.text, marginBottom: 6 }}>
               About you
@@ -931,6 +1024,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
                 </View>
               </TouchableOpacity>
             ))}
+            <View style={styles.moreAboutBottomSpacer} />
           </ScrollView>
         </View>
       </Modal>
@@ -955,8 +1049,9 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
               style={styles.modalScroll}
               contentContainerStyle={styles.moreFieldContent}
               showsVerticalScrollIndicator={false}
-              nestedScrollEnabled
-              keyboardShouldPersistTaps="handled"
+              contentInsetAdjustmentBehavior="automatic"
+              keyboardDismissMode="on-drag"
+              keyboardShouldPersistTaps="always"
             >
               {options.map((option) => {
                 const selected = value.toLowerCase() === option.toLowerCase();
@@ -1143,6 +1238,33 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           <Feather name="chevron-right" size={20} color={theme.colors.muted} />
         </TouchableOpacity>
 
+        {saveNotice ? (
+          <View
+            style={[
+              styles.saveNotice,
+              {
+                borderColor: saveNotice.tone === 'success' ? theme.colors.neonGreen : theme.colors.error,
+                backgroundColor: theme.colors.secondaryHighlight,
+              },
+            ]}
+          >
+            <Feather
+              name={saveNotice.tone === 'success' ? 'check-circle' : 'alert-circle'}
+              size={16}
+              color={saveNotice.tone === 'success' ? theme.colors.neonGreen : theme.colors.error}
+            />
+            <Typography
+              variant="small"
+              style={{
+                color: saveNotice.tone === 'success' ? theme.colors.text : theme.colors.error,
+                marginLeft: 8,
+              }}
+            >
+              {saveNotice.message}
+            </Typography>
+          </View>
+        ) : null}
+
         <TouchableOpacity
           style={[styles.saveButton, { backgroundColor: theme.colors.neonGreen }]}
           onPress={handleSave}
@@ -1183,9 +1305,19 @@ const styles = StyleSheet.create({
   },
   rowLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
   rowTextContainer: { marginLeft: 12, flex: 1 },
+  saveNotice: {
+    marginHorizontal: 20,
+    marginTop: 18,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   saveButton: {
     marginHorizontal: 20,
-    marginTop: 32,
+    marginTop: 22,
     paddingVertical: 16,
     borderRadius: 30,
     alignItems: 'center',
@@ -1204,6 +1336,7 @@ const styles = StyleSheet.create({
   modalSubheader: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 16 },
   modalScroll: { flex: 1 },
   modalScrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
+  interestsModalScrollContent: { paddingBottom: 140 },
   modalContent: { paddingHorizontal: 20, paddingTop: 16 },
   categorySection: { marginBottom: 24 },
   categoryHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
@@ -1265,7 +1398,11 @@ const styles = StyleSheet.create({
 
   moreAboutContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    paddingBottom: 160,
+    flexGrow: 1,
+  },
+  moreAboutBottomSpacer: {
+    height: 32,
   },
   moreRow: {
     flexDirection: 'row',
@@ -1287,7 +1424,8 @@ const styles = StyleSheet.create({
   },
   moreFieldContent: {
     paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingBottom: 120,
+    flexGrow: 1,
   },
   optionRow: {
     paddingVertical: 16,

@@ -15,7 +15,7 @@ type Props = {
 const plans = [
   { id: 'starter' as const, title: 'Starter', price: '$4.99', detail: '10 AI searches + likes boost' },
   { id: 'premium' as const, title: 'Premium', price: '$14.99', detail: '30 AI searches, rewinds, read receipts' },
-  { id: 'boost' as const, title: 'Boost', price: '$2.99', detail: 'Highlight your profile for 24 hours' },
+  { id: 'boost' as const, title: 'Boost', price: '$2.99', detail: 'Highlight your profile for 6 hours' },
 ];
 
 export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onPurchased }) => {

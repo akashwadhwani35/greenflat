@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 36,
-    fontWeight: '700',
+    fontFamily: 'RedHatDisplay_700Bold',
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 44,

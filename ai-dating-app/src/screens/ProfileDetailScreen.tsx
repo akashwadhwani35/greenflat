@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
-import { Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
+import React, { useState } from 'react';
+import { Alert, Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { MatchCandidate } from './MatchboardScreen';
+import { PixelFlag } from '../components/PixelFlag';
 
 type ProfileDetailScreenProps = {
   match: MatchCandidate | null;
@@ -15,6 +16,8 @@ type ProfileDetailScreenProps = {
   onSendCompliment?: (targetUserId: number, content: string) => Promise<void> | void;
   onBlock?: (targetUserId: number, name: string) => void;
   onReport?: (targetUserId: number, name: string) => void;
+  embedded?: boolean;
+  hideActionButtons?: boolean;
 };
 
 const fallbackPhoto = require('../../assets/icon.png');
@@ -36,6 +39,63 @@ const toArray = (value: unknown): string[] => {
   return value
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
     .filter(Boolean);
+};
+
+const toText = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value).trim();
+  if (value && typeof value === 'object') {
+    const candidate = (value as { label?: unknown; name?: unknown; value?: unknown });
+    if (typeof candidate.label === 'string' || typeof candidate.label === 'number') {
+      return String(candidate.label).trim();
+    }
+    if (typeof candidate.name === 'string' || typeof candidate.name === 'number') {
+      return String(candidate.name).trim();
+    }
+    if (typeof candidate.value === 'string' || typeof candidate.value === 'number') {
+      return String(candidate.value).trim();
+    }
+  }
+  return '';
+};
+
+const toTextArray = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toText(item))
+      .filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    return [trimmed];
+  }
+
+  return [];
+};
+
+const toSecondPersonSummary = (value: string): string => {
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  if (!trimmed) return '';
+
+  let summary = trimmed
+    .replace(/^(the individual|this individual|the user|this person)\s+/i, '')
+    .replace(/^(they|he|she)\s+(are|is)\s+/i, '');
+
+  if (!/^you\b/i.test(summary)) {
+    if (/^(are|have|tend|show|value|prefer|communicate|approach|bring)\b/i.test(summary)) {
+      summary = `You ${summary}`;
+    } else {
+      summary = `You are ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
+    }
+  }
+
+  summary = summary
+    .replace(/^you\s+is\b/i, 'You are')
+    .replace(/^you\s+has\b/i, 'You have');
+
+  return `${summary.charAt(0).toUpperCase()}${summary.slice(1)}`;
 };
 
 const buildPromptCards = (name: string, about: string, highlights: string[]): PromptCard[] => {
@@ -69,6 +129,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   onSuperlike,
   onBlock,
   onReport,
+  embedded = false,
+  hideActionButtons = false,
 }) => {
   const theme = useTheme();
   const [sendingComplimentKey, setSendingComplimentKey] = useState<string | null>(null);
@@ -82,6 +144,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     interests?: string[];
     photos?: string[];
     is_verified?: boolean;
+    personality_summary?: string;
+    top_traits?: string[];
   };
 
   const name = matchData.name || 'Profile';
@@ -91,20 +155,18 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const primaryPhoto = matchData.primary_photo ? { uri: matchData.primary_photo } : fallbackPhoto;
   const photos = toArray(matchData.photos);
   const cardPhotos = [primaryPhoto, ...photos.map((url) => ({ uri: url }))];
-  const aboutText = (matchData.bio || matchData.match_reason || '').trim();
-  const highlights = (matchData.interests && matchData.interests.length > 0)
-    ? matchData.interests
-    : (matchData.match_highlights || []);
+  const aboutText = toText(matchData.bio || matchData.match_reason || '');
+  const interests = toTextArray(matchData.interests);
+  const matchHighlights = toTextArray(matchData.match_highlights);
+  const highlights = interests.length > 0 ? interests : matchHighlights;
+  const personalitySummary = toSecondPersonSummary(toText(matchData.personality_summary));
+  const personalityTopTraits = toTextArray(matchData.top_traits);
 
-  const lookingFor = useMemo(() => {
-    if (matchData.relationship_goal) return [normalizeLabel(matchData.relationship_goal)];
-    return ['Long-term relationship', 'Fun, casual dates'];
-  }, [matchData.relationship_goal]);
-
-  const promptCards = useMemo(
-    () => buildPromptCards(name, aboutText, highlights),
-    [name, aboutText, highlights]
-  );
+  const relationshipGoal = toText(matchData.relationship_goal);
+  const lookingFor = relationshipGoal
+    ? [normalizeLabel(relationshipGoal)]
+    : ['Long-term relationship', 'Fun, casual dates'];
+  const promptCards = buildPromptCards(name, aboutText, highlights);
 
   const handleCompliment = async (prompt: string, answer: string) => {
     if (!onSendCompliment) return;
@@ -120,141 +182,249 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     }
   };
 
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <View style={styles.container}>
-        <StatusBar barStyle="dark-content" />
+  const handleQuickMessage = () => {
+    if (!onSendCompliment || sendingComplimentKey || promptCards.length === 0) return;
+    const firstCard = promptCards[0];
+    void handleCompliment(firstCard.prompt, firstCard.answer);
+  };
 
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.headerIconButton} activeOpacity={0.75}>
-            <Feather name="arrow-left" size={20} color="#111111" />
+  const handleSafetyMenu = () => {
+    if (!onBlock && !onReport) {
+      return;
+    }
+    const actions: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [];
+    if (onBlock) {
+      actions.push({
+        text: 'Block',
+        style: 'destructive',
+        onPress: () => onBlock(match.id, name),
+      });
+    }
+    if (onReport) {
+      actions.push({
+        text: 'Report',
+        style: 'destructive',
+        onPress: () => onReport(match.id, name),
+      });
+    }
+    actions.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Safety', `Manage your interaction with ${name}.`, actions);
+  };
+
+  const showSafetyButton = !hideActionButtons && Boolean(onBlock || onReport);
+
+  const content = (
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <StatusBar barStyle="light-content" />
+
+      <View style={[styles.header, { backgroundColor: theme.colors.deepBlack, borderBottomColor: theme.colors.border }]}>
+        <TouchableOpacity
+          onPress={onClose}
+          style={[styles.headerIconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+          activeOpacity={0.75}
+        >
+          <Feather name="arrow-left" size={20} color={theme.colors.text} />
+        </TouchableOpacity>
+        <View style={{ flex: 1 }} />
+        {showSafetyButton ? (
+          <TouchableOpacity
+            style={[styles.headerIconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+            activeOpacity={0.75}
+            onPress={handleSafetyMenu}
+          >
+            <Feather name="sliders" size={18} color={theme.colors.text} />
           </TouchableOpacity>
-          <View style={{ flex: 1 }} />
-          <TouchableOpacity style={styles.headerIconButton} activeOpacity={0.75}>
-            <Feather name="sliders" size={18} color="#111111" />
-          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerIconSpacer} />
+        )}
+      </View>
+
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        contentInsetAdjustmentBehavior="automatic"
+        bounces
+      >
+        <View style={[styles.photoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+          <Image source={primaryPhoto} style={styles.heroPhoto} />
         </View>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.photoCard}>
-            <Image source={primaryPhoto} style={styles.heroPhoto} />
-          </View>
+        <View style={styles.identityBlock}>
+          <Typography variant="h2" style={[styles.nameText, { color: theme.colors.text }]}>
+            {age ? `${name}, ${age}` : name}
+          </Typography>
+        </View>
 
-          <View style={styles.identityBlock}>
-            <Typography variant="h2" style={styles.nameText}>
-              {age ? `${name}, ${age}` : name}
-            </Typography>
-          </View>
-
-          <View style={styles.sectionCard}>
-            <Typography variant="bodyStrong" style={styles.sectionTitle}>
-              About me
-            </Typography>
-            <View style={styles.chipRow}>
-              {age ? <View style={styles.chip}><Typography variant="small" style={styles.chipText}>{age}</Typography></View> : null}
-              <View style={styles.chip}>
-                <Typography variant="small" style={styles.chipText}>
-                  {isVerified ? 'Verified' : 'Member'}
+        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+          <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            About me
+          </Typography>
+          <View style={styles.chipRow}>
+            {age ? (
+              <View style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+                <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+                  {age}
                 </Typography>
               </View>
+            ) : null}
+            <View style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+              <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+                {isVerified ? 'Verified' : 'Member'}
+              </Typography>
             </View>
           </View>
+        </View>
 
-          <View style={styles.sectionCard}>
-            <Typography variant="bodyStrong" style={styles.sectionTitle}>
-              I'm looking for
+        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+          <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            I'm looking for
+          </Typography>
+          <View style={styles.chipRow}>
+            {lookingFor.map((item) => (
+              <View key={item} style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+                <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+                  {item}
+                </Typography>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        {highlights.length > 0 ? (
+          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              My interests
             </Typography>
             <View style={styles.chipRow}>
-              {lookingFor.map((item) => (
-                <View key={item} style={styles.chip}>
-                  <Typography variant="small" style={styles.chipText}>
-                    {item}
+              {highlights.slice(0, 8).map((item) => (
+                <View key={`interest-${item}`} style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+                  <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+                    {normalizeLabel(item)}
                   </Typography>
                 </View>
               ))}
             </View>
           </View>
+        ) : null}
 
-          {highlights.length > 0 ? (
-            <View style={styles.sectionCard}>
-              <Typography variant="bodyStrong" style={styles.sectionTitle}>
-                My interests
+        {personalitySummary ? (
+          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <View style={styles.sectionHeaderRow}>
+              <Feather name="star" size={16} color={theme.colors.neonGreen} />
+              <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+                Personality snapshot
               </Typography>
+            </View>
+            <Typography variant="body" style={{ color: theme.colors.textDark, lineHeight: 22 }}>
+              {personalitySummary}
+            </Typography>
+            {personalityTopTraits.length > 0 ? (
               <View style={styles.chipRow}>
-                {highlights.slice(0, 8).map((item) => (
-                  <View key={item} style={styles.chip}>
-                    <Typography variant="small" style={styles.chipText}>
-                      {normalizeLabel(item)}
+                {personalityTopTraits.slice(0, 6).map((trait) => (
+                  <View
+                    key={`personality-trait-${trait}`}
+                    style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}
+                  >
+                    <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+                      {normalizeLabel(trait)}
                     </Typography>
                   </View>
                 ))}
               </View>
-            </View>
-          ) : null}
+            ) : null}
+          </View>
+        ) : null}
 
-          {promptCards.map((card, index) => (
-            <View key={`${card.prompt}-${index}`} style={styles.promptCard}>
-              <Image source={cardPhotos[index % cardPhotos.length]} style={styles.promptImage} />
-              <View style={styles.promptTextBlock}>
-                <Typography variant="bodyStrong" style={styles.promptTitle}>
-                  {card.prompt}
-                </Typography>
-                <Typography variant="body" style={styles.promptAnswer}>
-                  {card.answer}
-                </Typography>
-              </View>
-              <TouchableOpacity
-                style={styles.complimentRow}
-                activeOpacity={0.8}
-                disabled={!onSendCompliment || sendingComplimentKey === `${card.prompt}-${card.answer}`}
-                onPress={() => { void handleCompliment(card.prompt, card.answer); }}
-              >
-                <Feather name="message-circle" size={14} color="#4D4D4D" />
-                <Typography variant="small" style={styles.complimentText}>
-                  {sendingComplimentKey === `${card.prompt}-${card.answer}` ? 'Sending...' : 'Compliment'}
-                </Typography>
-              </TouchableOpacity>
-            </View>
-          ))}
-
-          <View style={styles.sectionCard}>
-            <Typography variant="bodyStrong" style={styles.sectionTitle}>
-              My location
-            </Typography>
-            <View style={styles.locationRow}>
-              <Feather name="map-pin" size={14} color="#4D4D4D" />
-              <Typography variant="small" style={styles.locationText}>
-                {city}
+        {promptCards.map((card, index) => (
+          <View key={`${card.prompt}-${index}`} style={[styles.promptCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <Image source={cardPhotos[index % cardPhotos.length]} style={styles.promptImage} />
+            <View style={styles.promptTextBlock}>
+              <Typography variant="bodyStrong" style={[styles.promptTitle, { color: theme.colors.text }]}>
+                {card.prompt}
+              </Typography>
+              <Typography variant="body" style={[styles.promptAnswer, { color: theme.colors.textDark }]}>
+                {card.answer}
               </Typography>
             </View>
+            <TouchableOpacity
+              style={[styles.complimentRow, { borderTopColor: theme.colors.border }]}
+              activeOpacity={0.8}
+              disabled={!onSendCompliment || sendingComplimentKey === `${card.prompt}-${card.answer}`}
+              onPress={() => { void handleCompliment(card.prompt, card.answer); }}
+            >
+              <Feather name="message-circle" size={14} color={theme.colors.muted} />
+              <Typography variant="small" style={[styles.complimentText, { color: theme.colors.muted }]}>
+                {sendingComplimentKey === `${card.prompt}-${card.answer}` ? 'Sending...' : 'Compliment'}
+              </Typography>
+            </TouchableOpacity>
           </View>
+        ))}
 
+        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+          <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            My location
+          </Typography>
+          <View style={styles.locationRow}>
+            <Feather name="map-pin" size={14} color={theme.colors.muted} />
+            <Typography variant="small" style={[styles.locationText, { color: theme.colors.textDark }]}>
+              {city}
+            </Typography>
+          </View>
+        </View>
+
+        {!hideActionButtons ? (
           <View style={styles.actionsWrap}>
             <View style={styles.actionButtons}>
-              <TouchableOpacity onPress={onSwipeLeft} style={styles.roundButton} activeOpacity={0.8}>
-                <Feather name="x" size={24} color="#222222" />
+              <TouchableOpacity
+                onPress={onSwipeLeft}
+                style={[styles.circleActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+                activeOpacity={0.8}
+              >
+                <Feather name="x" size={36} color={theme.colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.starButton} activeOpacity={0.8} onPress={onSuperlike}>
-                <Feather name="star" size={22} color="#111111" />
+              <TouchableOpacity
+                style={[styles.circleActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+                activeOpacity={0.8}
+                onPress={handleQuickMessage}
+                disabled={!onSendCompliment || Boolean(sendingComplimentKey)}
+              >
+                <Feather name="message-circle" size={30} color={theme.colors.text} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={onSwipeRight} style={styles.roundButton} activeOpacity={0.8}>
-                <Feather name="heart" size={22} color="#222222" />
+              <TouchableOpacity
+                style={[styles.centerFlagButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
+                activeOpacity={0.8}
+                onPress={onSuperlike}
+              >
+                <PixelFlag size={52} color={theme.colors.deepBlack} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onSwipeRight}
+                style={[styles.circleActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+                activeOpacity={0.8}
+              >
+                <Feather name="heart" size={34} color={theme.colors.neonGreen} />
               </TouchableOpacity>
             </View>
-            <TouchableOpacity activeOpacity={0.75} onPress={() => onBlock?.(match.id, name)}>
-              <Typography variant="small" style={styles.blockText}>Block</Typography>
-            </TouchableOpacity>
-            <TouchableOpacity activeOpacity={0.75} onPress={() => onReport?.(match.id, name)}>
-              <Typography variant="small" style={styles.reportText}>Report</Typography>
-            </TouchableOpacity>
           </View>
-        </ScrollView>
-      </View>
+        ) : null}
+      </ScrollView>
+    </View>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={onClose}
+    >
+      {content}
     </Modal>
   );
 };
@@ -262,7 +432,6 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F2F2F2',
   },
   header: {
     paddingTop: Platform.OS === 'ios' ? 52 : (StatusBar.currentHeight || 0) + 8,
@@ -270,6 +439,7 @@ const styles = StyleSheet.create({
     paddingBottom: 6,
     flexDirection: 'row',
     alignItems: 'center',
+    borderBottomWidth: 1,
   },
   headerIconButton: {
     width: 38,
@@ -277,44 +447,48 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E5E5E5',
+  },
+  headerIconSpacer: {
+    width: 38,
+    height: 38,
+  },
+  scrollView: {
+    flex: 1,
   },
   scrollContent: {
     paddingHorizontal: 8,
-    paddingBottom: 20,
+    paddingBottom: Platform.OS === 'ios' ? 150 : 126,
+    paddingTop: 8,
+    flexGrow: 1,
     gap: 8,
   },
   photoCard: {
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#DDDDDD',
-    backgroundColor: '#FFFFFF',
   },
   heroPhoto: {
     width: '100%',
-    height: 455,
-    backgroundColor: '#DDDDDD',
+    height: 500,
   },
   identityBlock: {
-    paddingHorizontal: 6,
-    paddingTop: 0,
+    paddingHorizontal: 8,
   },
   nameText: {
-    color: '#111111',
+    lineHeight: 32,
   },
   sectionCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E2E2',
-    backgroundColor: '#FFFFFF',
-    padding: 10,
+    padding: 12,
     gap: 8,
   },
-  sectionTitle: {
-    color: '#111111',
+  sectionTitle: {},
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   chipRow: {
     flexDirection: 'row',
@@ -323,94 +497,70 @@ const styles = StyleSheet.create({
   },
   chip: {
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    backgroundColor: '#F8F8F8',
     borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
-  chipText: {
-    color: '#222222',
-  },
+  chipText: {},
   promptCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#E2E2E2',
-    backgroundColor: '#FFFFFF',
     overflow: 'hidden',
   },
   promptImage: {
     width: '100%',
     height: 300,
-    backgroundColor: '#DDDDDD',
   },
   promptTextBlock: {
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    gap: 2,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    gap: 4,
   },
-  promptTitle: {
-    color: '#111111',
-  },
+  promptTitle: {},
   promptAnswer: {
-    color: '#222222',
     lineHeight: 22,
   },
   complimentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 10,
+    borderTopWidth: 1,
   },
-  complimentText: {
-    color: '#4D4D4D',
-  },
+  complimentText: {},
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
-  locationText: {
-    color: '#222222',
-  },
+  locationText: {},
   actionsWrap: {
-    marginTop: 4,
+    marginTop: 8,
     alignItems: 'center',
-    paddingTop: 4,
-    paddingBottom: 6,
-    gap: 8,
+    paddingTop: 6,
+    paddingBottom: 12,
   },
   actionButtons: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 20,
+    gap: 14,
   },
-  roundButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+  circleActionButton: {
+    width: 84,
+    height: 84,
+    borderRadius: 42,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#D9D9D9',
   },
-  starButton: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
+  centerFlagButton: {
+    width: 116,
+    height: 116,
+    borderRadius: 58,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F5D74F',
     borderWidth: 1,
-    borderColor: '#E5C53D',
-  },
-  blockText: {
-    color: '#1F1F1F',
-  },
-  reportText: {
-    color: '#A13636',
   },
 });
