@@ -286,20 +286,20 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
   const renderSummaryBar = () => {
     const r = rev(revenue);
     return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.summaryBar}>
+    <View style={styles.summaryRow}>
       {[
         { label: 'Revenue', value: fmtUsd(r.total), color: theme.colors.neonGreen },
-        { label: 'Paying Users', value: fmt(r.activePro + r.activePremium), color: '#3B82F6' },
+        { label: 'Paying', value: fmt(r.activePro + r.activePremium), color: '#3B82F6' },
         { label: 'ARPU', value: fmtUsd(r.arpu), color: '#A78BFA' },
         { label: 'Users', value: fmt(stats?.total_users || 0), color: '#F59E0B' },
         { label: 'Matches', value: fmt(stats?.total_matches || 0), color: '#EF4444' },
       ].map((item) => (
         <View key={item.label} style={[styles.summaryPill, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-          <Typography variant="tiny" style={{ color: item.color }}>{item.label}</Typography>
-          <Typography variant="h2" style={{ color: theme.colors.text }}>{item.value}</Typography>
+          <Typography variant="tiny" style={{ color: item.color, fontSize: 9 }}>{item.label}</Typography>
+          <Typography variant="bodyStrong" style={{ color: theme.colors.text, fontSize: 13 }}>{item.value}</Typography>
         </View>
       ))}
-    </ScrollView>
+    </View>
   );};
 
   const renderRevenueTab = () => {
@@ -641,7 +641,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
       {renderSummaryBar()}
 
       {/* Tab bar */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBar}>
+      <View style={styles.tabBar}>
         {TAB_ITEMS.map((tab) => (
           <Pressable
             key={tab.id}
@@ -655,7 +655,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
           >
             <Feather
               name={tab.icon as any}
-              size={14}
+              size={12}
               color={activeTab === tab.id ? '#000' : theme.colors.muted}
             />
             <Typography
@@ -663,13 +663,14 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
               style={{
                 color: activeTab === tab.id ? '#000' : theme.colors.text,
                 fontFamily: 'RedHatDisplay_600SemiBold',
+                fontSize: 10,
               }}
             >
               {tab.label}
             </Typography>
           </Pressable>
         ))}
-      </ScrollView>
+      </View>
 
       {/* Content */}
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -767,31 +768,34 @@ const barStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  summaryBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    gap: 8,
+  summaryRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    gap: 6,
   },
   summaryPill: {
+    flex: 1,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
     alignItems: 'center',
-    minWidth: 90,
   },
   tabBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     gap: 6,
   },
   tabPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
   },
   content: {
     paddingHorizontal: 16,

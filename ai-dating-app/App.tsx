@@ -801,7 +801,7 @@ const AppShell: React.FC = () => {
                 top: 0,
                 left: 0,
                 right: 0,
-                bottom: 0,
+                bottom: 60,
                 zIndex: 10,
               }}>
                 {isProfilePaused ? (
@@ -853,7 +853,7 @@ const AppShell: React.FC = () => {
               </View>
             )}
             {!showMessages && !showProfileModal && (
-              <View style={{ zIndex: 20 }}>
+              <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 20 }}>
                 <BottomNav
                   activeTab={activeTab}
                   onTabChange={handleTabChange}
