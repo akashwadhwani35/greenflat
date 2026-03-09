@@ -35,15 +35,19 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
     googleWebClientId || googleAndroidClientId || googleIosClientId || googleClientId
   );
 
-  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest({
-    clientId: googleClientId,
-    webClientId: googleWebClientId,
-    androidClientId: googleAndroidClientId,
-    iosClientId: googleIosClientId,
-    responseType: 'id_token',
-    selectAccount: true,
-    scopes: ['openid', 'profile', 'email'],
-  });
+  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest(
+    googleClientConfigured
+      ? {
+          clientId: googleClientId,
+          webClientId: googleWebClientId,
+          androidClientId: googleAndroidClientId,
+          iosClientId: googleIosClientId,
+          responseType: 'id_token',
+          selectAccount: true,
+          scopes: ['openid', 'profile', 'email'],
+        }
+      : { clientId: '_disabled_' },
+  );
 
   const signInWithGoogleToken = async (idToken: string) => {
     if (!apiBaseUrl || !onGoogleAuth) return;

@@ -33,15 +33,19 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
     googleWebClientId || googleAndroidClientId || googleIosClientId || googleClientId
   );
 
-  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest({
-    clientId: googleClientId,
-    webClientId: googleWebClientId,
-    androidClientId: googleAndroidClientId,
-    iosClientId: googleIosClientId,
-    responseType: 'id_token',
-    selectAccount: true,
-    scopes: ['openid', 'profile', 'email'],
-  });
+  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest(
+    googleClientConfigured
+      ? {
+          clientId: googleClientId,
+          webClientId: googleWebClientId,
+          androidClientId: googleAndroidClientId,
+          iosClientId: googleIosClientId,
+          responseType: 'id_token',
+          selectAccount: true,
+          scopes: ['openid', 'profile', 'email'],
+        }
+      : { clientId: '_disabled_' },
+  );
 
   const canSubmit = useMemo(() => email.trim().length > 3 && password.length >= 3, [email, password]);
 
