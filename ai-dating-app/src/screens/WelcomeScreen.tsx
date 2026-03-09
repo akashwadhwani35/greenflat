@@ -1,8 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, View, TouchableOpacity, StatusBar, Platform, Image, Text, Dimensions, Modal, ScrollView } from 'react-native';
+import { ActivityIndicator, Alert, Animated, StyleSheet, View, TouchableOpacity, StatusBar, Platform, Image, Text, Dimensions, Modal, ScrollView } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../theme/ThemeProvider';
 import { Typography } from '../components/Typography';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
+
+WebBrowser.maybeCompleteAuthSession();
 
 const glassLogo = require('../../assets/glass-logo.png');
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -11,13 +16,92 @@ const LOGO_SIZE = Math.min(SCREEN_WIDTH * 1.75, 740);
 type WelcomeScreenProps = {
   onStart: () => void;
   onLogin?: () => void;
+  onGoogleAuth?: (payload: { token: string; user: { id: number; name: string; is_admin?: boolean }; isNewUser?: boolean }) => void;
+  apiBaseUrl?: string;
 };
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, onGoogleAuth, apiBaseUrl }) => {
   const theme = useTheme();
   const logoAnim = useRef(new Animated.Value(0)).current;
   const contentAnim = useRef(new Animated.Value(0)).current;
   const [legalModal, setLegalModal] = useState<null | 'terms' | 'privacy'>(null);
+  const [googleLoading, setGoogleLoading] = useState(false);
+
+  const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+  const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
+  const googleIosClientId = process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID;
+  const googleClientId = process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || process.env.EXPO_PUBLIC_GOOGLE_EXPO_CLIENT_ID;
+  const googleClientConfigured = Boolean(
+    googleWebClientId || googleAndroidClientId || googleIosClientId || googleClientId
+  );
+
+  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest({
+    clientId: googleClientId,
+    webClientId: googleWebClientId,
+    androidClientId: googleAndroidClientId,
+    iosClientId: googleIosClientId,
+    responseType: 'id_token',
+    selectAccount: true,
+    scopes: ['openid', 'profile', 'email'],
+  });
+
+  const signInWithGoogleToken = async (idToken: string) => {
+    if (!apiBaseUrl || !onGoogleAuth) return;
+    setGoogleLoading(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_token: idToken }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || 'Google sign-in failed');
+      if (!data.token || !data.user?.id) throw new Error('Google sign-in response missing token');
+      onGoogleAuth({
+        token: data.token,
+        user: { id: data.user.id, name: data.user.name || 'friend', is_admin: data.user.is_admin },
+        isNewUser: data.is_new_user === true,
+      });
+    } catch (error: any) {
+      Alert.alert('Google sign-in failed', error.message || 'Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!googleResponse) return;
+    if (googleResponse.type !== 'success') {
+      if (googleResponse.type === 'error') {
+        Alert.alert('Google sign-in failed', 'Unable to authorize with Google. Please try again.');
+      }
+      return;
+    }
+    const responseParams = googleResponse.params as Record<string, string> | undefined;
+    const idToken = googleResponse.authentication?.idToken || responseParams?.id_token;
+    if (!idToken) {
+      Alert.alert('Google sign-in failed', 'Google did not return an ID token.');
+      return;
+    }
+    void signInWithGoogleToken(idToken);
+  }, [googleResponse]);
+
+  const startGoogleAuth = async () => {
+    if (googleLoading) return;
+    if (!googleClientConfigured || !onGoogleAuth) {
+      Alert.alert('Google sign-in unavailable', 'Google client IDs are not configured.');
+      return;
+    }
+    if (!googleRequest) {
+      Alert.alert('Google sign-in unavailable', 'Google auth request is not ready yet. Please try again.');
+      return;
+    }
+    try {
+      await promptGoogleAuth();
+    } catch (error: any) {
+      Alert.alert('Google sign-in failed', error?.message || 'Please try again.');
+    }
+  };
 
   useEffect(() => {
     Animated.sequence([
@@ -109,6 +193,17 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin }
           >
             <Text style={styles.primaryButtonText}>Create account</Text>
           </TouchableOpacity>
+
+          {/* Google Sign In */}
+          {googleClientConfigured && onGoogleAuth ? (
+            <GoogleSignInButton
+              label="Sign up with Google"
+              onPress={startGoogleAuth}
+              fullWidth
+              loading={googleLoading}
+              disabled={googleLoading}
+            />
+          ) : null}
 
           {/* Login Link */}
           {onLogin ? (

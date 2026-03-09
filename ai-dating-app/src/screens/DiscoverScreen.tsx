@@ -40,6 +40,7 @@ type DiscoverScreenProps = {
   preferredTab?: 'onGrid' | 'offGrid';
   pendingAISearchCharge?: boolean;
   onConsumeAISearchCharge?: () => void;
+  likedIds?: Set<number>;
 };
 
 const fallbackPhotos = [
@@ -97,6 +98,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   preferredTab,
   pendingAISearchCharge = false,
   onConsumeAISearchCharge,
+  likedIds,
 }) => {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState<'onGrid' | 'offGrid'>('onGrid');
@@ -122,7 +124,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         body: JSON.stringify({
           is_on_grid: false,
           exclude_ids: viewedProfileIds, // Exclude already seen profiles
-          limit: 10,
+          limit: 4,
         }),
       });
 
@@ -327,6 +329,15 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
             style={styles.cardGradient}
           />
 
+          {/* Liked overlay */}
+          {likedIds?.has(match.id) && (
+            <View style={styles.likedOverlay}>
+              <View style={styles.likedHeartContainer}>
+                <Feather name="heart" size={56} color="#ADFF1A" />
+              </View>
+            </View>
+          )}
+
           {/* Top badges row */}
           <View style={styles.topBadgesRow}>
             {/* Show match percentage only on AI Match (on-grid) */}
@@ -502,6 +513,23 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
               : 'Try adjusting your filters to find more profiles'}
           </Typography>
         </View>
+      ) : activeTab === 'offGrid' ? (
+        <View style={styles.offGridContainer}>
+          <View style={[styles.grid, styles.offGridGrid]}>
+            {matches.slice(0, 4).map((match, index) => (
+              <MatchCardItem key={`${match.id}-${index}`} match={match} index={index} />
+            ))}
+          </View>
+          <TouchableOpacity
+            style={[styles.dropMoreButton, { backgroundColor: theme.colors.neonGreen }]}
+            onPress={fetchNewOffGridProfiles}
+            activeOpacity={0.85}
+          >
+            <Typography variant="h2" style={{ color: theme.colors.deepBlack, fontFamily: 'RedHatDisplay_700Bold' }}>
+              Drop more
+            </Typography>
+          </TouchableOpacity>
+        </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -648,7 +676,7 @@ const styles = StyleSheet.create({
     height: CARD_WIDTH * 1.5,
     borderRadius: 20,
     overflow: 'hidden',
-    backgroundColor: '#2A2A2A',
+    backgroundColor: '#1B2920',
     position: 'relative',
     marginBottom: 16,
     shadowColor: '#000',
@@ -667,7 +695,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '65%',
+    height: '35%',
   },
   topBadgesRow: {
     position: 'absolute',
@@ -732,12 +760,12 @@ const styles = StyleSheet.create({
     marginBottom: 3,
   },
   cardName: {
-    fontSize: 19,
+    fontSize: 15,
     fontFamily: 'RedHatDisplay_700Bold',
-    letterSpacing: -0.3,
+    letterSpacing: -0.2,
   },
   cardAge: {
-    fontSize: 17,
+    fontSize: 14,
     fontFamily: 'RedHatDisplay_500Medium',
   },
   cardLocationRow: {
@@ -749,6 +777,37 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 13,
     lineHeight: 16,
+  },
+  likedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5,
+    borderRadius: 20,
+  },
+  likedHeartContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(173, 255, 26, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  offGridContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+    justifyContent: 'space-between',
+  },
+  offGridGrid: {
+    paddingBottom: 0,
+  },
+  dropMoreButton: {
+    alignSelf: 'center',
+    paddingHorizontal: 40,
+    paddingVertical: 16,
+    borderRadius: 999,
+    marginBottom: Platform.OS === 'ios' ? 100 : 80,
   },
   loadingContainer: {
     flex: 1,

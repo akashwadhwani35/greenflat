@@ -11,6 +11,7 @@ export type SavedSession = {
 
 const SESSION_KEY = 'greenflag.session.v1';
 const FIRST_SEARCH_DONE_PREFIX = 'greenflag.firstSearchDone.v1.';
+const WELCOME_SHOWN_PREFIX = 'greenflag.welcomeShown.v1.';
 
 export const loadSession = async (): Promise<SavedSession | null> => {
   try {
@@ -43,4 +44,17 @@ export const loadFirstSearchDone = async (userId: number): Promise<boolean> => {
 
 export const saveFirstSearchDone = async (userId: number): Promise<void> => {
   await AsyncStorage.setItem(`${FIRST_SEARCH_DONE_PREFIX}${userId}`, '1');
+};
+
+export const hasWelcomeBeenShown = async (userId: number): Promise<boolean> => {
+  try {
+    const value = await AsyncStorage.getItem(`${WELCOME_SHOWN_PREFIX}${userId}`);
+    return value === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const markWelcomeShown = async (userId: number): Promise<void> => {
+  await AsyncStorage.setItem(`${WELCOME_SHOWN_PREFIX}${userId}`, '1');
 };

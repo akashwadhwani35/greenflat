@@ -51,6 +51,8 @@ type ProfileDetailCandidate = MatchCandidate & {
   relationship_goal?: string;
   interests?: string[];
   photos?: string[];
+  personality_summary?: string;
+  top_traits?: string[];
 };
 
 type MediaUploadProvider = 'cloudinary' | 'local' | 'none';
@@ -132,6 +134,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       photos: photos
         .map((photo: any) => photo?.photo_url)
         .filter((url: unknown): url is string => typeof url === 'string' && url.length > 0),
+      personality_summary: typeof user.personality_summary === 'string' ? user.personality_summary : undefined,
+      top_traits: Array.isArray(user.top_traits) ? user.top_traits : undefined,
     };
   })();
 

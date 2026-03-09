@@ -317,7 +317,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
         p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
         p.smoker, p.drinker, p.relationship_goal,
-        pr.personality_traits,
+        pr.personality_traits, pr.personality_summary, pr.compatibility_tips, pr.top_traits,
         privacy.hide_distance, privacy.hide_city, privacy.incognito_mode, privacy.show_online_status,
         uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
         uap.dealbreakers, uap.growth_journey, uap.persona_embedding,

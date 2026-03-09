@@ -6,6 +6,7 @@ import * as WebBrowser from 'expo-web-browser';
 import { Typography } from '../components/Typography';
 import { UnderlineInput } from '../components/UnderlineInput';
 import { Button } from '../components/Button';
+import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { useTheme } from '../theme/ThemeProvider';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -13,7 +14,7 @@ WebBrowser.maybeCompleteAuthSession();
 type Props = {
   apiBaseUrl: string;
   onBack: () => void;
-  onSuccess: (payload: { token: string; user: { id: number; name: string; is_admin?: boolean } }) => void;
+  onSuccess: (payload: { token: string; user: { id: number; name: string; is_admin?: boolean }; isNewUser?: boolean }) => void;
   onForgotPassword?: () => void;
 };
 
@@ -58,6 +59,7 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
       onSuccess({
         token: data.token,
         user: { id: data.user.id, name: data.user.name || 'friend', is_admin: data.user.is_admin },
+        isNewUser: data.is_new_user === true,
       });
     } catch (error: any) {
       Alert.alert('Google sign-in failed', error.message || 'Please try again.');
@@ -155,15 +157,21 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
               autoCapitalize="none"
             />
             <Button label="Sign in" onPress={submit} fullWidth disabled={!canSubmit || loading} loading={loading} />
-            <Button
-              label="Continue with Google"
-              variant="secondary"
-              onPress={startGoogleAuth}
-              fullWidth
-              disabled={loading || googleLoading}
-              loading={googleLoading}
-            />
           </View>
+
+          <View style={styles.dividerRow}>
+            <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
+            <Typography variant="small" muted>or</Typography>
+            <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
+          </View>
+
+          <GoogleSignInButton
+            label="Continue with Google"
+            onPress={startGoogleAuth}
+            fullWidth
+            disabled={loading || googleLoading}
+            loading={googleLoading}
+          />
 
           {onForgotPassword ? (
             <TouchableOpacity onPress={onForgotPassword} style={{ alignSelf: 'center', marginTop: 14 }}>
@@ -209,5 +217,15 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     padding: 16,
     gap: 14,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginVertical: 16,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
   },
 });

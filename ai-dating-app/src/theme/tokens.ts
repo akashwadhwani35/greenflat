@@ -3,9 +3,9 @@ export const colorTokens = {
   neonGreen: '#ADFF1A',        // Grass green - primary CTA color
   deepBlack: '#101D13',        // Dark green-tinted black (new background)
   darkBlack: '#0A0A0A',        // Slightly lighter black
-  charcoal: '#1A1A1A',         // Charcoal for cards
+  charcoal: '#1B2920',         // Dark green for cards
   darkGray: '#212121',         // Dark gray
-  mediumGray: '#2A2A2A',       // Medium gray for elevated cards
+  mediumGray: '#243830',       // Slightly lighter green for elevated cards
   lightGray: '#3A3A3A',        // Light gray for borders
   peach: '#FDE2C9',            // Soft peach accent
   forestGreen: '#418B01',      // Deep green accent
@@ -22,13 +22,13 @@ export const colorTokens = {
   accentTint: 'rgba(253, 226, 201, 0.35)',
   info: '#ADFF1A',             // Neon green
   background: '#101D13',       // Dark green-tinted black
-  surface: '#1A1A1A',          // Charcoal for cards
-  surfaceLight: '#2A2A2A',     // Medium gray for elevated cards
+  surface: '#1B2920',          // Dark green for cards
+  surfaceLight: '#243830',     // Slightly lighter green for elevated cards
   text: '#FFFFFF',             // White text
   textDark: '#E0E0E0',         // Slightly dimmed white
   muted: '#888888',            // Muted gray
   mutedLight: '#AAAAAA',       // Light muted
-  border: '#333333',           // Dark border
+  border: '#4D4D4D',           // Hairline border
   borderLight: '#444444',      // Lighter border
   error: '#FF6B6B',            // Bright error red
   pink: '#FF4D8A',             // Pink for hearts/likes

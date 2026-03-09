@@ -491,9 +491,9 @@ export const reorderPhoto = async (req: AuthRequest, res: Response) => {
 export const updateUserBasics = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
-    const { name, city, gender, date_of_birth } = req.body;
+    const { name, city, gender, date_of_birth, interested_in } = req.body;
 
-    if (!name && !city && !gender && !date_of_birth) {
+    if (!name && !city && !gender && !date_of_birth && !interested_in) {
       return res.status(400).json({ error: 'Nothing to update' });
     }
 
@@ -503,10 +503,11 @@ export const updateUserBasics = async (req: AuthRequest, res: Response) => {
            city = COALESCE($2, city),
            gender = COALESCE($3, gender),
            date_of_birth = COALESCE($4, date_of_birth),
+           interested_in = COALESCE($5, interested_in),
            updated_at = NOW()
-       WHERE id = $5
-       RETURNING id, name, city, gender, date_of_birth`,
-      [name || null, city || null, gender || null, date_of_birth || null, userId]
+       WHERE id = $6
+       RETURNING id, name, city, gender, date_of_birth, interested_in`,
+      [name || null, city || null, gender || null, date_of_birth || null, interested_in || null, userId]
     );
 
     res.json({ user: result.rows[0] });

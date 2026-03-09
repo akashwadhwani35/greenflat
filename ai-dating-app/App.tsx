@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput } from 'react-native';
+import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput, Modal, Image, Pressable } from 'react-native';
 import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisplay_600SemiBold, RedHatDisplay_700Bold } from '@expo-google-fonts/red-hat-display';
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
@@ -33,7 +33,10 @@ import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { ProfileOverviewScreen } from './src/screens/ProfileOverviewScreen';
 import { AISearchScreen } from './src/screens/AISearchScreen';
-import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession } from './src/utils/session';
+import { DeleteAccountScreen } from './src/screens/DeleteAccountScreen';
+import { SubscriptionScreen } from './src/screens/SubscriptionScreen';
+import { PausedBanner } from './src/components/PausedBanner';
+import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown } from './src/utils/session';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
 
@@ -57,7 +60,9 @@ type Overlay =
   | 'checkout'
   | 'profileOverview'
   | 'profile'
-  | 'admin';
+  | 'admin'
+  | 'deleteAccount'
+  | 'subscription';
 
 type OnboardingResult = {
   token: string;
@@ -78,6 +83,8 @@ const AppShell: React.FC = () => {
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [matchedUser, setMatchedUser] = useState<{ matchId: number; userId: number; name: string; photo?: string } | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
+  const [subscriptionTab, setSubscriptionTab] = useState<'pro' | 'premium'>('pro');
+  const [walletRefreshKey, setWalletRefreshKey] = useState(0);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({});
   const [activeTab, setActiveTab] = useState<TabId>('explore');
   const [preferredDiscoverTab, setPreferredDiscoverTab] = useState<'onGrid' | 'offGrid'>('onGrid');
@@ -85,10 +92,21 @@ const AppShell: React.FC = () => {
   const [pendingAISearchCharge, setPendingAISearchCharge] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [aiSearchKey, setAiSearchKey] = useState(0);
+  const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  const [likedProfileIds, setLikedProfileIds] = useState<Set<number>>(new Set());
+  const [isProfilePaused, setIsProfilePaused] = useState(false);
 
   const applyEntryPointForUser = async (id: number) => {
     const firstSearchDone = await loadFirstSearchDone(id);
     setHasCompletedFirstSearch(firstSearchDone);
+
+    // Show one-time welcome popup for new users
+    const welcomeShown = await hasWelcomeBeenShown(id);
+    if (!welcomeShown) {
+      setShowWelcomePopup(true);
+      void markWelcomeShown(id);
+    }
+
     if (firstSearchDone) {
       setOverlay(null);
       setActiveTab('explore');
@@ -132,6 +150,20 @@ const AppShell: React.FC = () => {
     bootstrap().catch(() => setBooting(false));
   }, []);
 
+  // Fetch paused (incognito) state
+  useEffect(() => {
+    if (!authToken) return;
+    fetch(`${API_BASE_URL}/privacy/settings`, {
+      headers: { Authorization: `Bearer ${authToken}` },
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.settings?.incognito_mode) setIsProfilePaused(true);
+        else setIsProfilePaused(false);
+      })
+      .catch(() => {});
+  }, [authToken]);
+
   const persistAuth = async (token: string, user: { id: number; name: string; is_admin?: boolean }) => {
     setAuthToken(token);
     setUserName(user.name || 'friend');
@@ -162,6 +194,25 @@ const AppShell: React.FC = () => {
     setActiveTab('explore');
     setPreferredDiscoverTab('onGrid');
     setStage('welcome');
+  };
+
+  const handleUnpause = async () => {
+    if (!authToken) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/privacy/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ incognito_mode: false }),
+      });
+      if (!response.ok) throw new Error('Failed to unpause');
+      setIsProfilePaused(false);
+      Alert.alert('Profile active', 'Your profile is now visible again.');
+    } catch {
+      Alert.alert('Error', 'Could not unpause your profile. Please try again.');
+    }
   };
 
   const handleOnboardingComplete = (payload: OnboardingResult & { userId?: number }) => {
@@ -221,6 +272,7 @@ const AppShell: React.FC = () => {
       }
 
       const data = await response.json();
+      setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
       if (data.is_match && data.match_id) {
         // Show match modal
         setMatchedUser({
@@ -270,6 +322,7 @@ const AppShell: React.FC = () => {
       }
 
       const data = await response.json();
+      setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
       if (data.is_match && data.match_id) {
         setMatchedUser({
           matchId: data.match_id,
@@ -465,9 +518,20 @@ const AppShell: React.FC = () => {
       case 'notifications':
         return <NotificationsScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'wallet':
-        return <WalletScreen {...overlayProps} onOpenCheckout={() => setOverlay('checkout')} token={authToken!} apiBaseUrl={API_BASE_URL} />;
-      case 'likes':
         return (
+          <WalletScreen
+            {...overlayProps}
+            key={walletRefreshKey}
+            onOpenCheckout={() => setOverlay('checkout')}
+            onOpenSubscription={(tab) => { setSubscriptionTab(tab); setOverlay('subscription'); }}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+          />
+        );
+      case 'likes':
+        return isProfilePaused ? (
+          <PausedBanner onUnpause={handleUnpause} />
+        ) : (
           <LikesInboxScreen
             {...overlayProps}
             token={authToken!}
@@ -540,13 +604,34 @@ const AppShell: React.FC = () => {
       case 'verification':
         return <VerificationScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'privacySafety':
-        return <PrivacySafetyScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
+        return <PrivacySafetyScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onAccountDeleted={logout} onOpenDeleteAccount={() => setOverlay('deleteAccount')} />;
+      case 'deleteAccount':
+        return (
+          <DeleteAccountScreen
+            onBack={() => setOverlay('privacySafety')}
+            onClose={() => setOverlay(null)}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onAccountDeleted={logout}
+            onAccountPaused={() => { setIsProfilePaused(true); setOverlay(null); }}
+          />
+        );
       case 'helpCenter':
         return <HelpCenterScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'terms':
         return <TermsScreen {...overlayProps} />;
       case 'checkout':
-        return <CheckoutScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onPurchased={() => setOverlay('wallet')} />;
+        return <CheckoutScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onPurchased={() => { setWalletRefreshKey((k) => k + 1); setOverlay('wallet'); }} />;
+      case 'subscription':
+        return (
+          <SubscriptionScreen
+            onClose={() => setOverlay('wallet')}
+            initialTab={subscriptionTab}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onPurchased={() => { setWalletRefreshKey((k) => k + 1); setOverlay('wallet'); }}
+          />
+        );
       case 'profileOverview':
         return (
           <ProfileOverviewScreen
@@ -588,17 +673,36 @@ const AppShell: React.FC = () => {
     }
     switch (stage) {
       case 'welcome':
-        return <WelcomeScreen onStart={() => setStage('onboarding')} onLogin={() => setStage('login')} />;
+        return (
+          <WelcomeScreen
+            onStart={() => setStage('onboarding')}
+            onLogin={() => setStage('login')}
+            apiBaseUrl={API_BASE_URL}
+            onGoogleAuth={async ({ token, user, isNewUser }) => {
+              if (user.is_admin) setIsAdmin(true);
+              await persistAuth(token, user);
+              if (isNewUser) {
+                setStage('onboarding');
+              } else {
+                setStage('matchboard');
+              }
+            }}
+          />
+        );
       case 'login':
         return (
           <LoginScreen
             apiBaseUrl={API_BASE_URL}
             onBack={() => setStage('welcome')}
             onForgotPassword={() => setStage('forgotPassword')}
-            onSuccess={async ({ token, user }) => {
+            onSuccess={async ({ token, user, isNewUser }) => {
               if (user.is_admin) setIsAdmin(true);
               await persistAuth(token, user);
-              setStage('matchboard');
+              if (isNewUser) {
+                setStage('onboarding');
+              } else {
+                setStage('matchboard');
+              }
             }}
           />
         );
@@ -610,7 +714,7 @@ const AppShell: React.FC = () => {
           />
         );
       case 'onboarding':
-        return <OnboardingScreen onComplete={handleOnboardingComplete} onBack={() => setStage('welcome')} apiBaseUrl={API_BASE_URL} />;
+        return <OnboardingScreen onComplete={handleOnboardingComplete} onBack={() => setStage('welcome')} apiBaseUrl={API_BASE_URL} existingToken={authToken} existingUserId={userId} />;
       case 'postOnboarding':
         return <PostOnboardingScreen onComplete={handlePostOnboardingComplete} />;
       case 'matchboard':
@@ -621,23 +725,28 @@ const AppShell: React.FC = () => {
           renderOverlay()
         ) : (
           <>
-            <ExploreScreen
-              token={authToken}
-              name={userName || 'friend'}
-              apiBaseUrl={API_BASE_URL}
-              onCardPress={handleCardPress}
-              onOpenSettings={() => setOverlay('settings')}
-              onOpenNotifications={() => setOverlay('notifications')}
-              onOpenWallet={() => setOverlay('wallet')}
-              onOpenLikesInbox={() => setOverlay('likes')}
-              onOpenMatches={() => setOverlay('matches')}
-              onOpenConversations={() => setOverlay('conversations')}
-              onOpenAdvancedSearch={() => setOverlay('advancedSearch')}
-              filters={advancedFilters}
-              preferredTab={preferredDiscoverTab}
-              pendingAISearchCharge={pendingAISearchCharge}
-              onConsumeAISearchCharge={() => setPendingAISearchCharge(false)}
-            />
+            {isProfilePaused ? (
+              <PausedBanner onUnpause={handleUnpause} />
+            ) : (
+              <ExploreScreen
+                token={authToken}
+                name={userName || 'friend'}
+                apiBaseUrl={API_BASE_URL}
+                onCardPress={handleCardPress}
+                onOpenSettings={() => setOverlay('settings')}
+                onOpenNotifications={() => setOverlay('notifications')}
+                onOpenWallet={() => setOverlay('wallet')}
+                onOpenLikesInbox={() => setOverlay('likes')}
+                onOpenMatches={() => setOverlay('matches')}
+                onOpenConversations={() => setOverlay('conversations')}
+                onOpenAdvancedSearch={() => setOverlay('advancedSearch')}
+                filters={advancedFilters}
+                preferredTab={preferredDiscoverTab}
+                pendingAISearchCharge={pendingAISearchCharge}
+                onConsumeAISearchCharge={() => setPendingAISearchCharge(false)}
+                likedIds={likedProfileIds}
+              />
+            )}
             <ProfileDetailScreen
               match={selectedMatch}
               visible={showProfileModal}
@@ -693,8 +802,11 @@ const AppShell: React.FC = () => {
                 left: 0,
                 right: 0,
                 bottom: 0,
-                zIndex: 50,
+                zIndex: 10,
               }}>
+                {isProfilePaused ? (
+                  <PausedBanner onUnpause={handleUnpause} />
+                ) : (
                 <AISearchScreen
                   key={aiSearchKey}
                   onBack={() => {
@@ -719,6 +831,7 @@ const AppShell: React.FC = () => {
                     relationshipGoal: 'a long-term relationship',
                   }}
                 />
+                )}
               </View>
             )}
             {/* Messages Screen - Full screen overlay */}
@@ -739,13 +852,15 @@ const AppShell: React.FC = () => {
                 />
               </View>
             )}
-            {!showMessages && overlay !== 'aiSearch' && !showProfileModal && (
-              <BottomNav
-                activeTab={activeTab}
-                onTabChange={handleTabChange}
-                likesCount={0}
-                messagesCount={0}
-              />
+            {!showMessages && !showProfileModal && (
+              <View style={{ zIndex: 20 }}>
+                <BottomNav
+                  activeTab={activeTab}
+                  onTabChange={handleTabChange}
+                  likesCount={0}
+                  messagesCount={0}
+                />
+              </View>
             )}
           </View>
         );
@@ -757,6 +872,26 @@ const AppShell: React.FC = () => {
   return (
     <View style={styles.container}>
       {renderStage()}
+      <Modal visible={showWelcomePopup} transparent animationType="fade" onRequestClose={() => setShowWelcomePopup(false)}>
+        <View style={styles.welcomeBackdrop}>
+          <View style={[styles.welcomeCard, { backgroundColor: theme.colors.surface }]}>
+            <Pressable style={styles.welcomeClose} onPress={() => setShowWelcomePopup(false)}>
+              <Text style={{ color: theme.colors.muted, fontSize: 22 }}>✕</Text>
+            </Pressable>
+            <Image source={require('./assets/green-hand.png')} style={styles.welcomeHand} resizeMode="contain" />
+            <Text style={[styles.welcomeTitle, { color: theme.colors.text }]}>Welcome to GreenFlag.</Text>
+            <Text style={[styles.welcomeBody, { color: theme.colors.muted }]}>
+              We're new, growing fast, and getting better daily. Hang tight, your Greenflag is on the way.
+            </Text>
+            <Pressable
+              style={[styles.welcomeButton, { backgroundColor: theme.colors.neonGreen }]}
+              onPress={() => setShowWelcomePopup(false)}
+            >
+              <Text style={styles.welcomeButtonText}>Let's gooo</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -803,11 +938,63 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    maxWidth: 480,
+    width: '100%',
+    alignSelf: 'center',
   },
   loader: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#101D13',
+  },
+  welcomeBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  welcomeCard: {
+    borderRadius: 24,
+    paddingHorizontal: 28,
+    paddingTop: 16,
+    paddingBottom: 28,
+    alignItems: 'center',
+  },
+  welcomeClose: {
+    alignSelf: 'flex-end',
+    padding: 4,
+  },
+  welcomeHand: {
+    width: 100,
+    height: 100,
+    marginTop: 4,
+    marginBottom: 16,
+  },
+  welcomeTitle: {
+    fontFamily: 'RedHatDisplay_700Bold',
+    fontSize: 24,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  welcomeBody: {
+    fontFamily: 'RedHatDisplay_400Regular',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
+  welcomeButton: {
+    marginTop: 24,
+    borderRadius: 999,
+    paddingVertical: 16,
+    paddingHorizontal: 48,
+    width: '100%',
+    alignItems: 'center',
+  },
+  welcomeButtonText: {
+    fontFamily: 'RedHatDisplay_700Bold',
+    fontSize: 18,
+    color: '#000',
   },
 });

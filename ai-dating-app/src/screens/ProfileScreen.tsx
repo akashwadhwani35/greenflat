@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
   View,
   StyleSheet,
   ScrollView,
@@ -62,6 +63,8 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<PlanTab>('plus');
+  const [showBoostTip, setShowBoostTip] = useState(false);
+  const boostTipOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const fetchProfile = async () => {
@@ -164,9 +167,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
     return 'Requires Premium or 20 tokens';
   })();
 
+  const flashBoostTip = () => {
+    setShowBoostTip(true);
+    Animated.sequence([
+      Animated.timing(boostTipOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(2000),
+      Animated.timing(boostTipOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setShowBoostTip(false));
+  };
+
   const handleBoost = async () => {
     if (!canActivateBoost) {
-      Alert.alert('Boost', 'Boost requires Premium or 20 tokens.');
+      flashBoostTip();
       return;
     }
     try {
@@ -464,6 +476,13 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({
             ))}
           </View>
 
+          {showBoostTip && (
+            <Animated.View style={[styles.boostTip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, opacity: boostTipOpacity }]}>
+              <Typography variant="small" style={{ color: theme.colors.text, textAlign: 'center' }}>
+                Boost requires 20 tokens
+              </Typography>
+            </Animated.View>
+          )}
           <TouchableOpacity
             style={[
               styles.actionButton,
@@ -693,6 +712,14 @@ const styles = StyleSheet.create({
   },
   actionButtonDisabled: {
     opacity: 0.35,
+  },
+  boostTip: {
+    alignSelf: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginBottom: 8,
   },
   checkoutButton: {
     borderWidth: 1,

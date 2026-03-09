@@ -141,7 +141,14 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const theme = useTheme();
   const [sendingComplimentKey, setSendingComplimentKey] = useState<string | null>(null);
 
-  if (!match) return null;
+  if (!match) {
+    if (embedded) return null;
+    return (
+      <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+        <View style={[styles.container, { backgroundColor: '#101D13' }]} />
+      </Modal>
+    );
+  }
 
   const matchData = match as MatchCandidate & {
     bio?: string;

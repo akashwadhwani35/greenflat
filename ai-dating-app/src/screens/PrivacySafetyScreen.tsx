@@ -9,6 +9,8 @@ type Props = {
   onBack: () => void;
   token: string;
   apiBaseUrl: string;
+  onAccountDeleted?: () => void;
+  onOpenDeleteAccount?: () => void;
 };
 
 type PrivacySettings = {
@@ -18,7 +20,7 @@ type PrivacySettings = {
   show_online_status: boolean;
 };
 
-export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl }) => {
+export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onAccountDeleted, onOpenDeleteAccount }) => {
   const theme = useTheme();
   const [settings, setSettings] = useState<PrivacySettings>({
     hide_distance: false,
@@ -176,6 +178,17 @@ export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl
             </Typography>
           </TouchableOpacity>
         </View>
+
+        <TouchableOpacity
+          style={[styles.deleteButton, { borderColor: theme.colors.error }]}
+          activeOpacity={0.8}
+          onPress={onOpenDeleteAccount}
+        >
+          <Feather name="trash-2" size={16} color={theme.colors.error} />
+          <Typography variant="bodyStrong" style={{ color: theme.colors.error }}>
+            Delete account
+          </Typography>
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -211,5 +224,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  deleteButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 16,
+    marginTop: 10,
   },
 });

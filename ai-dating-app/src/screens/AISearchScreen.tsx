@@ -15,6 +15,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
+import { PixelFlag } from '../components/PixelFlag';
 import { useTheme } from '../theme/ThemeProvider';
 
 type Message = {
@@ -281,17 +282,21 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
       {
         id: `${Date.now()}-searching`,
         type: 'ai',
-        text: 'Alright, searching Greenflags for you.',
+        text: 'Searching for your greenflags...',
         timestamp: new Date(),
       },
     ]);
     setPendingSearchQuery(normalizedQuery);
-    setShowMatchesFoundPopup(true);
-    setIsTyping(false);
+    setIsTyping(true);
 
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 80);
+
+    setTimeout(() => {
+      setIsTyping(false);
+      setShowMatchesFoundPopup(true);
+    }, 2500);
   };
 
   const handleOpenDiscoverFromPopup = () => {
@@ -350,19 +355,7 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
       return;
     }
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: `${Date.now()}-valid`,
-        type: 'ai',
-        text: 'Alright, searching Greenflags for you.',
-        timestamp: new Date(),
-      },
-    ]);
-    setPendingSearchQuery(trimmed);
-    setShowMatchesFoundPopup(true);
-    setIsTyping(false);
-    addHistoryItem(trimmed);
+    queueSearchFlow(trimmed);
   };
 
   const handleSendMessage = (text: string) => {
@@ -410,9 +403,13 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
           <Feather name="x" size={24} color={theme.colors.text} />
         </TouchableOpacity>
 
-        <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-          {showHistory ? 'History' : 'AI Search'}
-        </Typography>
+        {showHistory ? (
+          <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
+            History
+          </Typography>
+        ) : (
+          <View />
+        )}
 
         <TouchableOpacity
           onPress={() => setShowHistory((prev) => !prev)}
@@ -599,27 +596,27 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
 
       <Modal
         visible={showMatchesFoundPopup}
-        transparent
+        transparent={false}
         animationType="fade"
         onRequestClose={() => setShowMatchesFoundPopup(false)}
       >
-        <View style={styles.matchesPopupBackdrop}>
-          <View
-            style={[
-              styles.matchesPopupCard,
-              { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.secondaryHairline },
-            ]}
-          >
-            <Typography variant="h2" align="center" style={{ color: theme.colors.text }}>
-              We found a few matches for you
+        <View style={[styles.matchesPopupScreen, { backgroundColor: theme.colors.neonGreen }]}>
+          <View style={styles.matchesPopupLogoRow}>
+            <PixelFlag size={48} color="#000" />
+          </View>
+          <View style={styles.matchesPopupTextBlock}>
+            <Typography variant="display" style={styles.matchesPopupHeading}>
+              We found{'\n'}a few{'\n'}matches{'\n'}for you.
             </Typography>
+          </View>
+          <View style={styles.matchesPopupFooter}>
             <TouchableOpacity
-              style={[styles.matchesPopupButton, { backgroundColor: theme.colors.neonGreen }]}
+              style={styles.matchesPopupButton}
               onPress={handleOpenDiscoverFromPopup}
               activeOpacity={0.85}
             >
-              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
-                View matches
+              <Typography variant="bodyStrong" style={{ color: '#fff', fontSize: 17 }}>
+                Show me
               </Typography>
             </TouchableOpacity>
           </View>
@@ -748,7 +745,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 12,
+    paddingBottom: 12,
     borderTopWidth: 1,
   },
   inputWrapper: {
@@ -775,25 +772,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  matchesPopupBackdrop: {
+  matchesPopupScreen: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
+    paddingTop: Platform.OS === 'ios' ? 80 : 60,
+    paddingBottom: Platform.OS === 'ios' ? 50 : 36,
   },
-  matchesPopupCard: {
-    width: '100%',
-    borderRadius: 18,
-    borderWidth: 1,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    gap: 16,
+  matchesPopupLogoRow: {
+    marginBottom: 24,
+  },
+  matchesPopupTextBlock: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  matchesPopupHeading: {
+    color: '#000',
+    fontFamily: 'RedHatDisplay_700Bold',
+    fontSize: 44,
+    lineHeight: 52,
+  },
+  matchesPopupFooter: {
+    paddingBottom: 8,
   },
   matchesPopupButton: {
-    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 18,
   },
 });

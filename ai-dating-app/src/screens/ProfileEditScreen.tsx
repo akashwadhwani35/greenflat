@@ -34,12 +34,12 @@ const INTEREST_CATEGORIES = [
   {
     name: 'Sports',
     emoji: '⚽',
-    items: ['Badminton', 'Baseball', 'Basketball', 'Bodybuilding', 'Bouldering', 'Bowling', 'Boxing', 'Cardio', 'Cricket', 'Cycling', 'Football', 'Golf', 'Gym', 'Running', 'Swimming', 'Tennis', 'Yoga'],
+    items: ['Badminton', 'Baseball', 'Basketball', 'Bodybuilding', 'Bouldering', 'Bowling', 'Boxing', 'Cardio', 'Cricket', 'Cycling', 'Fitness', 'Football', 'Golf', 'Gym', 'Running', 'Sports', 'Swimming', 'Tennis', 'Yoga'],
   },
   {
     name: 'Creativity',
     emoji: '🎨',
-    items: ['Art', 'Crafts', 'Crocheting', 'Dancing', 'Design', 'Drawing', 'Fashion', 'Knitting', 'Music', 'Painting', 'Photography', 'Pottery', 'Singing', 'Writing'],
+    items: ['Art', 'Crafts', 'Crocheting', 'Dancing', 'Design', 'Drawing', 'Fashion', 'Knitting', 'Music', 'Painting', 'Photography', 'Pottery', 'Singing', 'Technology', 'Writing'],
   },
   {
     name: 'Going out',
@@ -49,12 +49,12 @@ const INTEREST_CATEGORIES = [
   {
     name: 'Staying in',
     emoji: '🏠',
-    items: ['AI', 'Baking', 'Board games', 'Chess', 'Cooking', 'Gardening', 'House plants', 'Podcasts', 'Puzzles', 'Reading', 'Video games'],
+    items: ['AI', 'Baking', 'Board games', 'Chess', 'Cooking', 'Gaming', 'Gardening', 'House plants', 'Podcasts', 'Puzzles', 'Reading', 'Video games'],
   },
   {
     name: 'Film and TV',
     emoji: '🎬',
-    items: ['Action', 'Anime', 'Bollywood', 'Comedy', 'Crime', 'Documentaries', 'Drama', 'Horror', 'K-Drama', 'Reality TV', 'Romance', 'Sci-Fi', 'Thriller'],
+    items: ['Action', 'Anime', 'Bollywood', 'Comedy', 'Crime', 'Documentaries', 'Drama', 'Horror', 'K-Drama', 'Movies', 'Reality TV', 'Romance', 'Sci-Fi', 'Thriller'],
   },
   {
     name: 'Music',
@@ -69,7 +69,7 @@ const INTEREST_CATEGORIES = [
   {
     name: 'Traveling',
     emoji: '✈️',
-    items: ['Backpacking', 'Beaches', 'Camping', 'City trips', 'Exploring', 'Hiking trips', 'Road trips', 'Solo trips', 'Adventure'],
+    items: ['Backpacking', 'Beaches', 'Camping', 'City trips', 'Exploring', 'Hiking trips', 'Road trips', 'Solo trips', 'Travel', 'Adventure'],
   },
   {
     name: 'Pets',
@@ -180,6 +180,9 @@ type FormState = {
   starSign: string;
   politics: string;
   religion: string;
+  prompt1: string;
+  prompt2: string;
+  prompt3: string;
 };
 
 const GENDER_OPTIONS = ['Man', 'Woman', 'Non-binary', 'Other'];
@@ -340,6 +343,9 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     starSign: '',
     politics: '',
     religion: '',
+    prompt1: '',
+    prompt2: '',
+    prompt3: '',
   });
 
   const selectedInterests = useMemo(
@@ -387,6 +393,9 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             starSign: profile.star_sign || '',
             politics: profile.politics || '',
             religion: profile.religion || (typeof profile.spiritual === 'boolean' ? (profile.spiritual ? 'Spiritual' : 'Agnostic') : ''),
+            prompt1: profile.prompt1 || '',
+            prompt2: profile.prompt2 || '',
+            prompt3: profile.prompt3 || '',
           });
         }
       } catch (err) {
@@ -581,9 +590,9 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
         body_type: snapshotProfile.body_type || null,
         interests: form.interests,
         bio: form.bio,
-        prompt1: snapshotProfile.prompt1 || null,
-        prompt2: snapshotProfile.prompt2 || null,
-        prompt3: snapshotProfile.prompt3 || null,
+        prompt1: form.prompt1 || null,
+        prompt2: form.prompt2 || null,
+        prompt3: form.prompt3 || null,
         smoker: form.smoking ? form.smoking.toLowerCase() : (snapshotProfile.smoking_habit || snapshotProfile.smoker),
         drinker: form.drinking ? form.drinking.toLowerCase() : snapshotProfile.drinker || null,
         diet: snapshotProfile.diet || 'balanced',
@@ -940,7 +949,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           </Typography>
         </View>
 
-        <View style={styles.modalContent}>
+        <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
           <TextInput
             style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
             placeholder="Write a fun and punchy intro..."
@@ -955,7 +964,43 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'right', marginTop: 8 }}>
             {form.bio.length}/500
           </Typography>
-        </View>
+
+          <TextInput
+            style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 16 }]}
+            placeholder="Prompt 1: My ideal date is..."
+            placeholderTextColor={theme.colors.muted}
+            value={form.prompt1}
+            onChangeText={(t) => setForm((prev) => ({ ...prev, prompt1: t }))}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+            maxLength={240}
+          />
+
+          <TextInput
+            style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 12 }]}
+            placeholder="Prompt 2: I'm known for..."
+            placeholderTextColor={theme.colors.muted}
+            value={form.prompt2}
+            onChangeText={(t) => setForm((prev) => ({ ...prev, prompt2: t }))}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+            maxLength={240}
+          />
+
+          <TextInput
+            style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 12 }]}
+            placeholder="Prompt 3: My perfect weekend..."
+            placeholderTextColor={theme.colors.muted}
+            value={form.prompt3}
+            onChangeText={(t) => setForm((prev) => ({ ...prev, prompt3: t }))}
+            multiline
+            numberOfLines={3}
+            textAlignVertical="top"
+            maxLength={240}
+          />
+        </ScrollView>
       </View>
     </Modal>
   );
@@ -1398,11 +1443,10 @@ const styles = StyleSheet.create({
 
   moreAboutContent: {
     paddingHorizontal: 20,
-    paddingBottom: 160,
-    flexGrow: 1,
+    paddingBottom: 260,
   },
   moreAboutBottomSpacer: {
-    height: 32,
+    height: 60,
   },
   moreRow: {
     flexDirection: 'row',

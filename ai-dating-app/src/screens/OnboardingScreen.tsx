@@ -30,6 +30,9 @@ type OnboardingScreenProps = {
   onComplete: (result: { token: string; name: string; userId?: number }) => void;
   onBack?: () => void;
   apiBaseUrl: string;
+  /** When provided (e.g. Google OAuth), skip the contact/password step. */
+  existingToken?: string | null;
+  existingUserId?: number | null;
 };
 
 type SlideKey = 'basic' | 'intentions' | 'location' | 'physical' | 'lifestyle' | 'personality' | 'prompts' | 'photos' | 'contact';
@@ -40,7 +43,7 @@ type Slide = {
   subtitle?: string;
 };
 
-const slides: Slide[] = [
+const allSlides: Slide[] = [
   { key: 'basic', title: "Let's start with you", subtitle: 'Your name, identity, and age.' },
   { key: 'intentions', title: 'What brings you here?', subtitle: 'Your relationship goals and vibe.' },
   { key: 'location', title: 'Where are you?', subtitle: 'Detect or search your city.' },
@@ -73,8 +76,13 @@ const personalityQuestions = [
   { q: 'I handle conflict by:', a: 'Addressing it immediately', b: 'Taking time to process', c: 'Compromising', d: 'Avoiding when possible' },
 ];
 
-export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, onBack, apiBaseUrl }) => {
+export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, onBack, apiBaseUrl, existingToken, existingUserId }) => {
   const theme = useTheme();
+  // Skip the contact step when the user already has an account (e.g. Google OAuth)
+  const slides = useMemo(
+    () => (existingToken ? allSlides.filter((s) => s.key !== 'contact') : allSlides),
+    [existingToken]
+  );
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showIOSPicker, setShowIOSPicker] = useState(false);
@@ -235,48 +243,76 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   };
 
   const submitToBackend = async () => {
-    const email = resolveEmail();
-    const gender = mapIdentityToGender(form.identity || '');
-    const interested_in = form.interestedIn;
-    const password = form.password;
+    let token: string | undefined;
+    let userId: number | undefined;
 
-    const signupResponse = await fetch(`${apiBaseUrl}/auth/signup`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        password,
-        name: form.name.trim(),
-        gender,
-        interested_in,
-        date_of_birth: form.dateOfBirth,
-        city: form.city || 'Unknown',
-      }),
-    });
+    if (existingToken) {
+      // Google OAuth user – already signed up, just need to complete profile
+      token = existingToken;
+      userId = existingUserId ?? undefined;
 
-    const signupBody = await signupResponse.json().catch(() => ({}));
-    let token = signupBody?.token as string | undefined;
-    let userId = signupBody?.user?.id as number | undefined;
+      // Update basic user fields (gender, DOB, city, name) that were set to defaults during Google signup
+      const gender = mapIdentityToGender(form.identity || '');
+      const basicRes = await fetch(`${apiBaseUrl}/profile/basic`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          name: form.name.trim(),
+          gender,
+          interested_in: form.interestedIn,
+          date_of_birth: form.dateOfBirth,
+          city: form.city || 'Unknown',
+        }),
+      });
+      if (!basicRes.ok) {
+        const body = await basicRes.json().catch(() => ({}));
+        console.warn('Basic profile update failed:', body.error);
+      }
+    } else {
+      // Standard email/password signup
+      const email = resolveEmail();
+      const gender = mapIdentityToGender(form.identity || '');
+      const interested_in = form.interestedIn;
+      const password = form.password;
 
-    if (!signupResponse.ok) {
-      const errorMessage = signupBody.error || 'Unable to create your account.';
-      if (signupResponse.status === 400 && errorMessage.toLowerCase().includes('already')) {
-        const loginResponse = await fetch(`${apiBaseUrl}/auth/login`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password }),
-        });
+      const signupResponse = await fetch(`${apiBaseUrl}/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          name: form.name.trim(),
+          gender,
+          interested_in,
+          date_of_birth: form.dateOfBirth,
+          city: form.city || 'Unknown',
+        }),
+      });
 
-        if (!loginResponse.ok) {
-          const loginBody = await loginResponse.json().catch(() => ({}));
-          throw new Error(loginBody.error || errorMessage);
+      const signupBody = await signupResponse.json().catch(() => ({}));
+      token = signupBody?.token as string | undefined;
+      userId = signupBody?.user?.id as number | undefined;
+
+      if (!signupResponse.ok) {
+        const errorMessage = signupBody.error || 'Unable to create your account.';
+        if (signupResponse.status === 400 && errorMessage.toLowerCase().includes('already')) {
+          const loginResponse = await fetch(`${apiBaseUrl}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+
+          if (!loginResponse.ok) {
+            const loginBody = await loginResponse.json().catch(() => ({}));
+            throw new Error(loginBody.error || errorMessage);
+          }
+
+          const loginBody = await loginResponse.json();
+          token = loginBody.token;
+          userId = loginBody.user?.id;
+        } else {
+          throw new Error(errorMessage);
         }
-
-        const loginBody = await loginResponse.json();
-        token = loginBody.token;
-        userId = loginBody.user?.id;
-      } else {
-        throw new Error(errorMessage);
       }
     }
 
@@ -915,42 +951,6 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                 {form.bio.length}/500
               </Typography>
               {errors.bio ? <Typography variant="small" tone="error">{errors.bio}</Typography> : null}
-
-              <TextInput
-                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
-                placeholder="Prompt 1: My ideal date is..."
-                placeholderTextColor={theme.colors.muted}
-                value={form.prompt1}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, prompt1: text }))}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-                maxLength={240}
-              />
-
-              <TextInput
-                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
-                placeholder="Prompt 2: I'm known for..."
-                placeholderTextColor={theme.colors.muted}
-                value={form.prompt2}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, prompt2: text }))}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-                maxLength={240}
-              />
-
-              <TextInput
-                style={[styles.bioCardInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
-                placeholder="Prompt 3: My perfect weekend..."
-                placeholderTextColor={theme.colors.muted}
-                value={form.prompt3}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, prompt3: text }))}
-                multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-                maxLength={240}
-              />
             </View>
           </View>
         );

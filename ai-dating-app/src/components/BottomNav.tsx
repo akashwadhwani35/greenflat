@@ -99,7 +99,7 @@ const AIFlagIcon: React.FC<{ isActive: boolean }> = ({ isActive }) => {
       <View style={[
         styles.aiFlagIcon,
         {
-          backgroundColor: isActive ? '#ADFF1A' : '#1A1A1A',
+          backgroundColor: isActive ? '#ADFF1A' : '#1B2920',
           borderWidth: isActive ? 0 : 2,
           borderColor: '#ADFF1A',
         }

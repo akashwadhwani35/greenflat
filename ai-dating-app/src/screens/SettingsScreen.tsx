@@ -56,7 +56,6 @@ export const SettingsScreen: React.FC<Props> = ({
   onAccountDeleted,
 }) => {
   const theme = useTheme();
-  const [deleting, setDeleting] = useState(false);
   const [privacySettings, setPrivacySettings] = useState({
     hide_distance: false,
     incognito_mode: false,
@@ -137,32 +136,6 @@ export const SettingsScreen: React.FC<Props> = ({
           </TouchableOpacity>
         ))}
 
-        <View style={styles.card}>
-          <View style={styles.toggleRow}>
-            <Typography variant="body">Hide distance</Typography>
-            <Switch
-              value={privacySettings.hide_distance}
-              onValueChange={(v) => updateToggle('hide_distance', v)}
-              trackColor={{ false: theme.colors.muted, true: theme.colors.brand }}
-            />
-          </View>
-          <View style={styles.toggleRow}>
-            <Typography variant="body">Incognito mode</Typography>
-            <Switch
-              value={privacySettings.incognito_mode}
-              onValueChange={(v) => updateToggle('incognito_mode', v)}
-              trackColor={{ false: theme.colors.muted, true: theme.colors.brand }}
-            />
-          </View>
-          <View style={styles.toggleRow}>
-            <Typography variant="body">Show online status</Typography>
-            <Switch
-              value={privacySettings.show_online_status}
-              onValueChange={(v) => updateToggle('show_online_status', v)}
-              trackColor={{ false: theme.colors.muted, true: theme.colors.brand }}
-            />
-          </View>
-        </View>
 
         {__DEV__ && (
           <View style={[styles.card, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
@@ -183,43 +156,6 @@ export const SettingsScreen: React.FC<Props> = ({
         )}
 
         <Button label="Log out" variant="secondary" onPress={onLogout || onBack} fullWidth />
-        <Button
-          label="Delete account"
-          loading={deleting}
-          onPress={() => {
-            if (!token || !apiBaseUrl) return;
-            Alert.alert(
-              'Delete account',
-              'This permanently deletes your profile, matches, and messages.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      setDeleting(true);
-                      const response = await fetch(`${apiBaseUrl}/profile/me`, {
-                        method: 'DELETE',
-                        headers: { Authorization: `Bearer ${token}` },
-                      });
-                      const body = await response.json().catch(() => ({}));
-                      if (!response.ok) {
-                        throw new Error(body.error || 'Unable to delete account');
-                      }
-                      onAccountDeleted?.();
-                    } catch (error: any) {
-                      Alert.alert('Delete failed', error?.message || 'Please try again.');
-                    } finally {
-                      setDeleting(false);
-                    }
-                  },
-                },
-              ]
-            );
-          }}
-          fullWidth
-        />
       </ScrollView>
     </View>
   );

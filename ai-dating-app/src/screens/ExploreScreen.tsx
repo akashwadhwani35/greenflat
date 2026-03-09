@@ -19,6 +19,7 @@ type ExploreScreenProps = {
   preferredTab?: 'onGrid' | 'offGrid';
   pendingAISearchCharge?: boolean;
   onConsumeAISearchCharge?: () => void;
+  likedIds?: Set<number>;
 };
 
 export const ExploreScreen: React.FC<ExploreScreenProps> = ({
@@ -31,6 +32,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
   preferredTab,
   pendingAISearchCharge,
   onConsumeAISearchCharge,
+  likedIds,
 }) => {
   return (
     <View style={styles.container}>
@@ -44,6 +46,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
         preferredTab={preferredTab}
         pendingAISearchCharge={pendingAISearchCharge}
         onConsumeAISearchCharge={onConsumeAISearchCharge}
+        likedIds={likedIds}
       />
     </View>
   );

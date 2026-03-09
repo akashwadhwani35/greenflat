@@ -1,36 +1,28 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
+import { PixelFlag } from '../components/PixelFlag';
 import { Feather } from '@expo/vector-icons';
+
+type PlanTier = 'pro' | 'premium';
 
 type Props = {
   onBack: () => void;
   onOpenCheckout?: () => void;
+  onOpenSubscription?: (tab: PlanTier) => void;
   token?: string;
   apiBaseUrl?: string;
 };
 
-const ACTION_COSTS = {
-  aiSearch: 1,
-  compliment: 6,
-  greenFlag: 4,
-  boost: 20,
-} as const;
-
-const PACKS = [
-  { id: '15', amount: 15, centsEach: 26, price: '$3.99' },
-  { id: '40', amount: 40, centsEach: 22, price: '$8.99' },
-  { id: '95', amount: 95, centsEach: 18, price: '$16.99' },
-  { id: '260', amount: 260, centsEach: 15, price: '$39.99' },
-] as const;
-
-export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, token, apiBaseUrl }) => {
+export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSubscription, token, apiBaseUrl }) => {
   const theme = useTheme();
   const [loading, setLoading] = useState(false);
   const [balance, setBalance] = useState(0);
-  const [selectedPackId, setSelectedPackId] = useState<(typeof PACKS)[number]['id']>('15');
+  const [activePlan, setActivePlan] = useState<PlanTier | null>(null);
+  const [selectedTab, setSelectedTab] = useState<PlanTier>('pro');
+  const [boosting, setBoosting] = useState(false);
 
   useEffect(() => {
     const fetchWallet = async () => {
@@ -43,6 +35,7 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, token, a
         if (!response.ok) return;
         const data = await response.json();
         setBalance(Number(data.credit_balance || 0));
+        if (data.active_plan) setActivePlan(data.active_plan);
       } finally {
         setLoading(false);
       }
@@ -50,111 +43,189 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, token, a
     fetchWallet().catch((err) => console.warn('Failed to load wallet:', err));
   }, [token, apiBaseUrl]);
 
-  const selectedPack = useMemo(
-    () => PACKS.find((pack) => pack.id === selectedPackId) ?? PACKS[0],
-    [selectedPackId]
-  );
+  const handleUpgrade = (tier: PlanTier) => {
+    if (onOpenSubscription) onOpenSubscription(tier);
+    else if (onOpenCheckout) onOpenCheckout();
+  };
 
-  const actionRows = useMemo(() => ([
-    { label: 'AI Searches', value: Math.floor(balance / ACTION_COSTS.aiSearch) },
-    { label: 'Compliments', value: Math.floor(balance / ACTION_COSTS.compliment) },
-    { label: 'Super Likes', value: Math.floor(balance / ACTION_COSTS.greenFlag) },
-    { label: 'Boost', value: Math.floor(balance / ACTION_COSTS.boost) },
-  ]), [balance]);
+  const handleBoost = async () => {
+    if (!token || !apiBaseUrl) return;
+    if (balance < 20) {
+      Alert.alert('Not enough tokens', 'You need 20 GFT to boost. Get more tokens first.', [
+        { text: 'Get tokens', onPress: onOpenCheckout },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+      return;
+    }
+    setBoosting(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/profile/boost`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Boost failed');
+      setBalance((prev) => Math.max(0, prev - 20));
+      Alert.alert('Boosted!', 'Your profile will be shown to more people for the next 6 hours.');
+    } catch (error: any) {
+      Alert.alert('Boost failed', error?.message || 'Please try again.');
+    } finally {
+      setBoosting(false);
+    }
+  };
+
+  const isProActive = activePlan === 'pro';
+  const isPremiumActive = activePlan === 'premium';
+  const isSelectedActive = selectedTab === 'pro' ? isProActive : isPremiumActive;
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <PageHeader
-        title="Wallet"
-        onBack={onBack}
-        right={(
-          <Pressable
-            onPress={() => Alert.alert('Token info', 'Use tokens for AI searches, compliments, GreenFlags, and boost.')}
-            style={[
-              styles.infoButton,
-              { borderColor: theme.colors.neonGreen, backgroundColor: theme.colors.secondaryHighlight },
-            ]}
-            accessibilityRole="button"
-          >
-            <Feather name="info" size={16} color={theme.colors.neonGreen} />
-          </Pressable>
-        )}
-      />
+      <PageHeader title="Wallet" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {loading ? <ActivityIndicator color={theme.colors.brand} style={styles.loader} /> : null}
+        {loading ? <ActivityIndicator color={theme.colors.brand} style={{ marginTop: 6 }} /> : null}
 
-        <View style={[styles.balanceCard, { backgroundColor: theme.colors.neonGreen }]}>
-          <Typography variant="tiny" style={[styles.balanceLabel, { color: theme.colors.deepBlack }]}>
-            GF TOKENS
-          </Typography>
-          <Typography variant="display" style={[styles.balanceValue, { color: theme.colors.deepBlack }]}>
-            {balance}
-          </Typography>
+        {/* Balance pill */}
+        <View style={styles.balanceRow}>
+          <View style={[styles.balancePill, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+            <Typography variant="small" style={{ color: theme.colors.muted }}>GF Tokens</Typography>
+            <Typography variant="h1" style={{ color: theme.colors.neonGreen }}>{balance}</Typography>
+          </View>
+          <Pressable
+            onPress={onOpenCheckout}
+            style={[styles.addTokens, { backgroundColor: theme.colors.neonGreen }]}
+            accessibilityRole="button"
+          >
+            <Feather name="plus" size={18} color="#000" />
+            <Typography variant="small" style={{ color: '#000', fontFamily: 'RedHatDisplay_600SemiBold' }}>
+              Get tokens
+            </Typography>
+          </Pressable>
         </View>
 
-        <Typography variant="small" style={[styles.helperText, { color: theme.colors.textDark }]}>
-          Use GFTs for any of these actions
-        </Typography>
-
-        <View style={styles.actionsBlock}>
-          {actionRows.map((item) => (
-            <View key={item.label} style={styles.actionRow}>
-              <Typography variant="bodyStrong" style={[styles.actionValue, { color: theme.colors.neonGreen }]}>
-                {item.value}
-              </Typography>
-              <Typography variant="bodyStrong" style={[styles.actionLabel, { color: theme.colors.text }]}>
-                {item.label}
-              </Typography>
-            </View>
-          ))}
+        {/* Plan tabs */}
+        <View style={[styles.tabBar, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+          <Pressable
+            onPress={() => setSelectedTab('pro')}
+            style={[
+              styles.tab,
+              selectedTab === 'pro' && { backgroundColor: theme.colors.neonGreen },
+            ]}
+          >
+            <PixelFlag size={16} color={selectedTab === 'pro' ? '#000' : theme.colors.text} />
+            <Typography
+              variant="bodyStrong"
+              style={{ color: selectedTab === 'pro' ? '#000' : theme.colors.text }}
+            >
+              Pro
+            </Typography>
+          </Pressable>
+          <Pressable
+            onPress={() => setSelectedTab('premium')}
+            style={[
+              styles.tab,
+              selectedTab === 'premium' && { backgroundColor: theme.colors.neonGreen },
+            ]}
+          >
+            <PixelFlag size={16} color={selectedTab === 'premium' ? '#000' : theme.colors.text} />
+            <Typography
+              variant="bodyStrong"
+              style={{ color: selectedTab === 'premium' ? '#000' : theme.colors.text }}
+            >
+              Premium
+            </Typography>
+          </Pressable>
         </View>
 
-        <View style={[styles.divider, { backgroundColor: theme.colors.secondaryHairline }]} />
-
-        <View style={styles.packsGrid}>
-          {PACKS.map((pack) => {
-            const selected = pack.id === selectedPackId;
-            return (
-              <Pressable
-                key={pack.id}
-                onPress={() => setSelectedPackId(pack.id)}
-                style={[
-                  styles.packCard,
-                  selected
-                    ? { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }
-                    : { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline },
-                ]}
-                accessibilityRole="button"
-              >
-                <Typography
-                  variant="tiny"
-                  style={{ color: selected ? theme.colors.deepBlack : theme.colors.textDark, textAlign: 'center' }}
-                >
-                  {pack.centsEach} cents each
+        {/* Plan card */}
+        {selectedTab === 'pro' ? (
+          <View
+            style={[
+              styles.planCard,
+              isProActive
+                ? { borderColor: theme.colors.neonGreen, borderWidth: 2 }
+                : { borderColor: theme.colors.neonGreen, borderWidth: 1 },
+            ]}
+          >
+            {isProActive && (
+              <View style={[styles.activeBadge, { backgroundColor: theme.colors.neonGreen }]}>
+                <Typography variant="tiny" style={{ color: '#000', fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 1 }}>
+                  ACTIVE
                 </Typography>
-                <Typography
-                  variant="h1"
-                  style={[styles.packAmount, { color: selected ? theme.colors.deepBlack : theme.colors.text }]}
-                >
-                  {pack.amount} GFT
+              </View>
+            )}
+            <Typography variant="body" style={{ color: theme.colors.text, textAlign: 'center', marginTop: isProActive ? 8 : 0 }}>
+              Send unlimited likes & rewind anytime.
+            </Typography>
+            {!isProActive && (
+              <Pressable
+                style={[styles.upgradeButtonOutlined, { borderColor: theme.colors.neonGreen }]}
+                onPress={() => handleUpgrade('pro')}
+              >
+                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+                  Upgrade
                 </Typography>
               </Pressable>
-            );
-          })}
-        </View>
+            )}
+          </View>
+        ) : (
+          <View
+            style={[
+              styles.planCard,
+              isPremiumActive
+                ? { borderColor: theme.colors.neonGreen, borderWidth: 2, backgroundColor: theme.colors.neonGreen }
+                : { borderColor: 'transparent', borderWidth: 0, backgroundColor: theme.colors.neonGreen },
+            ]}
+          >
+            {isPremiumActive && (
+              <View style={[styles.activeBadge, { backgroundColor: '#000' }]}>
+                <Typography variant="tiny" style={{ color: theme.colors.neonGreen, fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 1 }}>
+                  ACTIVE
+                </Typography>
+              </View>
+            )}
+            <Typography variant="body" style={{ color: '#000', textAlign: 'center', marginTop: isPremiumActive ? 8 : 0 }}>
+              Get seen first and 3x your dates.
+            </Typography>
+            {!isPremiumActive && (
+              <Pressable
+                style={[styles.upgradeButtonDark]}
+                onPress={() => handleUpgrade('premium')}
+              >
+                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+                  Upgrade
+                </Typography>
+              </Pressable>
+            )}
+          </View>
+        )}
 
+        {/* Boost button */}
         <Pressable
-          onPress={() => {
-            if (!onOpenCheckout) return;
-            onOpenCheckout();
-          }}
-          style={[styles.ctaButton, { backgroundColor: theme.colors.neonGreen }]}
-          accessibilityRole="button"
+          onPress={handleBoost}
+          disabled={boosting}
+          style={({ pressed }) => [
+            styles.boostButton,
+            { backgroundColor: theme.colors.neonGreen },
+            pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
+            boosting && { opacity: 0.6 },
+          ]}
         >
-          <Typography variant="bodyStrong" style={[styles.ctaText, { color: theme.colors.deepBlack }]}>
-            {`Get ${selectedPack.amount} GFT for ${selectedPack.price}`}
-          </Typography>
+          {boosting ? (
+            <ActivityIndicator color="#000" />
+          ) : (
+            <>
+              <Typography variant="h1" style={styles.boostText}>
+                BOOOOOOOOOST
+              </Typography>
+              <Typography variant="small" style={{ color: 'rgba(0,0,0,0.7)', textAlign: 'center' }}>
+                Get seen by 10X more people
+              </Typography>
+            </>
+          )}
         </Pressable>
       </ScrollView>
     </View>
@@ -166,100 +237,84 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 16,
     paddingBottom: 150,
-    gap: 14,
+    gap: 16,
   },
-  loader: {
-    marginTop: 6,
-  },
-  infoButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1.5,
-  },
-  balanceCard: {
-    borderRadius: 20,
-    paddingTop: 14,
-    paddingBottom: 12,
-    paddingHorizontal: 16,
-    alignItems: 'center',
-  },
-  balanceLabel: {
-    letterSpacing: 0.8,
-    marginBottom: 4,
-  },
-  balanceValue: {
-    fontSize: 68,
-    lineHeight: 72,
-    fontFamily: 'RedHatDisplay_700Bold',
-  },
-  helperText: {
-    textAlign: 'center',
-    fontStyle: 'italic',
-    marginTop: 8,
-  },
-  actionsBlock: {
-    alignSelf: 'center',
-    gap: 2,
-  },
-  actionRow: {
+  balanceRow: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
+    gap: 12,
+  },
+  balancePill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  addTokens: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  tabBar: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    borderWidth: 1,
+    padding: 4,
+  },
+  tab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
+    paddingVertical: 12,
+    borderRadius: 999,
   },
-  actionValue: {
-    minWidth: 24,
-    textAlign: 'right',
-    fontFamily: 'RedHatDisplay_700Bold',
+  planCard: {
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 16,
+    minHeight: 180,
   },
-  actionLabel: {
-    minWidth: 150,
-    fontFamily: 'RedHatDisplay_400Regular',
+  activeBadge: {
+    paddingHorizontal: 14,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
-  divider: {
-    height: 1,
-    marginHorizontal: 12,
-    opacity: 0.35,
-  },
-  packsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  packCard: {
-    width: '48.5%',
-    minHeight: 86,
-    borderRadius: 12,
+  upgradeButtonOutlined: {
     borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+  },
+  upgradeButtonDark: {
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    borderRadius: 999,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+  },
+  boostButton: {
+    borderRadius: 20,
+    paddingVertical: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 6,
-    paddingVertical: 10,
-    gap: 2,
+    marginTop: 4,
   },
-  packAmount: {
+  boostText: {
+    color: '#000',
     fontFamily: 'RedHatDisplay_700Bold',
-    fontSize: 20,
-    lineHeight: 24,
-    letterSpacing: -0.3,
-  },
-  ctaButton: {
-    marginTop: 10,
-    borderRadius: 26,
-    minHeight: 62,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  ctaText: {
-    fontFamily: 'RedHatDisplay_700Bold',
-    fontSize: 16,
-    lineHeight: 20,
+    fontSize: 24,
+    letterSpacing: 1,
     textAlign: 'center',
-    letterSpacing: -0.2,
   },
 });
