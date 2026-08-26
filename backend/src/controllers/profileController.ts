@@ -3,7 +3,8 @@ import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { PERSONALITY_TRAITS_MAP, TOKEN_COSTS } from '../utils/constants';
 import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
-import { consumeCredits } from '../services/credits.service';
+import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
+import { normalizeMediaMessageUrl } from '../services/media.service';
 
 const BOOST_DURATION_HOURS = 6;
 
@@ -315,6 +316,10 @@ export const activateBoost = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
     const userId = req.userId!;
+
+    // Boost costs tokens, so settle the free allowance first.
+    await ensureDailyAllowance(userId);
+
     await client.query('BEGIN');
 
     const userResult = await client.query(
@@ -402,6 +407,20 @@ export const uploadPhoto = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Photo URL is required' });
     }
 
+    // Profile photos go through the same host allowlist as message media. Without
+    // this the column accepted any string, including data: payloads and arbitrary
+    // third-party URLs that the app would then render for every viewer.
+    let normalizedPhotoUrl: string;
+    try {
+      const requestHost = req.get('host') || undefined;
+      const allowHttpForRequestHost =
+        (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim() !== 'https' &&
+        req.protocol !== 'https';
+      normalizedPhotoUrl = normalizeMediaMessageUrl(photo_url, { requestHost, allowHttpForRequestHost });
+    } catch (validationError: any) {
+      return res.status(400).json({ error: validationError?.message || 'Invalid photo URL' });
+    }
+
     // If this is primary photo, unset other primary photos
     if (is_primary) {
       await pool.query(
@@ -412,7 +431,7 @@ export const uploadPhoto = async (req: AuthRequest, res: Response) => {
 
     const result = await pool.query(
       'INSERT INTO photos (user_id, photo_url, is_primary, order_index) VALUES ($1, $2, $3, $4) RETURNING *',
-      [userId, photo_url, is_primary || false, order_index || 0]
+      [userId, normalizedPhotoUrl, is_primary || false, order_index || 0]
     );
 
     res.status(201).json({
