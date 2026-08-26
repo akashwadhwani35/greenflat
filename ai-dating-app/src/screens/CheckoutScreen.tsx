@@ -4,6 +4,8 @@ import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
+import { purchaseTokenPack } from '../services/purchases';
+import type { PackId } from '../services/productIds';
 
 type Props = {
   onBack: () => void;
@@ -60,15 +62,44 @@ export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onP
   const applyPurchase = async () => {
     try {
       setLoading(true);
+
+      // Charge through the store first. Only once RevenueCat has validated the
+      // receipt do we ask our backend to grant anything.
+      const outcome = await purchaseTokenPack(selectedPackId as PackId);
+
+      if (outcome.status === 'cancelled') return;
+      if (outcome.status === 'unavailable') {
+        Alert.alert(
+          'Not available yet',
+          'In-app purchases are not set up on this build. Nothing has been charged.'
+        );
+        return;
+      }
+      if (outcome.status === 'error') {
+        Alert.alert('Purchase failed', outcome.message);
+        return;
+      }
+
       const response = await fetch(`${apiBaseUrl}/wallet/purchase`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ pack_id: selectedPackId }),
+        body: JSON.stringify({ pack_id: selectedPackId, receipt: outcome.productId }),
       });
       const body = await response.json().catch(() => ({}));
+
+      // 501: in-app payments are not configured on this build. Say so plainly
+      // rather than showing a failure the user could try to fix by retrying.
+      if (response.status === 501) {
+        Alert.alert(
+          'Not available yet',
+          body.error || 'Token packs are not on sale yet. Nothing has been charged.'
+        );
+        return;
+      }
+
       if (!response.ok) {
         throw new Error(body.error || 'Purchase failed');
       }

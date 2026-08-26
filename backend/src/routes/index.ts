@@ -15,7 +15,7 @@ import {
 import { registerToken, unregisterToken } from '../controllers/pushController';
 import { sendMessage, getMessages, getConversations, markAsRead, deleteMessage } from '../controllers/messageController';
 import { sidekick } from '../controllers/aiController';
-import { getWalletSummary, purchasePlan } from '../controllers/walletController';
+import { getWalletSummary, purchasePlan, subscribe } from '../controllers/walletController';
 import { createReport } from '../controllers/reportController';
 import {
   getPrivacySettings,
@@ -27,6 +27,7 @@ import {
 import { getNotificationPreferences, updateNotificationPreferences } from '../controllers/notificationsController';
 import { getMediaCapabilities, getUploadSignature, uploadLocalMedia } from '../controllers/mediaController';
 import { submitSupportMessage } from '../controllers/supportController';
+import { revenueCatWebhook } from '../controllers/webhookController';
 import adminRouter from './admin';
 import { loginLimiter, signupLimiter, forgotPasswordLimiter, resetPasswordLimiter } from '../middleware/rateLimit';
 
@@ -34,6 +35,9 @@ const router = express.Router();
 
 // Public routes
 router.post('/geocode', publicGeocode);
+
+// RevenueCat webhook. Authenticated by its own shared secret, not a user JWT.
+router.post('/webhooks/revenuecat', revenueCatWebhook);
 
 // Auth routes (rate limited)
 router.post('/auth/signup', signupLimiter, signup);
@@ -68,6 +72,7 @@ router.get('/likes/incoming', authenticate, getIncomingLikes);
 router.get('/matches', authenticate, getMatches);
 router.get('/wallet/summary', authenticate, getWalletSummary);
 router.post('/wallet/purchase', authenticate, purchasePlan);
+router.post('/wallet/subscribe', authenticate, subscribe);
 router.post('/report', authenticate, createReport);
 
 // Privacy and safety routes

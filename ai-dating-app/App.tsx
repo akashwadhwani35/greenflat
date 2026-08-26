@@ -37,6 +37,7 @@ import { DeleteAccountScreen } from './src/screens/DeleteAccountScreen';
 import { SubscriptionScreen } from './src/screens/SubscriptionScreen';
 import { PausedBanner } from './src/components/PausedBanner';
 import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown } from './src/utils/session';
+import { configurePurchases, logOutPurchases } from './src/services/purchases';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
 
@@ -139,6 +140,8 @@ const AppShell: React.FC = () => {
           setUserId(session.user.id || null);
           if (session.user.is_admin) setIsAdmin(true);
           if (session.user.id) {
+            // RevenueCat is keyed by our user id so the backend can verify purchases.
+            await configurePurchases(session.user.id);
             await applyEntryPointForUser(session.user.id);
           }
           setStage('matchboard');
@@ -170,6 +173,7 @@ const AppShell: React.FC = () => {
     setUserId(user.id);
     if (user.is_admin) setIsAdmin(true);
     await saveSession({ token, user });
+    await configurePurchases(user.id);
     await applyEntryPointForUser(user.id);
   };
 
@@ -184,6 +188,7 @@ const AppShell: React.FC = () => {
         // Best-effort only.
       }
     }
+    await logOutPurchases();
     await clearSession();
     setAuthToken(null);
     setUserId(null);

@@ -4,6 +4,8 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PixelFlag } from '../components/PixelFlag';
 import { Feather } from '@expo/vector-icons';
+import { purchaseSubscription } from '../services/purchases';
+import type { PlanDuration } from '../services/productIds';
 
 type PlanTier = 'pro' | 'premium';
 type Duration = '1week' | '1month' | '3month' | '6month';
@@ -76,15 +78,48 @@ export const SubscriptionScreen: React.FC<Props> = ({
   const handlePurchase = async () => {
     setLoading(true);
     try {
+      // Store charges first, backend grants only after RevenueCat confirms it.
+      const outcome = await purchaseSubscription(
+        selectedTab as PlanTier,
+        selectedDuration as PlanDuration
+      );
+
+      if (outcome.status === 'cancelled') return;
+      if (outcome.status === 'unavailable') {
+        Alert.alert(
+          'Not available yet',
+          'Subscriptions are not set up on this build. Nothing has been charged.'
+        );
+        return;
+      }
+      if (outcome.status === 'error') {
+        Alert.alert('Purchase failed', outcome.message);
+        return;
+      }
+
       const response = await fetch(`${apiBaseUrl}/wallet/subscribe`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ plan: selectedTab, duration: selectedDuration }),
+        body: JSON.stringify({
+          plan: selectedTab,
+          duration: selectedDuration,
+          receipt: outcome.productId,
+        }),
       });
       const body = await response.json().catch(() => ({}));
+
+      // 501: in-app payments are not configured on this build.
+      if (response.status === 501) {
+        Alert.alert(
+          'Not available yet',
+          body.error || 'Subscriptions are not on sale yet. Nothing has been charged.'
+        );
+        return;
+      }
+
       if (!response.ok) throw new Error(body.error || 'Purchase failed');
       Alert.alert('Subscribed!', `You're now on ${selectedTab === 'pro' ? 'Pro' : 'Premium'}!`);
       onPurchased?.();

@@ -9,6 +9,9 @@ import pool from './config/database';
 import { isCloudinaryConfigured } from './services/media.service';
 import { isSmsConfigured } from './services/sms.service';
 import { initSocketServer } from './socket';
+import { runMigrations } from './database/migrate';
+import { isPaymentsEnabled } from './services/payments.service';
+import { initRevenueCat } from './services/revenuecat.service';
 
 dotenv.config();
 
@@ -30,6 +33,10 @@ const assertProductionReadiness = () => {
 };
 
 assertProductionReadiness();
+
+// Registers the receipt validator when a RevenueCat key is present. Without it
+// isPaymentsEnabled() stays false and purchase endpoints return 501.
+initRevenueCat();
 
 // CORS configuration
 const corsAllowedOrigins = process.env.CORS_ALLOWED_ORIGINS
@@ -83,12 +90,37 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 const httpServer = createServer(app);
 let server: Server | null = null;
 
-if (process.env.NODE_ENV !== 'test') {
+const startServer = () => {
   initSocketServer(httpServer);
   server = httpServer.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`🚀 Server is running on port ${PORT}`);
     console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`💳 Payments: ${isPaymentsEnabled() ? 'ENABLED' : 'disabled (purchase endpoints return 501)'}`);
   });
+};
+
+if (process.env.NODE_ENV !== 'test') {
+  // Pending migrations are applied before we accept traffic. The runner takes a
+  // Postgres advisory lock, so several Cloud Run instances booting at once is safe.
+  // Set RUN_MIGRATIONS_ON_BOOT=false to manage migrations as a separate deploy step.
+  if (process.env.RUN_MIGRATIONS_ON_BOOT === 'false') {
+    startServer();
+  } else {
+    console.log('🗂  Checking for pending migrations...');
+    runMigrations()
+      .then(({ applied, skipped }) => {
+        console.log(
+          applied.length === 0
+            ? `🗂  Migrations up to date (${skipped} already applied).`
+            : `🗂  Applied ${applied.length} migration(s).`
+        );
+        startServer();
+      })
+      .catch((error) => {
+        console.error('❌ Migrations failed, refusing to start:', error);
+        process.exit(1);
+      });
+  }
 }
 
 export { server, corsAllowedOrigins };
