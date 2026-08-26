@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'ai-dating-app/**'
+  # Lets a failed or workflow-only change be re-run without a dummy commit.
+  workflow_dispatch:
 
 jobs:
   eas-build:
