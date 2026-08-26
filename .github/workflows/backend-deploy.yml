@@ -59,22 +59,27 @@ jobs:
             FREE_TOKEN_ALLOWANCE=30
             TOKEN_ALLOWANCE_INTERVAL_HOURS=24
             REQUIRE_EXTERNAL_SERVICES=false
+          # NOTE: the secrets block below is a literal string passed straight to
+          # gcloud, NOT yaml. A "#" line inside it becomes a bogus secret mapping
+          # and fails the deploy, so keep commentary out here.
+          #
+          # Phone verification and cloud media are OFF in production until Twilio
+          # and Cloudinary secrets exist in Secret Manager. The
+          # REQUIRE_EXTERNAL_SERVICES=false above is what suppresses the startup
+          # check that would otherwise catch it. Once the secrets are created, add
+          # these lines to the block below and drop that flag:
+          #   TWILIO_ACCOUNT_SID=twilio-account-sid:latest
+          #   TWILIO_AUTH_TOKEN=twilio-auth-token:latest
+          #   TWILIO_FROM_NUMBER=twilio-from-number:latest
+          #   CLOUDINARY_CLOUD_NAME=cloudinary-cloud-name:latest
+          #   CLOUDINARY_API_KEY=cloudinary-api-key:latest
+          #   CLOUDINARY_API_SECRET=cloudinary-api-secret:latest
           secrets: |
             DATABASE_URL=database-url:latest
             JWT_SECRET=jwt-secret:latest
             OPENAI_API_KEY=openai-api-key:latest
             GOOGLE_MAPS_API_KEY=google-maps-api-key:latest
             GOOGLE_OAUTH_CLIENT_IDS=google-oauth-client-ids:latest
-            # Phone verification and cloud media are OFF in production until these
-            # secrets exist in Secret Manager. REQUIRE_EXTERNAL_SERVICES=false above
-            # is what suppresses the startup check that would otherwise catch it.
-            # Create the secrets, uncomment these, then drop that flag.
-            # TWILIO_ACCOUNT_SID=twilio-account-sid:latest
-            # TWILIO_AUTH_TOKEN=twilio-auth-token:latest
-            # TWILIO_FROM_NUMBER=twilio-from-number:latest
-            # CLOUDINARY_CLOUD_NAME=cloudinary-cloud-name:latest
-            # CLOUDINARY_API_KEY=cloudinary-api-key:latest
-            # CLOUDINARY_API_SECRET=cloudinary-api-secret:latest
 
       - name: Show deployed URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

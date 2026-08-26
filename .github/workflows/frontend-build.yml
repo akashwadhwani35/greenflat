@@ -20,7 +20,10 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # eas-cli needs Node >= 22. eas-version below is pinned to "latest", so
+          # this broke on its own when a newer cli was published, not on a change
+          # in this repo.
+          node-version: 22
           cache: npm
           cache-dependency-path: ai-dating-app/package-lock.json
 
