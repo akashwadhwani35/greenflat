@@ -3,6 +3,7 @@ import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
 import { analyzeSelfieAgainstProfile } from '../services/openai.service';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
+import { isEmailConfigured, normalizeEmail, sendOtpEmail } from '../services/email.service';
 
 const OTP_TTL_SECONDS = 300;
 const OTP_REQUEST_COOLDOWN_SECONDS = 60;
@@ -65,22 +66,60 @@ const getOrCreateVerificationStatus = async (userId: number) => {
   return inserted.rows[0];
 };
 
+/**
+ * A verification code can go to an email address or a phone number.
+ *
+ * Email is the default path: it needs no carrier registration and Resend's free
+ * tier covers our volume, whereas SMS needs a paid provider. The onboarding
+ * screen already lets the user pick either.
+ */
+type OtpChannel = 'email' | 'phone';
+type OtpTarget = { channel: OtpChannel; value: string };
+
+const resolveOtpTarget = (body: any): OtpTarget | null => {
+  const email = normalizeEmail(body?.email);
+  if (email) return { channel: 'email', value: email };
+
+  const phone = normalizePhone(body?.phone);
+  if (phone) return { channel: 'phone', value: phone };
+
+  return null;
+};
+
+const maskEmail = (email: string) => {
+  const [user, domain] = email.split('@');
+  if (!domain) return email;
+  const head = user.slice(0, 1);
+  return `${head}${'*'.repeat(Math.max(1, user.length - 1))}@${domain}`;
+};
+
+const maskTarget = (t: OtpTarget) => (t.channel === 'email' ? maskEmail(t.value) : maskPhone(t.value));
+
+/** Which provider must be live for this channel, and whether it is. */
+const isChannelConfigured = (channel: OtpChannel) =>
+  channel === 'email' ? isEmailConfigured() : isSmsConfigured();
+
 export const requestOtp = async (req: Request, res: Response) => {
   try {
-    const normalizedPhone = normalizePhone((req.body as any)?.phone);
-    if (!normalizedPhone) {
-      return res.status(400).json({ error: 'Phone must include a valid country/area number' });
+    const target = resolveOtpTarget(req.body);
+    if (!target) {
+      return res.status(400).json({ error: 'A valid email address or phone number is required' });
     }
 
-    const smsConfigured = isSmsConfigured();
+    const column = target.channel;
+    const configured = isChannelConfigured(target.channel);
     const devBypass = canUseDevOtpBypass();
-    if (!smsConfigured && !devBypass) {
-      return res.status(503).json({ error: 'SMS provider is not configured' });
+    if (!configured && !devBypass) {
+      return res.status(503).json({
+        error: target.channel === 'email'
+          ? 'Email provider is not configured'
+          : 'SMS provider is not configured',
+      });
     }
 
     const recentOtp = await pool.query(
-      'SELECT created_at FROM otp_codes WHERE phone = $1',
-      [normalizedPhone]
+      `SELECT created_at FROM otp_codes WHERE ${column} = $1`,
+      [target.value]
     );
     if (recentOtp.rows.length > 0) {
       const createdAt = new Date(recentOtp.rows[0].created_at).getTime();
@@ -96,8 +135,8 @@ export const requestOtp = async (req: Request, res: Response) => {
     const hourlyCount = await pool.query(
       `SELECT COUNT(*)::int AS count
        FROM otp_request_audit
-       WHERE phone = $1 AND created_at >= NOW() - INTERVAL '1 hour'`,
-      [normalizedPhone]
+       WHERE ${column} = $1 AND created_at >= NOW() - INTERVAL '1 hour'`,
+      [target.value]
     );
     if (hourlyCount.rows[0]?.count >= OTP_REQUEST_LIMIT_PER_HOUR) {
       return res.status(429).json({
@@ -110,32 +149,33 @@ export const requestOtp = async (req: Request, res: Response) => {
     const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
 
     await pool.query(
-      `
-        INSERT INTO otp_codes (phone, code, expires_at, verify_attempts)
-        VALUES ($1, $2, $3, 0)
-        ON CONFLICT (phone) DO UPDATE SET code = $2, expires_at = $3, verify_attempts = 0, created_at = NOW()
-      `,
-      [normalizedPhone, code, expiresAt]
+      `INSERT INTO otp_codes (${column}, code, expires_at, verify_attempts)
+       VALUES ($1, $2, $3, 0)
+       ON CONFLICT (${column}) DO UPDATE
+         SET code = $2, expires_at = $3, verify_attempts = 0, created_at = NOW()`,
+      [target.value, code, expiresAt]
     );
 
-    await pool.query(
-      'INSERT INTO otp_request_audit (phone) VALUES ($1)',
-      [normalizedPhone]
-    );
+    await pool.query(`INSERT INTO otp_request_audit (${column}) VALUES ($1)`, [target.value]);
 
-    if (smsConfigured) {
-      await sendOtpSms(normalizedPhone, code);
-    }
-
-    if (!smsConfigured) {
-      console.log(`[DEV] Verification OTP for ${normalizedPhone}: ${code}`);
+    if (configured) {
+      if (target.channel === 'email') {
+        await sendOtpEmail(target.value, code);
+      } else {
+        await sendOtpSms(target.value, code);
+      }
+    } else {
+      console.log(`[DEV] Verification OTP for ${target.value}: ${code}`);
     }
 
     return res.json({
       message: 'OTP sent',
+      channel: target.channel,
       expires_in_seconds: OTP_TTL_SECONDS,
-      phone_hint: maskPhone(normalizedPhone),
-      normalized_phone: normalizedPhone,
+      destination_hint: maskTarget(target),
+      // Kept for older clients that read these fields.
+      phone_hint: target.channel === 'phone' ? maskPhone(target.value) : undefined,
+      normalized_phone: target.channel === 'phone' ? target.value : undefined,
     });
   } catch (error) {
     console.error('Request OTP error', error);
@@ -150,28 +190,33 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const normalizedPhone = normalizePhone((req.body as any)?.phone);
+    const target = resolveOtpTarget(req.body);
     const normalizedCode = normalizeOtpCode((req.body as any)?.code);
-    if (!normalizedPhone || !normalizedCode) {
-      return res.status(400).json({ error: 'Phone and a valid 6-digit code are required' });
+    if (!target || !normalizedCode) {
+      return res.status(400).json({
+        error: 'A valid email address or phone number and a 6-digit code are required',
+      });
     }
+
+    const column = target.channel;
     const otpResult = await pool.query(
-      'SELECT * FROM otp_codes WHERE phone = $1',
-      [normalizedPhone]
+      `SELECT * FROM otp_codes WHERE ${column} = $1`,
+      [target.value]
     );
     if (otpResult.rows.length === 0) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
+
     const record = otpResult.rows[0];
     if (record.code !== normalizedCode) {
       const nextAttempts = Number(record.verify_attempts || 0) + 1;
       if (nextAttempts >= OTP_VERIFY_MAX_ATTEMPTS) {
-        await pool.query('DELETE FROM otp_codes WHERE phone = $1', [normalizedPhone]);
+        await pool.query(`DELETE FROM otp_codes WHERE ${column} = $1`, [target.value]);
         return res.status(429).json({ error: 'Too many invalid attempts. Request a new OTP.' });
       }
       await pool.query(
-        'UPDATE otp_codes SET verify_attempts = $2 WHERE phone = $1',
-        [normalizedPhone, nextAttempts]
+        `UPDATE otp_codes SET verify_attempts = $2 WHERE ${column} = $1`,
+        [target.value, nextAttempts]
       );
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
@@ -179,22 +224,40 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
 
-    await pool.query('DELETE FROM otp_codes WHERE phone = $1', [normalizedPhone]);
+    await pool.query(`DELETE FROM otp_codes WHERE ${column} = $1`, [target.value]);
     await pool.query('UPDATE users SET is_verified = TRUE WHERE id = $1', [userId]);
-    const statusResult = await pool.query(
-      `INSERT INTO verification_status (user_id, phone, otp_verified, updated_at)
-       VALUES ($1, $2, TRUE, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET phone = $2, otp_verified = TRUE, updated_at = NOW()
-       RETURNING *`,
-      [userId, normalizedPhone]
-    );
 
-    res.json({ message: 'OTP verified', status: statusResult.rows[0] });
+    const statusResult = target.channel === 'email'
+      ? await pool.query(
+          `INSERT INTO verification_status (user_id, email, email_verified, otp_verified, updated_at)
+           VALUES ($1, $2, TRUE, TRUE, NOW())
+           ON CONFLICT (user_id) DO UPDATE
+             SET email = $2, email_verified = TRUE, otp_verified = TRUE, updated_at = NOW()
+           RETURNING *`,
+          [userId, target.value]
+        )
+      : await pool.query(
+          `INSERT INTO verification_status (user_id, phone, otp_verified, updated_at)
+           VALUES ($1, $2, TRUE, NOW())
+           ON CONFLICT (user_id) DO UPDATE
+             SET phone = $2, otp_verified = TRUE, updated_at = NOW()
+           RETURNING *`,
+          [userId, target.value]
+        );
+
+    return res.json({
+      // `status` is the field the shipped client reads; keep it.
+      message: 'OTP verified',
+      channel: target.channel,
+      status: statusResult.rows[0],
+      verification: statusResult.rows[0],
+    });
   } catch (error) {
     console.error('Verify OTP error', error);
     res.status(500).json({ error: 'Failed to verify OTP' });
   }
 };
+
 
 export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
   try {

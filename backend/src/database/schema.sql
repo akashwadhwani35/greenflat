@@ -299,7 +299,8 @@ CREATE TABLE IF NOT EXISTS blocks (
 -- OTP Codes (for phone verification)
 CREATE TABLE IF NOT EXISTS otp_codes (
     id SERIAL PRIMARY KEY,
-    phone TEXT UNIQUE NOT NULL,
+    phone TEXT UNIQUE,
+    email TEXT UNIQUE,
     code CHAR(6) NOT NULL,
     verify_attempts INTEGER DEFAULT 0,
     expires_at TIMESTAMPTZ NOT NULL,
@@ -308,7 +309,8 @@ CREATE TABLE IF NOT EXISTS otp_codes (
 
 CREATE TABLE IF NOT EXISTS otp_request_audit (
     id SERIAL PRIMARY KEY,
-    phone TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -317,6 +319,8 @@ CREATE TABLE IF NOT EXISTS verification_status (
     id SERIAL PRIMARY KEY,
     user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     phone TEXT,
+    email TEXT,
+    email_verified BOOLEAN DEFAULT FALSE,
     otp_verified BOOLEAN DEFAULT FALSE,
     face_status VARCHAR(12) DEFAULT 'unverified' CHECK (face_status IN ('unverified', 'pending', 'verified', 'failed')),
     age_verified BOOLEAN DEFAULT FALSE,

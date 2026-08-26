@@ -732,6 +732,59 @@ describe('GreenFlag backend core flow', () => {
     expect(getResponse.body.preferences.daily_picks).toBe(false);
   });
 
+  it('sends and verifies an OTP by email', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `emailotp_${Date.now()}@example.com`,
+      name: 'Email OTP',
+    });
+    const target = `verify.me.${Date.now()}@example.com`;
+
+    const request = await agent
+      .post('/api/verification/otp/request')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ email: target });
+
+    expect(request.status).toBe(200);
+    expect(request.body.channel).toBe('email');
+    // The address must never be echoed back in full.
+    expect(request.body.destination_hint).not.toBe(target);
+    expect(request.body.destination_hint).toContain('@');
+
+    const stored = await pool.query('SELECT code FROM otp_codes WHERE email = $1', [target]);
+    expect(stored.rows).toHaveLength(1);
+
+    const wrong = await agent
+      .post('/api/verification/otp/verify')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ email: target, code: '000000' });
+    expect(wrong.status).toBe(400);
+
+    const verify = await agent
+      .post('/api/verification/otp/verify')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ email: target, code: stored.rows[0].code });
+
+    expect(verify.status).toBe(200);
+    expect(verify.body.verification.email_verified).toBe(true);
+
+    const flag = await pool.query('SELECT is_verified FROM users WHERE id = $1', [user.userId]);
+    expect(flag.rows[0].is_verified).toBe(true);
+  });
+
+  it('rejects a malformed email for OTP', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `bademail_${Date.now()}@example.com`,
+      name: 'Bad Email',
+    });
+
+    const response = await agent
+      .post('/api/verification/otp/request')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ email: 'not-an-address' });
+
+    expect(response.status).toBe(400);
+  });
+
   it('supports dev OTP fallback when SMS provider is not configured', async () => {
     const user = await signupAndCompleteProfile({
       email: `otp_${Date.now()}@example.com`,
