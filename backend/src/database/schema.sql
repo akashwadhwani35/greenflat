@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS users (
     premium_expires_at TIMESTAMP,
     boost_expires_at TIMESTAMP,
     credit_balance INTEGER NOT NULL DEFAULT 50,
+    last_token_refill_at TIMESTAMP,
     cooldown_enabled BOOLEAN DEFAULT FALSE,
     cooldown_until TIMESTAMP,
     push_token TEXT,
@@ -31,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     show_online_status BOOLEAN DEFAULT TRUE,
     is_admin BOOLEAN DEFAULT FALSE,
     is_banned BOOLEAN DEFAULT FALSE,
+    is_shadow_banned BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -200,6 +202,34 @@ CREATE TABLE IF NOT EXISTS credit_transactions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Subscriptions Table
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    plan VARCHAR(20) NOT NULL CHECK (plan IN ('pro', 'premium')),
+    status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'expired', 'cancelled')),
+    starts_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    provider VARCHAR(20),
+    provider_transaction_id VARCHAR(255) UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Token Purchases Table (money in integer cents, never floats)
+CREATE TABLE IF NOT EXISTS token_purchases (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    pack_id VARCHAR(20) NOT NULL,
+    tokens INTEGER NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    currency VARCHAR(3) NOT NULL DEFAULT 'USD',
+    provider VARCHAR(20),
+    provider_transaction_id VARCHAR(255) UNIQUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Profile Views Table
 CREATE TABLE IF NOT EXISTS profile_views (
     id SERIAL PRIMARY KEY,
@@ -317,3 +347,7 @@ CREATE INDEX idx_blocks_blocker_id ON blocks(blocker_id);
 CREATE INDEX idx_blocks_blocked_id ON blocks(blocked_id);
 CREATE INDEX idx_support_messages_created_at ON support_messages(created_at DESC);
 CREATE INDEX idx_otp_request_audit_phone_created_at ON otp_request_audit(phone, created_at DESC);
+CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
+CREATE INDEX idx_subscriptions_status ON subscriptions(status);
+CREATE INDEX idx_token_purchases_user_id ON token_purchases(user_id);
+CREATE INDEX idx_token_purchases_created_at ON token_purchases(created_at DESC);

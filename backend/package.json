@@ -7,6 +7,8 @@
     "dev": "nodemon src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
+    "migrate": "ts-node src/database/migrate.ts",
+    "migrate:prod": "node dist/database/migrate.js",
     "test": "NODE_ENV=test jest --runInBand",
     "test:watch": "NODE_ENV=test jest --watch",
     "cleanup:demo-profiles": "ts-node src/scripts/purgeDemoProfiles.ts"
