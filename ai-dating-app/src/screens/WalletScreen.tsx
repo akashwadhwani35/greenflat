@@ -23,6 +23,11 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
   const [activePlan, setActivePlan] = useState<PlanTier | null>(null);
   const [selectedTab, setSelectedTab] = useState<PlanTier>('pro');
   const [boosting, setBoosting] = useState(false);
+  // Server decides whether anything is on sale. While it is false the app must
+  // not offer purchases, because every buy attempt would come back a 501.
+  const [paymentsEnabled, setPaymentsEnabled] = useState(false);
+  const [freeAllowance, setFreeAllowance] = useState<number | null>(null);
+  const [nextRefillAt, setNextRefillAt] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchWallet = async () => {
@@ -36,6 +41,9 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
         const data = await response.json();
         setBalance(Number(data.credit_balance || 0));
         if (data.active_plan) setActivePlan(data.active_plan);
+        setPaymentsEnabled(Boolean(data.payments_enabled));
+        setFreeAllowance(data.free_allowance ?? null);
+        setNextRefillAt(data.next_refill_at ?? null);
       } finally {
         setLoading(false);
       }
@@ -43,7 +51,25 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
     fetchWallet().catch((err) => console.warn('Failed to load wallet:', err));
   }, [token, apiBaseUrl]);
 
+  // "in about 5 hours" reads better here than a timestamp, and avoids implying
+  // a precision the top-up does not have.
+  const refillCountdown = (() => {
+    if (!nextRefillAt) return null;
+    const ms = new Date(nextRefillAt).getTime() - Date.now();
+    if (!Number.isFinite(ms) || ms <= 0) return null;
+    const hours = Math.round(ms / (1000 * 60 * 60));
+    if (hours >= 1) return `in about ${hours} hour${hours === 1 ? '' : 's'}`;
+    const minutes = Math.max(1, Math.round(ms / (1000 * 60)));
+    return `in about ${minutes} minute${minutes === 1 ? '' : 's'}`;
+  })();
+
+  const refillMessage = freeAllowance
+    ? `You get ${freeAllowance} GFT free every day` +
+      (refillCountdown ? `, topping back up ${refillCountdown}.` : '. Tokens top back up automatically.')
+    : 'Your tokens top back up automatically.';
+
   const handleUpgrade = (tier: PlanTier) => {
+    if (!paymentsEnabled) return;
     if (onOpenSubscription) onOpenSubscription(tier);
     else if (onOpenCheckout) onOpenCheckout();
   };
@@ -51,10 +77,18 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
   const handleBoost = async () => {
     if (!token || !apiBaseUrl) return;
     if (balance < 20) {
-      Alert.alert('Not enough tokens', 'You need 20 GFT to boost. Get more tokens first.', [
-        { text: 'Get tokens', onPress: onOpenCheckout },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      Alert.alert(
+        'Not enough tokens',
+        paymentsEnabled
+          ? 'You need 20 GFT to boost. Get more tokens first.'
+          : `You need 20 GFT to boost. ${refillMessage}`,
+        paymentsEnabled
+          ? [
+              { text: 'Get tokens', onPress: onOpenCheckout },
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          : [{ text: 'OK' }]
+      );
       return;
     }
     setBoosting(true);
@@ -94,114 +128,131 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
             <Typography variant="small" style={{ color: theme.colors.muted }}>GF Tokens</Typography>
             <Typography variant="h1" style={{ color: theme.colors.neonGreen }}>{balance}</Typography>
           </View>
-          <Pressable
-            onPress={onOpenCheckout}
-            style={[styles.addTokens, { backgroundColor: theme.colors.neonGreen }]}
-            accessibilityRole="button"
-          >
-            <Feather name="plus" size={18} color="#000" />
-            <Typography variant="small" style={{ color: '#000', fontFamily: 'RedHatDisplay_600SemiBold' }}>
-              Get tokens
-            </Typography>
-          </Pressable>
+          {paymentsEnabled ? (
+            <Pressable
+              onPress={onOpenCheckout}
+              style={[styles.addTokens, { backgroundColor: theme.colors.neonGreen }]}
+              accessibilityRole="button"
+            >
+              <Feather name="plus" size={18} color="#000" />
+              <Typography variant="small" style={{ color: '#000', fontFamily: 'RedHatDisplay_600SemiBold' }}>
+                Get tokens
+              </Typography>
+            </Pressable>
+          ) : null}
         </View>
 
-        {/* Plan tabs */}
-        <View style={[styles.tabBar, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-          <Pressable
-            onPress={() => setSelectedTab('pro')}
-            style={[
-              styles.tab,
-              selectedTab === 'pro' && { backgroundColor: theme.colors.neonGreen },
-            ]}
-          >
-            <PixelFlag size={16} color={selectedTab === 'pro' ? '#000' : theme.colors.text} />
-            <Typography
-              variant="bodyStrong"
-              style={{ color: selectedTab === 'pro' ? '#000' : theme.colors.text }}
-            >
-              Pro
+        {/* Where tokens come from while packs are not on sale. */}
+        {!paymentsEnabled ? (
+          <View style={[styles.refillNote, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+            <Feather name="gift" size={16} color={theme.colors.neonGreen} />
+            <Typography variant="small" style={{ color: theme.colors.mutedLight, flex: 1 }}>
+              {refillMessage}
             </Typography>
-          </Pressable>
-          <Pressable
-            onPress={() => setSelectedTab('premium')}
-            style={[
-              styles.tab,
-              selectedTab === 'premium' && { backgroundColor: theme.colors.neonGreen },
-            ]}
-          >
-            <PixelFlag size={16} color={selectedTab === 'premium' ? '#000' : theme.colors.text} />
-            <Typography
-              variant="bodyStrong"
-              style={{ color: selectedTab === 'premium' ? '#000' : theme.colors.text }}
-            >
-              Premium
-            </Typography>
-          </Pressable>
-        </View>
+          </View>
+        ) : null}
 
-        {/* Plan card */}
-        {selectedTab === 'pro' ? (
-          <View
-            style={[
-              styles.planCard,
-              isProActive
-                ? { borderColor: theme.colors.neonGreen, borderWidth: 2 }
-                : { borderColor: theme.colors.neonGreen, borderWidth: 1 },
-            ]}
-          >
-            {isProActive && (
-              <View style={[styles.activeBadge, { backgroundColor: theme.colors.neonGreen }]}>
-                <Typography variant="tiny" style={{ color: '#000', fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 1 }}>
-                  ACTIVE
-                </Typography>
-              </View>
-            )}
-            <Typography variant="body" style={{ color: theme.colors.text, textAlign: 'center', marginTop: isProActive ? 8 : 0 }}>
-              Send unlimited likes & rewind anytime.
-            </Typography>
-            {!isProActive && (
-              <Pressable
-                style={[styles.upgradeButtonOutlined, { borderColor: theme.colors.neonGreen }]}
-                onPress={() => handleUpgrade('pro')}
+        {/* Paid plans are hidden entirely while nothing is on sale. */}
+        {paymentsEnabled ? (
+          <>
+          {/* Plan tabs */}
+          <View style={[styles.tabBar, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+            <Pressable
+              onPress={() => setSelectedTab('pro')}
+              style={[
+                styles.tab,
+                selectedTab === 'pro' && { backgroundColor: theme.colors.neonGreen },
+              ]}
+            >
+              <PixelFlag size={16} color={selectedTab === 'pro' ? '#000' : theme.colors.text} />
+              <Typography
+                variant="bodyStrong"
+                style={{ color: selectedTab === 'pro' ? '#000' : theme.colors.text }}
               >
-                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
-                  Upgrade
-                </Typography>
-              </Pressable>
-            )}
-          </View>
-        ) : (
-          <View
-            style={[
-              styles.planCard,
-              isPremiumActive
-                ? { borderColor: theme.colors.neonGreen, borderWidth: 2, backgroundColor: theme.colors.neonGreen }
-                : { borderColor: 'transparent', borderWidth: 0, backgroundColor: theme.colors.neonGreen },
-            ]}
-          >
-            {isPremiumActive && (
-              <View style={[styles.activeBadge, { backgroundColor: '#000' }]}>
-                <Typography variant="tiny" style={{ color: theme.colors.neonGreen, fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 1 }}>
-                  ACTIVE
-                </Typography>
-              </View>
-            )}
-            <Typography variant="body" style={{ color: '#000', textAlign: 'center', marginTop: isPremiumActive ? 8 : 0 }}>
-              Get seen first and 3x your dates.
-            </Typography>
-            {!isPremiumActive && (
-              <Pressable
-                style={[styles.upgradeButtonDark]}
-                onPress={() => handleUpgrade('premium')}
+                Pro
+              </Typography>
+            </Pressable>
+            <Pressable
+              onPress={() => setSelectedTab('premium')}
+              style={[
+                styles.tab,
+                selectedTab === 'premium' && { backgroundColor: theme.colors.neonGreen },
+              ]}
+            >
+              <PixelFlag size={16} color={selectedTab === 'premium' ? '#000' : theme.colors.text} />
+              <Typography
+                variant="bodyStrong"
+                style={{ color: selectedTab === 'premium' ? '#000' : theme.colors.text }}
               >
-                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
-                  Upgrade
-                </Typography>
-              </Pressable>
-            )}
+                Premium
+              </Typography>
+            </Pressable>
           </View>
-        )}
+
+          {/* Plan card */}
+          {selectedTab === 'pro' ? (
+            <View
+              style={[
+                styles.planCard,
+                isProActive
+                  ? { borderColor: theme.colors.neonGreen, borderWidth: 2 }
+                  : { borderColor: theme.colors.neonGreen, borderWidth: 1 },
+              ]}
+            >
+              {isProActive && (
+                <View style={[styles.activeBadge, { backgroundColor: theme.colors.neonGreen }]}>
+                  <Typography variant="tiny" style={{ color: '#000', fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 1 }}>
+                    ACTIVE
+                  </Typography>
+                </View>
+              )}
+              <Typography variant="body" style={{ color: theme.colors.text, textAlign: 'center', marginTop: isProActive ? 8 : 0 }}>
+                Send unlimited likes & rewind anytime.
+              </Typography>
+              {!isProActive && (
+                <Pressable
+                  style={[styles.upgradeButtonOutlined, { borderColor: theme.colors.neonGreen }]}
+                  onPress={() => handleUpgrade('pro')}
+                >
+                  <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+                    Upgrade
+                  </Typography>
+                </Pressable>
+              )}
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.planCard,
+                isPremiumActive
+                  ? { borderColor: theme.colors.neonGreen, borderWidth: 2, backgroundColor: theme.colors.neonGreen }
+                  : { borderColor: 'transparent', borderWidth: 0, backgroundColor: theme.colors.neonGreen },
+              ]}
+            >
+              {isPremiumActive && (
+                <View style={[styles.activeBadge, { backgroundColor: '#000' }]}>
+                  <Typography variant="tiny" style={{ color: theme.colors.neonGreen, fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 1 }}>
+                    ACTIVE
+                  </Typography>
+                </View>
+              )}
+              <Typography variant="body" style={{ color: '#000', textAlign: 'center', marginTop: isPremiumActive ? 8 : 0 }}>
+                Get seen first and 3x your dates.
+              </Typography>
+              {!isPremiumActive && (
+                <Pressable
+                  style={[styles.upgradeButtonDark]}
+                  onPress={() => handleUpgrade('premium')}
+                >
+                  <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+                    Upgrade
+                  </Typography>
+                </Pressable>
+              )}
+            </View>
+          )}
+          </>
+        ) : null}
 
         {/* Boost button */}
         <Pressable
@@ -261,6 +312,15 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  refillNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   tabBar: {
     flexDirection: 'row',

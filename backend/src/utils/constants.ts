@@ -32,6 +32,21 @@ export const PREMIUM_BENEFITS = {
   search_shine: true,
 };
 
+// Free token allowance.
+//
+// Tokens cannot be bought until in-app billing exists, so without this a user
+// spends their signup balance and is then permanently locked out of AI search,
+// superlikes, compliments and boost.
+//
+// This is a top-up to a floor, not an addition: a user already at or above the
+// floor receives nothing, so tokens cannot be stockpiled day over day. It also
+// serves as the per-user ceiling on our OpenAI spend, since AI search is the
+// main token sink and every search is a real model call.
+export const FREE_TOKEN_ALLOWANCE = Number(process.env.FREE_TOKEN_ALLOWANCE || 30);
+export const TOKEN_ALLOWANCE_INTERVAL_HOURS = Number(
+  process.env.TOKEN_ALLOWANCE_INTERVAL_HOURS || 24
+);
+
 export const TOKEN_COSTS = {
   AI_SEARCH: 1,
   SUPER_LIKE: 4,

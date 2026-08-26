@@ -3,7 +3,7 @@ import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
 import { notifyLikeReceived, notifyMatch } from '../services/push.service';
-import { consumeCredits } from '../services/credits.service';
+import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
 
 // Helper to reset activity limits if needed
 const checkAndResetLimits = async (userId: number, client: any) => {
@@ -51,6 +51,9 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     if (!target_user_id) {
       return res.status(400).json({ error: 'Target user ID is required' });
     }
+
+    // Superlikes cost tokens, so settle the free allowance first.
+    await ensureDailyAllowance(userId);
 
     await client.query('BEGIN');
 
@@ -405,6 +408,9 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
       target_user_id?: number;
       content?: string;
     };
+
+    // Compliments cost tokens, so settle the free allowance first.
+    await ensureDailyAllowance(userId);
 
     if (!target_user_id || target_user_id === userId) {
       return res.status(400).json({ error: 'Valid target user ID is required' });
