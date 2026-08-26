@@ -163,10 +163,10 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
     setLoading(true);
     const [s, rev, tok, eng, gr, rep, usr] = await Promise.all([
       safeFetch<Stats | null>(`${apiBaseUrl}/admin/stats`, null),
-      safeFetch<RevenueData | null>(`${apiBaseUrl}/admin/analytics/revenue`, null),
-      safeFetch<TokenData | null>(`${apiBaseUrl}/admin/analytics/tokens`, null),
-      safeFetch<EngagementData | null>(`${apiBaseUrl}/admin/analytics/engagement`, null),
-      safeFetch<GrowthData | null>(`${apiBaseUrl}/admin/analytics/growth`, null),
+      safeFetch<RevenueRaw | null>(`${apiBaseUrl}/admin/analytics/revenue`, null),
+      safeFetch<TokenRaw | null>(`${apiBaseUrl}/admin/analytics/tokens`, null),
+      safeFetch<EngagementRaw | null>(`${apiBaseUrl}/admin/analytics/engagement`, null),
+      safeFetch<GrowthRaw | null>(`${apiBaseUrl}/admin/analytics/growth`, null),
       safeFetch<{ reports: Report[] }>(`${apiBaseUrl}/admin/reports?limit=20`, { reports: [] }),
       safeFetch<{ users: User[] }>(`${apiBaseUrl}/admin/users?limit=20`, { users: [] }),
     ]);

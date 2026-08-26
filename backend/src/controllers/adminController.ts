@@ -153,18 +153,23 @@ export const getRevenueAnalytics = async (req: AuthRequest, res: Response) => {
 
     // Total token revenue & revenue by period
     try {
-      const totalRes = await pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM token_purchases`);
-      data.total_token_revenue = parseFloat(totalRes.rows[0].total);
+      // Stored in integer cents; reported in whole currency units.
+      const revenue = await pool.query(
+        `SELECT
+           COALESCE(SUM(amount_cents), 0) AS lifetime,
+           COALESCE(SUM(amount_cents) FILTER (WHERE created_at >= CURRENT_DATE), 0) AS today,
+           COALESCE(SUM(amount_cents) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days'), 0) AS week,
+           COALESCE(SUM(amount_cents) FILTER (WHERE created_at >= NOW() - INTERVAL '30 days'), 0) AS month
+         FROM token_purchases`
+      );
+      const row = revenue.rows[0];
+      const toUnits = (cents: any) => Number((Number(cents) / 100).toFixed(2));
+
+      data.total_token_revenue = toUnits(row.lifetime);
       data.revenue_lifetime = data.total_token_revenue;
-
-      const todayRes = await pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM token_purchases WHERE created_at >= CURRENT_DATE`);
-      data.revenue_today = parseFloat(todayRes.rows[0].total);
-
-      const week = await pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM token_purchases WHERE created_at >= NOW() - INTERVAL '7 days'`);
-      data.revenue_7d = parseFloat(week.rows[0].total);
-
-      const month = await pool.query(`SELECT COALESCE(SUM(amount), 0) AS total FROM token_purchases WHERE created_at >= NOW() - INTERVAL '30 days'`);
-      data.revenue_30d = parseFloat(month.rows[0].total);
+      data.revenue_today = toUnits(row.today);
+      data.revenue_7d = toUnits(row.week);
+      data.revenue_30d = toUnits(row.month);
     } catch (e) {
       console.warn('Revenue query (token_purchases) failed, using defaults:', (e as Error).message);
     }
@@ -231,32 +236,45 @@ export const getTokenAnalytics = async (req: AuthRequest, res: Response) => {
       console.warn('Token purchases query failed:', (e as Error).message);
     }
 
-    // Total tokens spent & spend by feature
+    // Total tokens spent & spend by feature.
+    // Debits are stored as a positive amount with direction='debit'; there is no
+    // negative-amount row and no `feature` column, so spend is grouped by reason.
     try {
-      const spent = await pool.query(`SELECT COALESCE(SUM(ABS(amount)), 0) AS total FROM credit_transactions WHERE amount < 0`);
+      const spent = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0) AS total FROM credit_transactions WHERE direction = 'debit'`
+      );
       data.total_tokens_spent = parseInt(spent.rows[0].total, 10);
 
       const byFeature = await pool.query(
-        `SELECT feature, COALESCE(SUM(ABS(amount)), 0)::int AS total_spent, COUNT(*)::int AS usage_count
+        `SELECT reason, COALESCE(SUM(amount), 0)::int AS total_spent, COUNT(*)::int AS usage_count
          FROM credit_transactions
-         WHERE amount < 0 AND feature IS NOT NULL
-         GROUP BY feature
+         WHERE direction = 'debit'
+         GROUP BY reason
          ORDER BY total_spent DESC`
       );
 
+      // Ledger reasons -> the feature buckets the dashboard renders.
+      const REASON_TO_FEATURE: Record<string, string> = {
+        ai_search: 'ai_search',
+        superlike: 'super_like',
+        compliment_send: 'compliment',
+        boost_activation: 'boost',
+      };
+
       for (const row of byFeature.rows) {
-        const key = row.feature as string;
-        if (key in data.spend_by_feature) {
+        const key = REASON_TO_FEATURE[row.reason as string];
+        if (key && key in data.spend_by_feature) {
           data.spend_by_feature[key] = row.total_spent;
         }
       }
 
-      if (byFeature.rows.length > 0) {
+      const featureRows = byFeature.rows.filter((r: any) => REASON_TO_FEATURE[r.reason as string]);
+      if (featureRows.length > 0) {
         // Most used = highest usage_count
-        const mostUsed = byFeature.rows.reduce((a: any, b: any) => (b.usage_count > a.usage_count ? b : a), byFeature.rows[0]);
-        data.most_used_feature = mostUsed.feature;
-        // Most profitable = highest total_spent
-        data.most_profitable_feature = byFeature.rows[0].feature;
+        const mostUsed = featureRows.reduce((a: any, b: any) => (b.usage_count > a.usage_count ? b : a), featureRows[0]);
+        data.most_used_feature = REASON_TO_FEATURE[mostUsed.reason as string];
+        // Most profitable = highest total_spent (rows are already sorted)
+        data.most_profitable_feature = REASON_TO_FEATURE[featureRows[0].reason as string];
       }
     } catch (e) {
       console.warn('Credit transactions query failed:', (e as Error).message);
@@ -279,34 +297,65 @@ export const getEngagementAnalytics = async (req: AuthRequest, res: Response) =>
       avg_time_to_first_reply_minutes: 0,
     };
 
-    // Compliment reply rate
+    // Compliment reply rate. Compliments are likes with is_compliment set; a
+    // "reply" is the recipient having liked back (which is what creates a match).
     try {
-      const total = await pool.query(`SELECT COUNT(*)::int AS count FROM compliments`);
-      const replied = await pool.query(`SELECT COUNT(*)::int AS count FROM compliments WHERE replied = true`);
-      if (total.rows[0].count > 0) {
-        data.compliment_reply_rate = parseFloat(((replied.rows[0].count / total.rows[0].count) * 100).toFixed(2));
+      const compliments = await pool.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (
+             WHERE EXISTS (
+               SELECT 1 FROM likes back
+               WHERE back.liker_id = l.liked_id AND back.liked_id = l.liker_id
+             )
+           )::int AS replied
+         FROM likes l
+         WHERE l.is_compliment = TRUE`
+      );
+      const { total, replied } = compliments.rows[0];
+      if (total > 0) {
+        data.compliment_reply_rate = parseFloat(((replied / total) * 100).toFixed(2));
       }
     } catch (e) {
       console.warn('Compliment reply rate query failed:', (e as Error).message);
     }
 
-    // Green Flag match rate
+    // Green Flag match rate. A Green Flag like is a superlike.
     try {
-      const totalGF = await pool.query(`SELECT COUNT(*)::int AS count FROM green_flags`);
-      const matchedGF = await pool.query(`SELECT COUNT(*)::int AS count FROM green_flags WHERE matched = true`);
-      if (totalGF.rows[0].count > 0) {
-        data.green_flag_match_rate = parseFloat(((matchedGF.rows[0].count / totalGF.rows[0].count) * 100).toFixed(2));
+      const greenFlags = await pool.query(
+        `SELECT
+           COUNT(*)::int AS total,
+           COUNT(*) FILTER (
+             WHERE EXISTS (
+               SELECT 1 FROM likes back
+               WHERE back.liker_id = l.liked_id AND back.liked_id = l.liker_id
+             )
+           )::int AS matched
+         FROM likes l
+         WHERE l.is_superlike = TRUE`
+      );
+      const { total, matched } = greenFlags.rows[0];
+      if (total > 0) {
+        data.green_flag_match_rate = parseFloat(((matched / total) * 100).toFixed(2));
       }
     } catch (e) {
       console.warn('Green flag match rate query failed:', (e as Error).message);
     }
 
-    // Boost effectiveness (profiles viewed during boost / total boosts)
+    // Boost effectiveness: average profile views earned per boost purchased.
+    // Boosts are ledgered as credit_transactions; views come from profile_views.
     try {
-      const boosts = await pool.query(`SELECT COUNT(*)::int AS count FROM boosts`);
-      const boostViews = await pool.query(`SELECT COALESCE(SUM(views_gained), 0)::int AS total FROM boosts`);
+      const boosts = await pool.query(
+        `SELECT COUNT(*)::int AS count FROM credit_transactions WHERE reason = 'boost_activation'`
+      );
       if (boosts.rows[0].count > 0) {
-        data.boost_effectiveness = parseFloat((boostViews.rows[0].total / boosts.rows[0].count).toFixed(2));
+        const views = await pool.query(
+          `SELECT COUNT(*)::int AS total
+           FROM profile_views pv
+           JOIN users u ON u.id = pv.viewed_id
+           WHERE u.boost_expires_at IS NOT NULL AND pv.created_at <= u.boost_expires_at`
+        );
+        data.boost_effectiveness = parseFloat((views.rows[0].total / boosts.rows[0].count).toFixed(2));
       }
     } catch (e) {
       console.warn('Boost effectiveness query failed:', (e as Error).message);
@@ -469,33 +518,44 @@ export const grantRemoveTokens = async (req: AuthRequest, res: Response) => {
 
     const delta = action === 'grant' ? amount : -amount;
 
-    // Update wallet balance
-    const result = await pool.query(
-      `UPDATE wallet
-       SET credit_balance = GREATEST(credit_balance + $1, 0), updated_at = NOW()
-       WHERE user_id = $2
-       RETURNING credit_balance`,
-      [delta, userId]
-    );
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    if (result.rows.length === 0) {
-      // Wallet row may not exist; create it
-      if (action === 'grant') {
-        const ins = await pool.query(
-          `INSERT INTO wallet (user_id, credit_balance, created_at, updated_at)
-           VALUES ($1, $2, NOW(), NOW())
-           RETURNING credit_balance`,
-          [userId, amount]
-        );
-        return res.json({ message: `Granted ${amount} tokens`, credit_balance: ins.rows[0].credit_balance });
-      }
-      return res.status(400).json({ error: 'User has no wallet to remove tokens from' });
+      // Balances live on users.credit_balance. There is no separate wallet table.
+      const result = await client.query(
+        `UPDATE users
+         SET credit_balance = GREATEST(credit_balance + $1::int, 0), updated_at = NOW()
+         WHERE id = $2
+         RETURNING credit_balance`,
+        [delta, userId]
+      );
+
+      // Every balance change is ledgered so the wallet history stays truthful.
+      await client.query(
+        `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          userId,
+          amount,
+          action === 'grant' ? 'credit' : 'debit',
+          action === 'grant' ? 'admin_grant' : 'admin_remove',
+          JSON.stringify({ granted_by: req.userId }),
+        ]
+      );
+
+      await client.query('COMMIT');
+
+      res.json({
+        message: action === 'grant' ? `Granted ${amount} tokens` : `Removed ${amount} tokens`,
+        credit_balance: Number(result.rows[0].credit_balance),
+      });
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
     }
-
-    res.json({
-      message: action === 'grant' ? `Granted ${amount} tokens` : `Removed ${amount} tokens`,
-      credit_balance: result.rows[0].credit_balance,
-    });
   } catch (error) {
     console.error('Admin grantRemoveTokens error:', error);
     res.status(500).json({ error: 'Failed to update tokens' });
