@@ -4,7 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, TOKEN_COSTS } from '../utils/constants';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
-import { consumeCredits, getCreditBalance } from '../services/credits.service';
+import { consumeCredits, getCreditBalance, ensureDailyAllowance } from '../services/credits.service';
 
 const haversineDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const toRad = (value: number) => (value * Math.PI) / 180;
@@ -199,6 +199,9 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       charge_credits?: boolean;
     };
     const chargeCredits = Boolean((req.body as any)?.charge_credits);
+
+    // Top up the free allowance before anything reads or spends the balance.
+    await ensureDailyAllowance(userId);
     const isAIEnabled = Boolean(process.env.OPENAI_API_KEY);
     let remainingCredits: number | null = null;
 
@@ -206,25 +209,26 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     let aiParsedQuery: Awaited<ReturnType<typeof parseSearchQuery>> | null = null;
     const enhancedFilters: SearchFilters = { ...filters };
 
+    // Filters the AI inferred from prose rather than ones the user set explicitly.
+    // A phrase like "late 20s" should narrow the results, but it must never be the
+    // reason someone sees an empty grid, so these are dropped and retried on zero.
+    const aiInferredFilterKeys: Array<keyof SearchFilters> = [];
+
     if (isAIEnabled && search_query && search_query.trim().length > 0) {
       aiParsedQuery = await parseSearchQuery(search_query);
 
-      // Merge AI-parsed filters with user-provided filters
-      if (aiParsedQuery?.filters?.min_age && !enhancedFilters.minAge) {
-        enhancedFilters.minAge = aiParsedQuery.filters.min_age;
-      }
-      if (aiParsedQuery?.filters?.max_age && !enhancedFilters.maxAge) {
-        enhancedFilters.maxAge = aiParsedQuery.filters.max_age;
-      }
-      if (aiParsedQuery?.filters?.min_height && !enhancedFilters.minHeight) {
-        enhancedFilters.minHeight = aiParsedQuery.filters.min_height;
-      }
-      if (aiParsedQuery?.filters?.city && !enhancedFilters.city) {
-        enhancedFilters.city = aiParsedQuery.filters.city;
-      }
-      if (aiParsedQuery?.filters?.relationship_goal && !enhancedFilters.relationship_goal) {
-        enhancedFilters.relationship_goal = aiParsedQuery.filters.relationship_goal;
-      }
+      const applyInferred = <K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) => {
+        if (value === undefined || value === null) return;
+        if (enhancedFilters[key] !== undefined && enhancedFilters[key] !== null) return;
+        enhancedFilters[key] = value;
+        aiInferredFilterKeys.push(key);
+      };
+
+      applyInferred('minAge', aiParsedQuery?.filters?.min_age as any);
+      applyInferred('maxAge', aiParsedQuery?.filters?.max_age as any);
+      applyInferred('minHeight', aiParsedQuery?.filters?.min_height as any);
+      applyInferred('city', aiParsedQuery?.filters?.city as any);
+      applyInferred('relationship_goal', aiParsedQuery?.filters?.relationship_goal as any);
     }
 
     // Get current user data
@@ -308,197 +312,227 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const onGridCount = limits.on_grid_results;
     const offGridCount = limits.off_grid_results;
 
-    // Build base query for candidates
-    let queryParams: any[] = [userId];
-    let paramIndex = 2;
+    // Built as a function so the same query can be re-run with the AI-inferred
+    // filters removed when they eliminate every candidate.
+    const buildCandidateQuery = (f: SearchFilters): { sql: string; params: any[] } => {
+      // Build base query for candidates
+      let queryParams: any[] = [userId];
+      let paramIndex = 2;
 
-    let baseQuery = `
-      SELECT
-        u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
-        p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
-        p.smoker, p.drinker, p.relationship_goal,
-        pr.personality_traits, pr.personality_summary, pr.compatibility_tips, pr.top_traits,
-        privacy.hide_distance, privacy.hide_city, privacy.incognito_mode, privacy.show_online_status,
-        uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
-        uap.dealbreakers, uap.growth_journey, uap.persona_embedding,
-        primary_photo.photo_url as primary_photo
-      FROM users u
-      LEFT JOIN user_profiles p ON u.id = p.user_id
-      LEFT JOIN personality_responses pr ON u.id = pr.user_id
-      LEFT JOIN user_ai_profiles uap ON u.id = uap.user_id
-      LEFT JOIN user_privacy_settings privacy ON privacy.user_id = u.id
-      LEFT JOIN photos primary_photo ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
-      LEFT JOIN likes existing_like ON existing_like.liker_id = $1 AND existing_like.liked_id = u.id
-      LEFT JOIN blocks blocked_rel
-        ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
-         OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
-      WHERE u.id != $1
-        AND existing_like.id IS NULL
-        AND blocked_rel.id IS NULL
-    `;
+      let baseQuery = `
+        SELECT
+          u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
+          p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
+          p.smoker, p.drinker, p.relationship_goal,
+          pr.personality_traits, pr.personality_summary, pr.compatibility_tips, pr.top_traits,
+          privacy.hide_distance, privacy.hide_city, privacy.incognito_mode, privacy.show_online_status,
+          uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
+          uap.dealbreakers, uap.growth_journey, uap.persona_embedding,
+          primary_photo.photo_url as primary_photo
+        FROM users u
+        LEFT JOIN user_profiles p ON u.id = p.user_id
+        LEFT JOIN personality_responses pr ON u.id = pr.user_id
+        LEFT JOIN user_ai_profiles uap ON u.id = uap.user_id
+        LEFT JOIN user_privacy_settings privacy ON privacy.user_id = u.id
+        LEFT JOIN photos primary_photo ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
+        LEFT JOIN likes existing_like ON existing_like.liker_id = $1 AND existing_like.liked_id = u.id
+        LEFT JOIN blocks blocked_rel
+          ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
+           OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
+        WHERE u.id != $1
+          AND existing_like.id IS NULL
+          AND blocked_rel.id IS NULL
+      `;
 
-    const requestedInterestedIn =
-      typeof enhancedFilters.interested_in === 'string' &&
-      ['male', 'female', 'both'].includes(enhancedFilters.interested_in)
-        ? enhancedFilters.interested_in
-        : undefined;
-    const effectiveInterestedIn = requestedInterestedIn || currentUser.interested_in;
+      const requestedInterestedIn =
+        typeof f.interested_in === 'string' &&
+        ['male', 'female', 'both'].includes(f.interested_in)
+          ? f.interested_in
+          : undefined;
+      const effectiveInterestedIn = requestedInterestedIn || currentUser.interested_in;
 
-    // Seeker preference (can be overridden by filter): interested_in='both' should not collapse results.
-    if (effectiveInterestedIn !== 'both') {
-      baseQuery += ` AND u.gender = $${paramIndex}`;
-      queryParams.push(effectiveInterestedIn);
-      paramIndex++;
-    }
-
-    // Reciprocal preference: candidate should also be open to the seeker's gender.
-    baseQuery += ` AND (u.interested_in = 'both' OR u.interested_in = $${paramIndex})`;
-    queryParams.push(currentUser.gender);
-    paramIndex++;
-
-    // Respect candidate privacy and blocking.
-    baseQuery += ` AND COALESCE(privacy.incognito_mode, FALSE) = FALSE`;
-
-    // Apply age filters
-    if (enhancedFilters.minAge || enhancedFilters.maxAge) {
-      const minDate = enhancedFilters.maxAge
-        ? new Date(new Date().setFullYear(new Date().getFullYear() - enhancedFilters.maxAge))
-        : null;
-      const maxDate = enhancedFilters.minAge
-        ? new Date(new Date().setFullYear(new Date().getFullYear() - enhancedFilters.minAge))
-        : null;
-
-      if (minDate) {
-        baseQuery += ` AND u.date_of_birth >= $${paramIndex}`;
-        queryParams.push(minDate);
+      // Seeker preference (can be overridden by filter): interested_in='both' should not collapse results.
+      if (effectiveInterestedIn !== 'both') {
+        baseQuery += ` AND u.gender = $${paramIndex}`;
+        queryParams.push(effectiveInterestedIn);
         paramIndex++;
       }
-      if (maxDate) {
-        baseQuery += ` AND u.date_of_birth <= $${paramIndex}`;
-        queryParams.push(maxDate);
+
+      // Reciprocal preference: candidate should also be open to the seeker's gender.
+      baseQuery += ` AND (u.interested_in = 'both' OR u.interested_in = $${paramIndex})`;
+      queryParams.push(currentUser.gender);
+      paramIndex++;
+
+      // Respect candidate privacy and blocking.
+      baseQuery += ` AND COALESCE(privacy.incognito_mode, FALSE) = FALSE`;
+
+      // Apply age filters
+      if (f.minAge || f.maxAge) {
+        const minDate = f.maxAge
+          ? new Date(new Date().setFullYear(new Date().getFullYear() - f.maxAge))
+          : null;
+        const maxDate = f.minAge
+          ? new Date(new Date().setFullYear(new Date().getFullYear() - f.minAge))
+          : null;
+
+        if (minDate) {
+          baseQuery += ` AND u.date_of_birth >= $${paramIndex}`;
+          queryParams.push(minDate);
+          paramIndex++;
+        }
+        if (maxDate) {
+          baseQuery += ` AND u.date_of_birth <= $${paramIndex}`;
+          queryParams.push(maxDate);
+          paramIndex++;
+        }
+      }
+
+      // Apply minimum height filter
+      if (f.minHeight) {
+        baseQuery += ` AND p.height >= $${paramIndex}`;
+        queryParams.push(f.minHeight);
         paramIndex++;
       }
+
+      // Apply maximum height filter
+      if (f.maxHeight) {
+        baseQuery += ` AND p.height <= $${paramIndex}`;
+        queryParams.push(f.maxHeight);
+        paramIndex++;
+      }
+
+      // Apply city filter only if explicitly specified
+      if (f.city) {
+        baseQuery += ` AND u.city = $${paramIndex}`;
+        queryParams.push(f.city);
+        paramIndex++;
+      }
+      // Note: City filtering is now optional - profiles from all cities will show if no city filter is specified
+
+      // Apply smoking habit filter
+      if (f.smoking_habit && f.smoking_habit.trim().length > 0) {
+        baseQuery += ` AND LOWER(p.smoking_habit) = LOWER($${paramIndex})`;
+        queryParams.push(f.smoking_habit);
+        paramIndex++;
+      } else if (f.smoker !== undefined) {
+        // Backwards-compatible boolean smoker filter.
+        baseQuery += ` AND p.smoker = $${paramIndex}`;
+        queryParams.push(f.smoker);
+        paramIndex++;
+      }
+
+      // Apply drinker filter
+      if (f.drinker) {
+        baseQuery += ` AND LOWER(p.drinker) = LOWER($${paramIndex})`;
+        queryParams.push(f.drinker);
+        paramIndex++;
+      }
+
+      const relationshipGoalFilter = f.relationship_goal || f.dating_intentions;
+
+      // Apply relationship goal filter
+      if (relationshipGoalFilter) {
+        baseQuery += ` AND p.relationship_goal = $${paramIndex}`;
+        queryParams.push(relationshipGoalFilter);
+        paramIndex++;
+      }
+
+      // Apply religion filter
+      if (f.religion) {
+        baseQuery += ` AND LOWER(p.religion) = LOWER($${paramIndex})`;
+        queryParams.push(f.religion);
+        paramIndex++;
+      }
+
+      // Apply children filter
+      if (f.have_kids) {
+        baseQuery += ` AND LOWER(p.have_kids) = LOWER($${paramIndex})`;
+        queryParams.push(f.have_kids);
+        paramIndex++;
+      }
+
+      // Apply politics filter
+      if (f.politics) {
+        baseQuery += ` AND LOWER(p.politics) = LOWER($${paramIndex})`;
+        queryParams.push(f.politics);
+        paramIndex++;
+      }
+
+      // Apply education filter
+      if (f.education_level) {
+        baseQuery += ` AND LOWER(COALESCE(p.education_level, p.education, '')) = LOWER($${paramIndex})`;
+        queryParams.push(f.education_level);
+        paramIndex++;
+      }
+
+      // Apply ethnicity filter
+      if (f.ethnicity) {
+        baseQuery += ` AND LOWER(p.ethnicity) = LOWER($${paramIndex})`;
+        queryParams.push(f.ethnicity);
+        paramIndex++;
+      }
+
+      // Apply drugs filter
+      if (f.drugs) {
+        baseQuery += ` AND LOWER(p.drugs) = LOWER($${paramIndex})`;
+        queryParams.push(f.drugs);
+        paramIndex++;
+      }
+
+      // Apply marijuana filter
+      if (f.marijuana) {
+        baseQuery += ` AND LOWER(p.marijuana) = LOWER($${paramIndex})`;
+        queryParams.push(f.marijuana);
+        paramIndex++;
+      }
+
+      // Check cooldown status - exclude users in cooldown
+      baseQuery += ` AND (u.cooldown_until IS NULL OR u.cooldown_until < NOW())`;
+
+      // Exclude already viewed/swiped profiles (for off-grid refresh)
+      if (exclude_ids && exclude_ids.length > 0) {
+        baseQuery += ` AND u.id NOT IN (${exclude_ids.map((_, i) => `$${paramIndex + i}`).join(', ')})`;
+        queryParams.push(...exclude_ids);
+        paramIndex += exclude_ids.length;
+      }
+
+      return { sql: baseQuery, params: queryParams };
+    };
+
+    // First pass honours everything, including whatever the AI inferred.
+    const primaryQuery = buildCandidateQuery(enhancedFilters);
+    let candidates = (await pool.query(primaryQuery.sql, primaryQuery.params)).rows;
+
+    // If the AI's own guesses are what emptied the grid, drop them and try again
+    // rather than telling the user there is nobody out there.
+    let relaxedFilters: string[] = [];
+    if (candidates.length === 0 && aiInferredFilterKeys.length > 0) {
+      const userOnlyFilters: SearchFilters = { ...filters };
+      const retryQuery = buildCandidateQuery(userOnlyFilters);
+      const retryRows = (await pool.query(retryQuery.sql, retryQuery.params)).rows;
+
+      if (retryRows.length > 0) {
+        candidates = retryRows;
+        relaxedFilters = aiInferredFilterKeys.map(String);
+        for (const key of aiInferredFilterKeys) {
+          delete (enhancedFilters as any)[key];
+        }
+      }
     }
-
-    // Apply minimum height filter
-    if (enhancedFilters.minHeight) {
-      baseQuery += ` AND p.height >= $${paramIndex}`;
-      queryParams.push(enhancedFilters.minHeight);
-      paramIndex++;
-    }
-
-    // Apply maximum height filter
-    if (enhancedFilters.maxHeight) {
-      baseQuery += ` AND p.height <= $${paramIndex}`;
-      queryParams.push(enhancedFilters.maxHeight);
-      paramIndex++;
-    }
-
-    // Apply city filter only if explicitly specified
-    if (enhancedFilters.city) {
-      baseQuery += ` AND u.city = $${paramIndex}`;
-      queryParams.push(enhancedFilters.city);
-      paramIndex++;
-    }
-    // Note: City filtering is now optional - profiles from all cities will show if no city filter is specified
-
-    // Apply smoking habit filter
-    if (enhancedFilters.smoking_habit && enhancedFilters.smoking_habit.trim().length > 0) {
-      baseQuery += ` AND LOWER(p.smoking_habit) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.smoking_habit);
-      paramIndex++;
-    } else if (enhancedFilters.smoker !== undefined) {
-      // Backwards-compatible boolean smoker filter.
-      baseQuery += ` AND p.smoker = $${paramIndex}`;
-      queryParams.push(enhancedFilters.smoker);
-      paramIndex++;
-    }
-
-    // Apply drinker filter
-    if (enhancedFilters.drinker) {
-      baseQuery += ` AND LOWER(p.drinker) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.drinker);
-      paramIndex++;
-    }
-
-    const relationshipGoalFilter = enhancedFilters.relationship_goal || enhancedFilters.dating_intentions;
-
-    // Apply relationship goal filter
-    if (relationshipGoalFilter) {
-      baseQuery += ` AND p.relationship_goal = $${paramIndex}`;
-      queryParams.push(relationshipGoalFilter);
-      paramIndex++;
-    }
-
-    // Apply religion filter
-    if (enhancedFilters.religion) {
-      baseQuery += ` AND LOWER(p.religion) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.religion);
-      paramIndex++;
-    }
-
-    // Apply children filter
-    if (enhancedFilters.have_kids) {
-      baseQuery += ` AND LOWER(p.have_kids) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.have_kids);
-      paramIndex++;
-    }
-
-    // Apply politics filter
-    if (enhancedFilters.politics) {
-      baseQuery += ` AND LOWER(p.politics) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.politics);
-      paramIndex++;
-    }
-
-    // Apply education filter
-    if (enhancedFilters.education_level) {
-      baseQuery += ` AND LOWER(COALESCE(p.education_level, p.education, '')) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.education_level);
-      paramIndex++;
-    }
-
-    // Apply ethnicity filter
-    if (enhancedFilters.ethnicity) {
-      baseQuery += ` AND LOWER(p.ethnicity) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.ethnicity);
-      paramIndex++;
-    }
-
-    // Apply drugs filter
-    if (enhancedFilters.drugs) {
-      baseQuery += ` AND LOWER(p.drugs) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.drugs);
-      paramIndex++;
-    }
-
-    // Apply marijuana filter
-    if (enhancedFilters.marijuana) {
-      baseQuery += ` AND LOWER(p.marijuana) = LOWER($${paramIndex})`;
-      queryParams.push(enhancedFilters.marijuana);
-      paramIndex++;
-    }
-
-    // Check cooldown status - exclude users in cooldown
-    baseQuery += ` AND (u.cooldown_until IS NULL OR u.cooldown_until < NOW())`;
-
-    // Exclude already viewed/swiped profiles (for off-grid refresh)
-    if (exclude_ids && exclude_ids.length > 0) {
-      baseQuery += ` AND u.id NOT IN (${exclude_ids.map((_, i) => `$${paramIndex + i}`).join(', ')})`;
-      queryParams.push(...exclude_ids);
-      paramIndex += exclude_ids.length;
-    }
-
-    // Execute query
-    const candidatesResult = await pool.query(baseQuery, queryParams);
-    const candidates = candidatesResult.rows;
 
     if (candidates.length === 0) {
-      return res.json({
-        on_grid_matches: [],
-        off_grid_matches: [],
+      // Mirror the shape the caller asked for. Returning on_grid_matches to a
+      // client that reads `matches` handed it undefined instead of an empty list.
+      const emptyBody = {
+        credit_balance: await getCreditBalance(userId),
+        relaxed_filters: relaxedFilters,
         message: 'No matches found. Try adjusting your search criteria.',
-      });
+      };
+
+      if (is_on_grid === true || is_on_grid === false) {
+        return res.json({ ...emptyBody, matches: [] });
+      }
+      return res.json({ ...emptyBody, on_grid_matches: [], off_grid_matches: [] });
     }
 
     // Calculate match percentages for all candidates
@@ -595,6 +629,11 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       suggested_openers: [],
     }));
 
+    // Tracks whether any real AI work happened on this request. The user is only
+    // billed for an AI search when the model actually answered; a request served
+    // entirely from hardcoded fallbacks is free.
+    let aiDidRealWork = aiParsedQuery ? aiParsedQuery.degraded === false : false;
+
     if (isAIEnabled && onGridMatches.length > 0) {
       onGridWithReasons = await Promise.all(
         onGridMatches.map(async (match: any) => {
@@ -603,8 +642,11 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
             const narrative = await generateMatchNarrative(
               seekerPersonaSummary,
               candidateSummary,
-              match.match_percentage
+              match.match_percentage,
+              match.name
             );
+
+            if (narrative.degraded === false) aiDidRealWork = true;
 
             return {
               ...match,
@@ -618,7 +660,8 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
               const fallbackReason = await generateMatchReason(
                 seekerPersonaSummary,
                 candidateSummary,
-                match.match_percentage
+                match.match_percentage,
+                match.name
               );
               return {
                 ...match,
@@ -640,8 +683,10 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       );
     }
 
-    // Charge only when we are actually returning visible on-grid profiles.
-    if (shouldChargeForAISearch && onGridWithReasons.length > 0) {
+    // Charge only when we are returning visible on-grid profiles AND the AI
+    // actually ran. If every model call fell back to canned copy, the search was
+    // keyword matching, so billing a token for it would be charging for nothing.
+    if (shouldChargeForAISearch && onGridWithReasons.length > 0 && aiDidRealWork) {
       try {
         remainingCredits = await consumeCredits(
           userId,
@@ -671,11 +716,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       res.json({
         matches: onGridWithReasons,
         credit_balance: remainingCredits,
+        relaxed_filters: relaxedFilters,
         ai_context: aiParsedQuery
           ? {
               search_intent: aiParsedQuery.search_intent,
               preferences: aiParsedQuery.preferences,
               filters_inferred: aiParsedQuery.filters,
+              degraded: aiParsedQuery.degraded === true,
             }
           : null,
       });
@@ -684,11 +731,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       res.json({
         matches: offGridMatches,
         credit_balance: remainingCredits,
+        relaxed_filters: relaxedFilters,
         ai_context: aiParsedQuery
           ? {
               search_intent: aiParsedQuery.search_intent,
               preferences: aiParsedQuery.preferences,
               filters_inferred: aiParsedQuery.filters,
+              degraded: aiParsedQuery.degraded === true,
             }
           : null,
       });
@@ -698,11 +747,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         on_grid_matches: onGridWithReasons,
         off_grid_matches: offGridMatches,
         credit_balance: remainingCredits,
+        relaxed_filters: relaxedFilters,
         ai_context: aiParsedQuery
           ? {
               search_intent: aiParsedQuery.search_intent,
               preferences: aiParsedQuery.preferences,
               filters_inferred: aiParsedQuery.filters,
+              degraded: aiParsedQuery.degraded === true,
             }
           : null,
       });

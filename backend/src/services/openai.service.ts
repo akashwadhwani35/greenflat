@@ -28,6 +28,11 @@ interface ParsedSearchQuery {
     relationship_goal?: string;
   };
   search_intent: string;
+  /**
+   * True when the AI call failed and this is a hardcoded fallback. Callers must
+   * not bill a user for AI work that did not happen.
+   */
+  degraded?: boolean;
 }
 
 /**
@@ -87,7 +92,7 @@ Only return the JSON object, no other text.`;
     }
 
     const parsed = JSON.parse(content);
-    return parsed as ParsedSearchQuery;
+    return { ...(parsed as ParsedSearchQuery), degraded: false };
   } catch (error) {
     console.error('Error parsing search query:', error);
     // Return empty structure on error
@@ -95,6 +100,7 @@ Only return the JSON object, no other text.`;
       preferences: {},
       filters: {},
       search_intent: query,
+      degraded: true,
     };
   }
 };
@@ -142,24 +148,47 @@ export const cosineSimilarity = (a: number[], b: number[]): number => {
 /**
  * Generate a rich explanation for why two users align
  */
+/**
+ * Last line of defence against prompt placeholders reaching the reader. The
+ * model is told not to emit "User A"/"User B"; if it does anyway, rewrite them
+ * rather than shipping them onto the match card.
+ */
+const stripPlaceholderNames = (text: unknown, candidateName: string): string => {
+  if (typeof text !== 'string') return '';
+  return text
+    .replace(/\bUser\s*A\b/gi, 'you')
+    .replace(/\bUser\s*1\b/gi, 'you')
+    .replace(/\bUser\s*B\b/gi, candidateName)
+    .replace(/\bUser\s*2\b/gi, candidateName)
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+};
+
 export const generateMatchNarrative = async (
   seekerProfile: string,
   candidateProfile: string,
-  matchPercentage: number
+  matchPercentage: number,
+  candidateName?: string
 ): Promise<{
   summary: string;
   highlights: string[];
   suggested_openers: string[];
+  degraded?: boolean;
 }> => {
-  const prompt = `You are Greenflag, an emotionally intelligent dating coach. Explain why two people (User A and User B) could be a meaningful match.
+  // This text is shown to the seeker on the match card, so it is written to them
+  // directly. Never let placeholder labels ("User A") reach the reader.
+  const them = candidateName?.trim() || 'them';
+  const prompt = `You are Greenflag, an emotionally intelligent dating coach. You are speaking directly to someone about a person they have matched with.
 
-User A Persona:
+The reader's persona:
 ${seekerProfile}
 
-User B Persona:
+${them}'s persona:
 ${candidateProfile}
 
-They have a compatibility score of ${matchPercentage}%.
+Their compatibility score is ${matchPercentage}%.
+
+Write to the reader in second person ("you"), and refer to the other person as ${them}. Never use placeholder labels such as "User A", "User B", "User 1", or "the reader" in your output.
 
 Return JSON with keys summary (2 sentences max), highlights (array of 2-3 bullet points describing alignment), and suggested_openers (array of 2 gentle conversation starters tied to their common ground). Keep language warm, human, and specific.`;
 
@@ -178,9 +207,12 @@ Return JSON with keys summary (2 sentences max), highlights (array of 2-3 bullet
 
     const parsed = JSON.parse(content);
     return {
-      summary: parsed.summary || 'You share relatable energy.',
-      highlights: parsed.highlights || [],
-      suggested_openers: parsed.suggested_openers || [],
+      summary: stripPlaceholderNames(parsed.summary, them) || 'You share relatable energy.',
+      highlights: (parsed.highlights || []).map((h: string) => stripPlaceholderNames(h, them)),
+      suggested_openers: (parsed.suggested_openers || []).map((o: string) =>
+        stripPlaceholderNames(o, them)
+      ),
+      degraded: false,
     };
   } catch (error) {
     console.error('Error generating match narrative:', error);
@@ -194,19 +226,24 @@ Return JSON with keys summary (2 sentences max), highlights (array of 2-3 bullet
         'Ask about a recent moment that made them feel alive',
         'Share a story that reflects your common interest',
       ],
+      degraded: true,
     };
   }
 };
 export const generateMatchReason = async (
   userProfile: string,
   matchProfile: string,
-  matchPercentage: number
+  matchPercentage: number,
+  candidateName?: string
 ): Promise<string> => {
-  const prompt = `You are a dating app matchmaker. Explain why these two people are a ${matchPercentage}% match in one short, friendly sentence (max 15 words).
+  const them = candidateName?.trim() || 'them';
+  const prompt = `You are a dating app matchmaker speaking directly to a reader about someone they matched with. Explain the ${matchPercentage}% match in one short, friendly sentence (max 15 words).
 
-User 1 Profile: ${userProfile}
+The reader's profile: ${userProfile}
 
-User 2 Profile: ${matchProfile}
+${them}'s profile: ${matchProfile}
+
+Address the reader as "you" and the other person as ${them}. Never output placeholder labels like "User A" or "User 1".
 
 Focus on the strongest common ground: shared interests, complementary personality traits, or aligned values.
 
@@ -225,7 +262,8 @@ Return only the match reason, nothing else.`;
       max_tokens: 50,
     });
 
-    return response.choices[0].message.content?.trim() || 'You share common interests';
+    const reason = stripPlaceholderNames(response.choices[0].message.content, them);
+    return reason || 'You share common interests';
   } catch (error) {
     console.error('Error generating match reason:', error);
     return 'You might be a great match';
