@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, View, TouchableOpacity, Image, ActivityIndicator, Alert, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { toUploadableDataUrl } from '../utils/image';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
@@ -77,16 +78,15 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 5],
-        quality: 0.7,
-        base64: Platform.OS !== 'web',
+        quality: 1,
       });
 
       if (result.canceled || !result.assets?.length) return;
 
       const asset = result.assets[0];
-      const photoPayload = Platform.OS === 'web'
-        ? asset.uri
-        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+      // Downscale before base64: a full-resolution photo as a string is enough
+      // to exhaust the JS heap on Android.
+      const photoPayload = await toUploadableDataUrl(asset.uri);
 
       await uploadPhoto(false, photoPayload);
     } catch (err: any) {

@@ -19,6 +19,7 @@ import { Feather } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import { toUploadableDataUrl } from '../utils/image';
 import { Button } from '../components/Button';
 import { Chip } from '../components/Chip';
 import { InputField } from '../components/InputField';
@@ -444,8 +445,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 5],
-        quality: 0.7,
-        base64: Platform.OS !== 'web',
+        quality: 1,
       });
 
       if (result.canceled || !result.assets?.length) {
@@ -454,9 +454,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
       const asset = result.assets[0];
 
-      const dataUrl = Platform.OS === 'web'
-        ? asset.uri
-        : (asset.base64 ? `data:${asset.type || 'image/jpeg'};base64,${asset.base64}` : asset.uri);
+      // Downscale before it becomes base64. A full-resolution photo held in
+      // state as a string is what was exhausting memory and killing the app at
+      // the end of onboarding.
+      const dataUrl = await toUploadableDataUrl(asset.uri);
 
       setForm((prev) => ({ ...prev, photos: [...prev.photos, dataUrl] }));
     } catch (error: any) {
