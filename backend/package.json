@@ -11,7 +11,8 @@
     "migrate:prod": "node dist/database/migrate.js",
     "test": "NODE_ENV=test jest --runInBand",
     "test:watch": "NODE_ENV=test jest --watch",
-    "cleanup:demo-profiles": "ts-node src/scripts/purgeDemoProfiles.ts"
+    "cleanup:demo-profiles": "ts-node src/scripts/purgeDemoProfiles.ts",
+    "seed:demo": "ts-node src/scripts/seedDemoProfiles.ts"
   },
   "keywords": [],
   "author": "",
