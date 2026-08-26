@@ -60,6 +60,7 @@ jobs:
             PAYMENTS_ENABLED=false
             FREE_TOKEN_ALLOWANCE=30
             TOKEN_ALLOWANCE_INTERVAL_HOURS=24
+            GCS_MEDIA_BUCKET=greenflag-app-media
             REQUIRE_EXTERNAL_SERVICES=false
           # NOTE: the secrets block below is a literal string passed straight to
           # gcloud, NOT yaml. A "#" line inside it becomes a bogus secret mapping

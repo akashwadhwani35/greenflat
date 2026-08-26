@@ -524,18 +524,37 @@ describe('GreenFlag backend core flow', () => {
     expect(afterBan.status).toBe(403);
   });
 
+  it('accepts the data URL the app actually sends for a profile photo', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `dataurl_${Date.now()}@example.com`,
+      name: 'Data URL',
+    });
+
+    // expo-image-picker hands the app a base64 data URL and PhotoManagerScreen
+    // posts it straight here. Rejecting it broke photo upload entirely.
+    const response = await agent
+      .post('/api/profile/photo')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({
+        photo_url:
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        is_primary: true,
+      });
+
+    // Without a bucket configured this is 503 (storage unavailable), never 400.
+    // A 400 would mean the payload itself was rejected, which is the bug.
+    expect(response.status).not.toBe(400);
+  });
+
   it('rejects profile photos that are not on an allowed https host', async () => {
     const user = await signupAndCompleteProfile({
       email: `photo_${Date.now()}@example.com`,
       name: 'Photo User',
     });
 
-    const dataUrl = await agent
-      .post('/api/profile/photo')
-      .set('Authorization', `Bearer ${user.token}`)
-      .send({ photo_url: 'data:image/png;base64,iVBORw0KGgo=' });
-    expect(dataUrl.status).toBe(400);
-
+    // Data URLs are the app's normal upload path and are covered above. What must
+    // still be refused is an arbitrary third-party URL, which would have the app
+    // render a stranger's host for every viewer.
     const arbitraryHost = await agent
       .post('/api/profile/photo')
       .set('Authorization', `Bearer ${user.token}`)

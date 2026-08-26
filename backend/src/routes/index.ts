@@ -25,7 +25,7 @@ import {
   unblockUser,
 } from '../controllers/privacyController';
 import { getNotificationPreferences, updateNotificationPreferences } from '../controllers/notificationsController';
-import { getMediaCapabilities, getUploadSignature, uploadLocalMedia } from '../controllers/mediaController';
+import { getMediaCapabilities, getUploadSignature, uploadLocalMedia, serveMedia } from '../controllers/mediaController';
 import { submitSupportMessage } from '../controllers/supportController';
 import { revenueCatWebhook } from '../controllers/webhookController';
 import adminRouter from './admin';
@@ -90,6 +90,10 @@ router.post('/notifications/preferences', authenticate, updateNotificationPrefer
 router.get('/media/capabilities', authenticate, getMediaCapabilities);
 router.post('/media/upload-signature', authenticate, getUploadSignature);
 router.post('/media/upload-local', authenticate, uploadLocalMedia);
+// Must stay LAST of the /media routes: :name would otherwise swallow
+// /media/capabilities. Serving is public because photo_url is rendered directly
+// by the app and object names are unguessable UUIDs; the bucket stays private.
+router.get('/media/:name', serveMedia);
 
 // Verification routes
 router.post('/verification/otp/request', authenticate, requestOtp);

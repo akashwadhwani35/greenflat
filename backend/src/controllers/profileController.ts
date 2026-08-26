@@ -5,6 +5,7 @@ import { PERSONALITY_TRAITS_MAP, TOKEN_COSTS } from '../utils/constants';
 import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
 import { normalizeMediaMessageUrl } from '../services/media.service';
+import { storeDataUrl, mediaUrlFor, isGcsConfigured } from '../services/storage.service';
 
 const BOOST_DURATION_HOURS = 6;
 
@@ -407,18 +408,36 @@ export const uploadPhoto = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Photo URL is required' });
     }
 
-    // Profile photos go through the same host allowlist as message media. Without
-    // this the column accepted any string, including data: payloads and arbitrary
-    // third-party URLs that the app would then render for every viewer.
+    // The app sends the picked image straight from expo-image-picker as a base64
+    // data: URL, so that is the primary path: it is stored in GCS and replaced
+    // with a URL served back through this API.
+    //
+    // A plain URL is still accepted (re-adding an existing photo, or a client
+    // that uploaded separately) but must pass the host allowlist. Before this the
+    // column took any string at all, including arbitrary third-party URLs that
+    // the app would then render for every viewer.
     let normalizedPhotoUrl: string;
+    const isDataUrl = typeof photo_url === 'string' && photo_url.trim().startsWith('data:');
+
     try {
+      const forwardedProto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim();
+      const protocol = forwardedProto || req.protocol || 'https';
       const requestHost = req.get('host') || undefined;
-      const allowHttpForRequestHost =
-        (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim() !== 'https' &&
-        req.protocol !== 'https';
-      normalizedPhotoUrl = normalizeMediaMessageUrl(photo_url, { requestHost, allowHttpForRequestHost });
+
+      if (isDataUrl) {
+        if (!isGcsConfigured()) {
+          return res.status(503).json({ error: 'Photo storage is not configured' });
+        }
+        const stored = await storeDataUrl(photo_url);
+        normalizedPhotoUrl = mediaUrlFor(stored.objectName, `${protocol}://${requestHost}`);
+      } else {
+        normalizedPhotoUrl = normalizeMediaMessageUrl(photo_url, {
+          requestHost,
+          allowHttpForRequestHost: protocol !== 'https',
+        });
+      }
     } catch (validationError: any) {
-      return res.status(400).json({ error: validationError?.message || 'Invalid photo URL' });
+      return res.status(400).json({ error: validationError?.message || 'Invalid photo' });
     }
 
     // If this is primary photo, unset other primary photos
