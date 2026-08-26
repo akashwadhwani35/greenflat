@@ -1,8 +1,31 @@
 # GreenFlag - AI-Powered Dating App
 
-## 🎉 Status: 100% COMPLETE & READY TO USE
+A React Native (Expo) dating app with real-time messaging, AI matching, and
+personality analysis, backed by Node/Express + PostgreSQL + OpenAI.
 
-A fully functional AI dating application with real-time messaging, smart matching, and personality analysis powered by OpenAI.
+## Status (last verified 2026-08-24)
+
+The core loop is built and tested: signup, onboarding, matching, likes, mutual
+matches, chat, block/report, account deletion. `npm test` in `backend/` is green.
+
+Not ready:
+
+- **Production is down.** Cloud Run returns 503, not yet diagnosed.
+- **Payments are disabled.** Token packs and subscriptions return 501 until a
+  store receipt validator is registered and `PAYMENTS_ENABLED=true`. See
+  `backend/src/services/payments.service.ts`. Apple and Google require their own
+  billing for in-app digital goods, so Stripe is not an option here.
+- **Twilio and Cloudinary are unconfigured in production**, so phone
+  verification and cloud media do not work there.
+- **`gflag.app/terms` returns 404**, and the app links to it.
+
+Run `npm run migrate` in `backend/` against a new database; migrations also run
+automatically on boot unless `RUN_MIGRATIONS_ON_BOOT=false`.
+
+> The sections below, along with `COMPLETED_FEATURES.md`,
+> `IMPLEMENTATION_STATUS.md`, and `READY_TO_TEST.md`, were written in Dec 2024
+> and describe a Heroku deployment that no longer applies. Treat them as
+> historical notes rather than current instructions.
 
 ---
 

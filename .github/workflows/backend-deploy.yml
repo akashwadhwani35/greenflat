@@ -54,6 +54,10 @@ jobs:
             OPENAI_MODEL=gpt-4o-mini
             OPENAI_EMBEDDING_MODEL=text-embedding-3-small
             JWT_EXPIRES_IN=7d
+            RUN_MIGRATIONS_ON_BOOT=true
+            PAYMENTS_ENABLED=false
+            FREE_TOKEN_ALLOWANCE=30
+            TOKEN_ALLOWANCE_INTERVAL_HOURS=24
             REQUIRE_EXTERNAL_SERVICES=false
           secrets: |
             DATABASE_URL=database-url:latest
@@ -61,6 +65,16 @@ jobs:
             OPENAI_API_KEY=openai-api-key:latest
             GOOGLE_MAPS_API_KEY=google-maps-api-key:latest
             GOOGLE_OAUTH_CLIENT_IDS=google-oauth-client-ids:latest
+            # Phone verification and cloud media are OFF in production until these
+            # secrets exist in Secret Manager. REQUIRE_EXTERNAL_SERVICES=false above
+            # is what suppresses the startup check that would otherwise catch it.
+            # Create the secrets, uncomment these, then drop that flag.
+            # TWILIO_ACCOUNT_SID=twilio-account-sid:latest
+            # TWILIO_AUTH_TOKEN=twilio-auth-token:latest
+            # TWILIO_FROM_NUMBER=twilio-from-number:latest
+            # CLOUDINARY_CLOUD_NAME=cloudinary-cloud-name:latest
+            # CLOUDINARY_API_KEY=cloudinary-api-key:latest
+            # CLOUDINARY_API_SECRET=cloudinary-api-secret:latest
 
       - name: Show deployed URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"

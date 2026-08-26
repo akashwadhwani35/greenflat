@@ -2,6 +2,7 @@ import request from 'supertest';
 import type { Server } from 'http';
 import app from '../index';
 import pool from '../config/database';
+import { registerReceiptValidator, resetReceiptValidator } from '../services/payments.service';
 
 type SignupOverrides = Partial<{
   email: string;
@@ -239,7 +240,7 @@ describe('GreenFlag backend core flow', () => {
     expect(reportResponse.body.report.reported_id).toBe(userB.userId);
   });
 
-  it('applies wallet purchase credits', async () => {
+  it('refuses token purchases while payments are not configured', async () => {
     const user = await signupAndCompleteProfile({
       email: `wallet_${Date.now()}@example.com`,
       name: 'Maya',
@@ -248,14 +249,155 @@ describe('GreenFlag backend core flow', () => {
     const purchaseResponse = await agent
       .post('/api/wallet/purchase')
       .set('Authorization', `Bearer ${user.token}`)
-      .send({ plan: 'starter' });
-    expect(purchaseResponse.status).toBe(200);
+      .send({ pack_id: '15' });
+    expect(purchaseResponse.status).toBe(501);
+    expect(purchaseResponse.body.payments_enabled).toBe(false);
 
+    // Balance must be untouched: no payment, no tokens.
     const walletResponse = await agent
       .get('/api/wallet/summary')
       .set('Authorization', `Bearer ${user.token}`);
     expect(walletResponse.status).toBe(200);
-    expect(walletResponse.body.credit_balance).toBe(60);
+    expect(walletResponse.body.credit_balance).toBe(50);
+  });
+
+  it('tops spent tokens back up to the free allowance once per interval', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `allowance_${Date.now()}@example.com`,
+      name: 'Reeta',
+    });
+
+    // Spend down to nothing, as an active user eventually would.
+    await pool.query(
+      'UPDATE users SET credit_balance = 0, last_token_refill_at = NULL WHERE id = $1',
+      [user.userId]
+    );
+
+    const first = await agent
+      .get('/api/wallet/summary')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(first.status).toBe(200);
+    expect(first.body.credit_balance).toBe(30);
+    expect(first.body.free_allowance).toBe(30);
+    expect(first.body.next_refill_at).toBeTruthy();
+
+    // The grant is ledgered so the wallet history stays truthful.
+    const ledger = await pool.query(
+      `SELECT amount, direction FROM credit_transactions
+       WHERE user_id = $1 AND reason = 'daily_allowance'`,
+      [user.userId]
+    );
+    expect(ledger.rows).toHaveLength(1);
+    expect(Number(ledger.rows[0].amount)).toBe(30);
+    expect(ledger.rows[0].direction).toBe('credit');
+
+    // Spending then immediately re-reading must NOT hand out a second allowance.
+    await pool.query('UPDATE users SET credit_balance = 4 WHERE id = $1', [user.userId]);
+    const second = await agent
+      .get('/api/wallet/summary')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(second.body.credit_balance).toBe(4);
+
+    // Once the interval has elapsed, they are topped back up to the floor.
+    await pool.query(
+      "UPDATE users SET last_token_refill_at = NOW() - INTERVAL '25 hours' WHERE id = $1",
+      [user.userId]
+    );
+    const third = await agent
+      .get('/api/wallet/summary')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(third.body.credit_balance).toBe(30);
+  });
+
+  it('does not reduce a balance that is already above the free allowance', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `abovefloor_${Date.now()}@example.com`,
+      name: 'Ira',
+    });
+
+    // Someone who bought a pack sits above the floor and must keep every token.
+    await pool.query(
+      "UPDATE users SET credit_balance = 120, last_token_refill_at = NOW() - INTERVAL '25 hours' WHERE id = $1",
+      [user.userId]
+    );
+
+    const wallet = await agent
+      .get('/api/wallet/summary')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(wallet.body.credit_balance).toBe(120);
+  });
+
+  it('refuses subscriptions while payments are not configured', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `sub_${Date.now()}@example.com`,
+      name: 'Nina',
+    });
+
+    const response = await agent
+      .post('/api/wallet/subscribe')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ plan: 'pro', duration: '1month' });
+
+    // The route must exist and refuse deliberately, not 404.
+    expect(response.status).toBe(501);
+
+    const profile = await agent
+      .get('/api/profile/me')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(profile.body.user.is_premium).toBe(false);
+  });
+
+  it('grants a token pack only against a validated store receipt', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `receipt_${Date.now()}@example.com`,
+      name: 'Priya',
+    });
+
+    // Stand in for RevenueCat's verification of an Apple/Google receipt.
+    registerReceiptValidator(async (claim) => {
+      // The user id must come from the JWT, never from the request body.
+      expect(claim.appUserId).toBe(String(user.userId));
+      return {
+        transactionId: `txn_${claim.productId}_fixed`,
+        provider: 'apple' as const,
+        productId: claim.productId,
+        amountCents: 399,
+        currency: 'USD',
+      };
+    });
+    process.env.PAYMENTS_ENABLED = 'true';
+
+    try {
+      // A purchase without a receipt is rejected even when payments are live.
+      const noReceipt = await agent
+        .post('/api/wallet/purchase')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ pack_id: '15' });
+      expect(noReceipt.status).toBe(400);
+
+      const purchase = await agent
+        .post('/api/wallet/purchase')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ pack_id: '15', receipt: 'store-receipt-blob' });
+      expect(purchase.status).toBe(200);
+      expect(purchase.body.wallet.credit_balance).toBe(65);
+
+      // Replaying the same receipt must not credit a second time.
+      const replay = await agent
+        .post('/api/wallet/purchase')
+        .set('Authorization', `Bearer ${user.token}`)
+        .send({ pack_id: '15', receipt: 'store-receipt-blob' });
+      expect(replay.status).toBe(200);
+      expect(replay.body.duplicate).toBe(true);
+
+      const wallet = await agent
+        .get('/api/wallet/summary')
+        .set('Authorization', `Bearer ${user.token}`);
+      expect(wallet.body.credit_balance).toBe(65);
+    } finally {
+      delete process.env.PAYMENTS_ENABLED;
+      resetReceiptValidator();
+    }
   });
 
   it('activates boost for non-premium users by consuming 20 credits for 6 hours', async () => {
@@ -286,7 +428,12 @@ describe('GreenFlag backend core flow', () => {
       name: 'No Boost Credits',
     });
 
-    await pool.query('UPDATE users SET credit_balance = 5 WHERE id = $1', [user.userId]);
+    // Already received today's free allowance and spent it down, so no top-up is
+    // due and the balance genuinely cannot cover a boost.
+    await pool.query(
+      'UPDATE users SET credit_balance = 5, last_token_refill_at = NOW() WHERE id = $1',
+      [user.userId]
+    );
 
     const boostResponse = await agent
       .post('/api/profile/boost')
@@ -355,6 +502,45 @@ describe('GreenFlag backend core flow', () => {
     expect(incomingLikesAfterUpgrade.body.likes[0].user.id).toBe(regularLiker.userId);
     expect(incomingLikesAfterUpgrade.body.likes[0].is_superlike).toBe(true);
     expect(incomingLikesAfterUpgrade.body.likes[1].is_superlike).toBe(true);
+  });
+
+  it('blocks a banned user on their existing token, not just at login', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `banned_${Date.now()}@example.com`,
+      name: 'Banned User',
+    });
+
+    // Token is already issued and still well within its 7-day life.
+    const beforeBan = await agent
+      .get('/api/profile/me')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(beforeBan.status).toBe(200);
+
+    await pool.query('UPDATE users SET is_banned = TRUE WHERE id = $1', [user.userId]);
+
+    const afterBan = await agent
+      .get('/api/profile/me')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(afterBan.status).toBe(403);
+  });
+
+  it('rejects profile photos that are not on an allowed https host', async () => {
+    const user = await signupAndCompleteProfile({
+      email: `photo_${Date.now()}@example.com`,
+      name: 'Photo User',
+    });
+
+    const dataUrl = await agent
+      .post('/api/profile/photo')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ photo_url: 'data:image/png;base64,iVBORw0KGgo=' });
+    expect(dataUrl.status).toBe(400);
+
+    const arbitraryHost = await agent
+      .post('/api/profile/photo')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ photo_url: 'https://evil.example.com/tracker.png' });
+    expect(arbitraryHost.status).toBe(400);
   });
 
   it('deletes account and invalidates login', async () => {

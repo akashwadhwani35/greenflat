@@ -5,6 +5,8 @@ process.env.OPENAI_MODEL = '';
 process.env.OPENAI_EMBEDDING_MODEL = '';
 
 const tables = [
+  'token_purchases',
+  'subscriptions',
   'reports',
   'profile_views',
   'search_history',
