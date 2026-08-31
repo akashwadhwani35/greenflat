@@ -5,6 +5,7 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { MatchCandidate } from './MatchboardScreen';
 import { PixelFlag } from '../components/PixelFlag';
+import type { ViewerProfile } from '../hooks/useViewerProfile';
 
 type ProfileDetailScreenProps = {
   match: MatchCandidate | null;
@@ -21,6 +22,12 @@ type ProfileDetailScreenProps = {
   headerRightAccessibilityLabel?: string;
   embedded?: boolean;
   hideActionButtons?: boolean;
+  /**
+   * The signed-in user's own answers. When supplied, any detail the two people
+   * share is rendered in green. Omitted when someone is previewing their own
+   * profile, where highlighting everything would say nothing.
+   */
+  viewer?: ViewerProfile | null;
 };
 
 const fallbackPhoto = require('../../assets/icon.png');
@@ -78,29 +85,6 @@ const toTextArray = (value: unknown): string[] => {
   return [];
 };
 
-const toSecondPersonSummary = (value: string): string => {
-  const trimmed = value.trim().replace(/\s+/g, ' ');
-  if (!trimmed) return '';
-
-  let summary = trimmed
-    .replace(/^(the individual|this individual|the user|this person)\s+/i, '')
-    .replace(/^(they|he|she)\s+(are|is)\s+/i, '');
-
-  if (!/^you\b/i.test(summary)) {
-    if (/^(are|have|tend|show|value|prefer|communicate|approach|bring)\b/i.test(summary)) {
-      summary = `You ${summary}`;
-    } else {
-      summary = `You are ${summary.charAt(0).toLowerCase()}${summary.slice(1)}`;
-    }
-  }
-
-  summary = summary
-    .replace(/^you\s+is\b/i, 'You are')
-    .replace(/^you\s+has\b/i, 'You have');
-
-  return `${summary.charAt(0).toUpperCase()}${summary.slice(1)}`;
-};
-
 const buildPromptCards = (name: string, about: string, highlights: string[]): PromptCard[] => {
   const first = highlights[0] || 'slow evenings';
   const second = highlights[1] || 'coffee chats';
@@ -137,6 +121,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   headerRightAccessibilityLabel,
   embedded = false,
   hideActionButtons = false,
+  viewer = null,
 }) => {
   const theme = useTheme();
   const [sendingComplimentKey, setSendingComplimentKey] = useState<string | null>(null);
@@ -159,6 +144,16 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     is_verified?: boolean;
     personality_summary?: string;
     top_traits?: string[];
+    pronouns?: string[];
+    height?: number | string;
+    body_type?: string;
+    smoker?: boolean | string;
+    smoking_habit?: string;
+    drinker?: string;
+    drugs?: string;
+    diet?: string;
+    fitness_level?: string;
+    distance_km?: number;
   };
 
   const name = matchData.name || 'Profile';
@@ -172,7 +167,6 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const interests = toTextArray(matchData.interests);
   const matchHighlights = toTextArray(matchData.match_highlights);
   const highlights = interests.length > 0 ? interests : matchHighlights;
-  const personalitySummary = toSecondPersonSummary(toText(matchData.personality_summary));
   const personalityTopTraits = toTextArray(matchData.top_traits);
 
   const relationshipGoal = toText(matchData.relationship_goal);
@@ -180,6 +174,69 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     ? [normalizeLabel(relationshipGoal)]
     : ['Long-term relationship', 'Fun, casual dates'];
   const promptCards = buildPromptCards(name, aboutText, highlights);
+
+  const pronouns = toTextArray(matchData.pronouns);
+
+  /**
+   * Green means "you two said the same thing".
+   *
+   * It is the one colour the brand spends, so it has to carry meaning rather
+   * than decorate: a green bubble is always a shared answer, never emphasis.
+   */
+  const sharesAttribute = (key: string, value: string): boolean => {
+    if (!viewer || !value) return false;
+    const mine = viewer.attributes[key];
+    return Boolean(mine) && mine === value.trim().toLowerCase();
+  };
+
+  const viewerInterestSet = new Set(
+    (viewer?.interests || []).map((item) => item.trim().toLowerCase())
+  );
+  const viewerTraitSet = new Set((viewer?.traits || []).map((item) => item.trim().toLowerCase()));
+
+  const sharesInterest = (value: string) => viewerInterestSet.has(value.trim().toLowerCase());
+  const sharesTrait = (value: string) => viewerTraitSet.has(value.trim().toLowerCase());
+
+  const smokingValue = toText(
+    matchData.smoking_habit ||
+      (typeof matchData.smoker === 'boolean'
+        ? matchData.smoker
+          ? 'regular'
+          : 'never'
+        : matchData.smoker)
+  );
+
+  const heightValue = matchData.height ? String(matchData.height) : '';
+  const distanceValue =
+    typeof matchData.distance_km === 'number' && Number.isFinite(matchData.distance_km)
+      ? `${Math.round(matchData.distance_km)} km away`
+      : '';
+
+  // Section 2 of the card, in the order the design board sets out: location,
+  // distance, exercise, smoking, drinking, height.
+  const basics: { key: string; label: string; value: string; shared: boolean }[] = [
+    { key: 'city', label: 'Lives in', value: matchData.city || '', shared: sharesAttribute('city', matchData.city || '') },
+    { key: 'distance', label: 'Distance', value: distanceValue, shared: false },
+    { key: 'fitness_level', label: 'Exercise', value: toText(matchData.fitness_level), shared: sharesAttribute('fitness_level', toText(matchData.fitness_level)) },
+    { key: 'smoker', label: 'Smoking', value: smokingValue, shared: sharesAttribute('smoker', smokingValue) },
+    { key: 'drinker', label: 'Drinking', value: toText(matchData.drinker), shared: sharesAttribute('drinker', toText(matchData.drinker)) },
+    { key: 'height', label: 'Height', value: heightValue, shared: false },
+  ].filter((row) => row.value.length > 0);
+
+  // Section 5, "add rest": anything else worth saying, once the ordered ones are done.
+  const extras: { key: string; label: string; value: string; shared: boolean }[] = [
+    { key: 'body_type', label: 'Body type', value: toText(matchData.body_type), shared: false },
+    { key: 'diet', label: 'Diet', value: toText(matchData.diet), shared: sharesAttribute('diet', toText(matchData.diet)) },
+    { key: 'drugs', label: 'Drugs', value: toText(matchData.drugs), shared: sharesAttribute('drugs', toText(matchData.drugs)) },
+  ].filter((row) => row.value.length > 0);
+
+  const bubbleStyle = (shared: boolean) => ({
+    borderColor: shared ? theme.colors.neonGreen : theme.colors.secondaryHairline,
+    backgroundColor: shared ? 'rgba(173, 255, 26, 0.14)' : theme.colors.secondaryHighlight,
+  });
+
+  const bubbleTextColor = (shared: boolean) =>
+    shared ? theme.colors.neonGreen : theme.colors.textDark;
 
   const handleCompliment = async (prompt: string, answer: string) => {
     if (!onSendCompliment) return;
@@ -281,18 +338,37 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </Typography>
         </View>
 
-        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-          <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            About me
-          </Typography>
+        {pronouns.length > 0 ? (
           <View style={styles.chipRow}>
-            {age ? (
-              <View style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+            {pronouns.map((pronoun) => (
+              <View
+                key={`pronoun-${pronoun}`}
+                style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}
+              >
                 <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
-                  {age}
+                  {pronoun}
                 </Typography>
               </View>
-            ) : null}
+            ))}
+          </View>
+        ) : null}
+
+        {/* 1 — relationship type */}
+        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+          <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+            Looking for
+          </Typography>
+          <View style={styles.chipRow}>
+            {lookingFor.map((item) => {
+              const shared = sharesAttribute('relationship_goal', item);
+              return (
+                <View key={item} style={[styles.chip, bubbleStyle(shared)]}>
+                  <Typography variant="small" style={[styles.chipText, { color: bubbleTextColor(shared) }]}>
+                    {item}
+                  </Typography>
+                </View>
+              );
+            })}
             <View style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
               <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
                 {isVerified ? 'Verified' : 'Member'}
@@ -301,31 +377,19 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </View>
         </View>
 
-        <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-          <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            I'm looking for
-          </Typography>
-          <View style={styles.chipRow}>
-            {lookingFor.map((item) => (
-              <View key={item} style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
-                <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
-                  {item}
-                </Typography>
-              </View>
-            ))}
-          </View>
-        </View>
-
-        {highlights.length > 0 ? (
+        {/* 2 — location, distance, exercise, smoking, drinking, height */}
+        {basics.length > 0 ? (
           <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
             <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
-              My interests
+              The basics
             </Typography>
             <View style={styles.chipRow}>
-              {highlights.slice(0, 8).map((item) => (
-                <View key={`interest-${item}`} style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
-                  <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
-                    {normalizeLabel(item)}
+              {basics.map((row) => (
+                <View key={row.key} style={[styles.chip, bubbleStyle(row.shared)]}>
+                  <Typography variant="small" style={[styles.chipText, { color: bubbleTextColor(row.shared) }]}>
+                    {row.key === 'city' || row.key === 'distance' || row.key === 'height'
+                      ? row.value
+                      : `${row.label}: ${normalizeLabel(row.value)}`}
                   </Typography>
                 </View>
               ))}
@@ -333,7 +397,29 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </View>
         ) : null}
 
-        {personalitySummary ? (
+        {/* 3 — interests */}
+        {highlights.length > 0 ? (
+          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              Interests
+            </Typography>
+            <View style={styles.chipRow}>
+              {highlights.slice(0, 8).map((item) => {
+                const shared = sharesInterest(item);
+                return (
+                  <View key={`interest-${item}`} style={[styles.chip, bubbleStyle(shared)]}>
+                    <Typography variant="small" style={[styles.chipText, { color: bubbleTextColor(shared) }]}>
+                      {normalizeLabel(item)}
+                    </Typography>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {/* 4 — personality snapshot: keyword bubbles only, no generated prose */}
+        {personalityTopTraits.length > 0 ? (
           <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
             <View style={styles.sectionHeaderRow}>
               <Feather name="star" size={16} color={theme.colors.neonGreen} />
@@ -341,23 +427,36 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 Personality snapshot
               </Typography>
             </View>
-            <Typography variant="body" style={{ color: theme.colors.textDark, lineHeight: 22 }}>
-              {personalitySummary}
-            </Typography>
-            {personalityTopTraits.length > 0 ? (
-              <View style={styles.chipRow}>
-                {personalityTopTraits.slice(0, 6).map((trait) => (
-                  <View
-                    key={`personality-trait-${trait}`}
-                    style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}
-                  >
-                    <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+            <View style={styles.chipRow}>
+              {personalityTopTraits.slice(0, 6).map((trait) => {
+                const shared = sharesTrait(trait);
+                return (
+                  <View key={`personality-trait-${trait}`} style={[styles.chip, bubbleStyle(shared)]}>
+                    <Typography variant="small" style={[styles.chipText, { color: bubbleTextColor(shared) }]}>
                       {normalizeLabel(trait)}
                     </Typography>
                   </View>
-                ))}
-              </View>
-            ) : null}
+                );
+              })}
+            </View>
+          </View>
+        ) : null}
+
+        {/* 5 — the rest */}
+        {extras.length > 0 ? (
+          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              More about {name}
+            </Typography>
+            <View style={styles.chipRow}>
+              {extras.map((row) => (
+                <View key={row.key} style={[styles.chip, bubbleStyle(row.shared)]}>
+                  <Typography variant="small" style={[styles.chipText, { color: bubbleTextColor(row.shared) }]}>
+                    {`${row.label}: ${normalizeLabel(row.value)}`}
+                  </Typography>
+                </View>
+              ))}
+            </View>
           </View>
         ) : null}
 

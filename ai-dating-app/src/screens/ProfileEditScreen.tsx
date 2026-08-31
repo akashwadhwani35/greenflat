@@ -375,7 +375,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             bio: profile.bio || '',
             interests: normalizeInterestsForForm(profile.interests),
             languages: Array.isArray(profile.languages) ? profile.languages : [],
-            pronouns: Array.isArray(profile.pronouns) ? profile.pronouns : [],
+            // Pronouns live on the user, beside name and gender, not in user_profiles.
+            pronouns: Array.isArray(user.pronouns) ? user.pronouns : [],
             communities: Array.isArray(profile.communities) ? profile.communities : [],
             work: profile.occupation || '',
             education: profile.education || '',
@@ -578,6 +579,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           city: form.city,
           gender: genderApi,
           date_of_birth: form.dateOfBirth || null,
+          pronouns: form.pronouns,
         }),
       });
       const basicBody = await basicResponse.json().catch(() => ({}));

@@ -54,13 +54,9 @@ export const TOKEN_COSTS = {
   BOOST: 20,
 } as const;
 
-// Personality Traits Mapping
-export const PERSONALITY_TRAITS_MAP: Record<string, string[]> = {
-  A: ['Funny', 'Playful', 'Positive', 'Outgoing', 'Social', 'Adventurous', 'Spontaneous', 'Charismatic', 'Witty', 'Free-spirited'],
-  B: ['Caring', 'Empathetic', 'Emotionally aware', 'Romantic', 'Thoughtful', 'Reliable', 'Warm', 'Compassionate', 'Selfless'],
-  C: ['Logical', 'Respectful', 'Calm', 'Rational', 'Serious', 'Grounded', 'Mature', 'Reliable', 'Structured', 'Focused'],
-  D: ['Responsible', 'Supportive', 'Independent', 'Confident', 'Chill', 'Adaptable', 'Laid-back', 'Easy-going'],
-};
+// Personality traits now live per question+option in utils/personalityQuestions.ts.
+// A flat A/B/C/D map cannot express a situational quiz, where the same letter
+// means something different on each question.
 
 // JWT Configuration
 const resolvedJwtSecret = process.env.JWT_SECRET || (process.env.NODE_ENV === 'test' ? 'test-jwt-secret' : '');

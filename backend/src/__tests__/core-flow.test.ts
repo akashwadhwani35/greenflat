@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import app from '../index';
 import pool from '../config/database';
 import { registerReceiptValidator, resetReceiptValidator } from '../services/payments.service';
+import { resetRateLimits } from '../middleware/rateLimit';
 
 type SignupOverrides = Partial<{
   email: string;
@@ -853,6 +854,294 @@ describe('GreenFlag backend core flow', () => {
       .set('Authorization', `Bearer ${user.token}`)
       .send({ phone: '+15551234567' });
     expect(second.status).toBe(429);
+  });
+
+
+  // --- Staged signup funnel -------------------------------------------------
+
+  const readOtpCode = async (channel: 'phone' | 'email', value: string) => {
+    const record = await pool.query(`SELECT code FROM otp_codes WHERE ${channel} = $1`, [value]);
+    expect(record.rows.length).toBe(1);
+    return String(record.rows[0].code);
+  };
+
+  const runRegistrationFunnel = async (phone: string, email: string, password = 'Passw0rd!') => {
+    const start = await agent.post('/api/auth/register/start').send({});
+    expect(start.status).toBe(201);
+    const registration_token = start.body.registration_token as string;
+    expect(registration_token).toBeTruthy();
+
+    if (start.body.phone_required) {
+      const phoneStep = await agent
+        .post('/api/auth/register/phone')
+        .send({ registration_token, phone });
+      expect(phoneStep.status).toBe(200);
+
+      const phoneVerify = await agent
+        .post('/api/auth/register/phone/verify')
+        .send({ registration_token, code: await readOtpCode('phone', phone) });
+      expect(phoneVerify.status).toBe(200);
+    }
+
+    const emailStep = await agent
+      .post('/api/auth/register/email')
+      .send({ registration_token, email });
+    expect(emailStep.status).toBe(200);
+
+    const emailVerify = await agent
+      .post('/api/auth/register/email/verify')
+      .send({ registration_token, code: await readOtpCode('email', email) });
+    expect(emailVerify.status).toBe(200);
+
+    const complete = await agent
+      .post('/api/auth/register/complete')
+      .send({ registration_token, password });
+
+    return { registration_token, complete };
+  };
+
+  it('creates an account through the staged signup funnel', async () => {
+    const email = `funnel_${Date.now()}@example.com`;
+    const { complete } = await runRegistrationFunnel('+15551230001', email);
+
+    expect(complete.status).toBe(201);
+    expect(complete.body.token).toBeTruthy();
+    expect(complete.body.user.email).toBe(email);
+    // The account exists but has no profile yet, so the app must send them on.
+    expect(complete.body.onboarding_required).toBe(true);
+    expect(complete.body.user.onboarding_completed).toBe(false);
+
+    // The phone verified during the funnel carries onto the new account.
+    const status = await agent
+      .get('/api/verification/status')
+      .set('Authorization', `Bearer ${complete.body.token}`);
+    expect(status.status).toBe(200);
+    expect(status.body.status.otp_verified).toBe(true);
+    expect(status.body.status.phone).toBe('+15551230001');
+
+    // And the password set at the last step is the one that logs in.
+    const login = await agent.post('/api/auth/login').send({ email, password: 'Passw0rd!' });
+    expect(login.status).toBe(200);
+  });
+
+  it('refuses to finish a registration whose email was never verified', async () => {
+    const start = await agent.post('/api/auth/register/start').send({});
+    const registration_token = start.body.registration_token as string;
+
+    const phone = '+15551230002';
+    await agent.post('/api/auth/register/phone').send({ registration_token, phone });
+    await agent
+      .post('/api/auth/register/phone/verify')
+      .send({ registration_token, code: await readOtpCode('phone', phone) });
+
+    await agent
+      .post('/api/auth/register/email')
+      .send({ registration_token, email: `unverified_${Date.now()}@example.com` });
+
+    // Skips straight past the email OTP screen.
+    const complete = await agent
+      .post('/api/auth/register/complete')
+      .send({ registration_token, password: 'Passw0rd!' });
+    expect(complete.status).toBe(409);
+    expect(complete.body.error).toMatch(/verify your email/i);
+  });
+
+  it('refuses to reach the email step until the phone is verified', async () => {
+    const start = await agent.post('/api/auth/register/start').send({});
+    expect(start.body.phone_required).toBe(true);
+    const registration_token = start.body.registration_token as string;
+
+    await agent
+      .post('/api/auth/register/phone')
+      .send({ registration_token, phone: '+15551230003' });
+
+    const emailStep = await agent
+      .post('/api/auth/register/email')
+      .send({ registration_token, email: `tooearly_${Date.now()}@example.com` });
+    expect(emailStep.status).toBe(409);
+    expect(emailStep.body.error).toMatch(/verify your phone/i);
+  });
+
+  it('skips the phone steps entirely when no SMS provider is available', async () => {
+    process.env.ALLOW_DEV_OTP_BYPASS = 'false';
+    try {
+      const capabilities = await agent.get('/api/auth/capabilities');
+      expect(capabilities.status).toBe(200);
+      expect(capabilities.body.sms).toBe(false);
+
+      const start = await agent.post('/api/auth/register/start').send({});
+      expect(start.body.phone_required).toBe(false);
+    } finally {
+      delete process.env.ALLOW_DEV_OTP_BYPASS;
+    }
+  });
+
+  it('rejects a registration password below the minimum length', async () => {
+    const email = `shortpw_${Date.now()}@example.com`;
+    const { complete } = await runRegistrationFunnel('+15551230004', email, 'short');
+    expect(complete.status).toBe(400);
+    expect(complete.body.error).toMatch(/at least 8 characters/i);
+  });
+
+  it('refuses a registration for an email that is already an account', async () => {
+    const existing = await signupAndCompleteProfile({
+      email: `taken_${Date.now()}@example.com`,
+      name: 'Taken User',
+    });
+
+    const start = await agent.post('/api/auth/register/start').send({});
+    const registration_token = start.body.registration_token as string;
+    const phone = '+15551230005';
+    await agent.post('/api/auth/register/phone').send({ registration_token, phone });
+    await agent
+      .post('/api/auth/register/phone/verify')
+      .send({ registration_token, code: await readOtpCode('phone', phone) });
+
+    const emailStep = await agent
+      .post('/api/auth/register/email')
+      .send({ registration_token, email: existing.signupPayload.email });
+    expect(emailStep.status).toBe(409);
+    expect(emailStep.body.error).toMatch(/already registered/i);
+  });
+
+
+  it('lets one honest signup finish without tripping its own rate limit', async () => {
+    // Rate limiting is off under test by default, which is why a limiter sized
+    // smaller than the funnel it guards went unnoticed: the funnel makes six
+    // requests, and the signup limiter allows five per hour. Turn it on here so
+    // the budgets are exercised rather than assumed.
+    process.env.ENABLE_RATE_LIMIT_IN_TESTS = 'true';
+    resetRateLimits();
+    try {
+      const email = `ratelimit_${Date.now()}@example.com`;
+      const { complete } = await runRegistrationFunnel('+15551230007', email);
+      expect(complete.status).toBe(201);
+    } finally {
+      delete process.env.ENABLE_RATE_LIMIT_IN_TESTS;
+      resetRateLimits();
+    }
+  });
+
+  it('still refuses bulk funnel creation from one address', async () => {
+    process.env.ENABLE_RATE_LIMIT_IN_TESTS = 'true';
+    resetRateLimits();
+    try {
+      const statuses: number[] = [];
+      for (let i = 0; i < 17; i++) {
+        const response = await agent.post('/api/auth/register/start').send({});
+        statuses.push(response.status);
+      }
+      // 15 allowed per hour, so the tail must be rejected.
+      expect(statuses.filter((code) => code === 201).length).toBe(15);
+      expect(statuses[statuses.length - 1]).toBe(429);
+    } finally {
+      delete process.env.ENABLE_RATE_LIMIT_IN_TESTS;
+      resetRateLimits();
+    }
+  });
+
+  // --- Quiz, pronouns, and discovery eligibility ----------------------------
+
+  it('serves twelve situational questions with four options each', async () => {
+    const response = await agent.get('/api/personality/questions');
+    expect(response.status).toBe(200);
+    expect(response.body.count).toBe(12);
+    expect(response.body.questions).toHaveLength(12);
+
+    response.body.questions.forEach((question: any, index: number) => {
+      expect(question.number).toBe(index + 1);
+      expect(typeof question.prompt).toBe('string');
+      expect(question.prompt.length).toBeGreaterThan(0);
+      expect(question.options.map((o: any) => o.key)).toEqual(['A', 'B', 'C', 'D']);
+      // Trait mappings stay server-side so answers cannot be reverse-engineered.
+      question.options.forEach((option: any) => expect(option.traits).toBeUndefined());
+    });
+  });
+
+  it('stores all twelve answers and derives traits per question, not per letter', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `quiz_${Date.now()}@example.com`, name: 'Quiz User' },
+      {
+        question9_answer: 'A',
+        question10_answer: 'B',
+        question11_answer: 'C',
+        question12_answer: 'D',
+      }
+    );
+
+    const stored = await pool.query(
+      `SELECT question9_answer, question10_answer, question11_answer, question12_answer,
+              personality_traits
+       FROM personality_responses WHERE user_id = $1`,
+      [user.userId]
+    );
+    expect(stored.rows[0].question9_answer).toBe('A');
+    expect(stored.rows[0].question12_answer).toBe('D');
+
+    const traits: string[] = stored.rows[0].personality_traits;
+    // Q1=A is "Make them laugh" -> Playful; Q12=D is "We handle the boring days
+    // well" -> Steady. A flat A/B/C/D map could not produce both.
+    expect(traits).toEqual(expect.arrayContaining(['Playful', 'Steady']));
+    expect(new Set(traits).size).toBe(traits.length);
+  });
+
+  it('keeps quiz answers that a later profile update does not resend', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `quizkeep_${Date.now()}@example.com`, name: 'Quiz Keep' },
+      { question9_answer: 'C' }
+    );
+
+    const update = await agent
+      .post('/api/profile/complete')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ bio: 'Updated bio only.' });
+    expect(update.status).toBe(200);
+
+    const stored = await pool.query(
+      'SELECT question1_answer, question9_answer FROM personality_responses WHERE user_id = $1',
+      [user.userId]
+    );
+    expect(stored.rows[0].question1_answer).toBe('A');
+    expect(stored.rows[0].question9_answer).toBe('C');
+  });
+
+  it('persists pronouns, which the app collected but previously discarded', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `pronouns_${Date.now()}@example.com`, name: 'Pronoun User' },
+      { pronouns: ['She / Her', 'They / Them'] }
+    );
+
+    const me = await agent
+      .get('/api/profile/me')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(me.status).toBe(200);
+    expect(me.body.user.pronouns).toEqual(['She / Her', 'They / Them']);
+  });
+
+  it('hides accounts that have not finished onboarding from discovery', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `seeker_${Date.now()}@example.com`,
+      name: 'Seeker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    // An account created by the funnel: real, logged in, but no profile yet.
+    const funnelEmail = `ghost_${Date.now()}@example.com`;
+    const { complete } = await runRegistrationFunnel('+15551230006', funnelEmail);
+    expect(complete.status).toBe(201);
+
+    const search = await agent
+      .post('/api/matches/search')
+      .set('Authorization', `Bearer ${seeker.token}`)
+      .send({ search_query: '', is_on_grid: true });
+    expect(search.status).toBe(200);
+
+    const returnedIds = [
+      ...(search.body.on_grid || []),
+      ...(search.body.off_grid || []),
+    ].map((candidate: any) => candidate.id);
+    expect(returnedIds).not.toContain(complete.body.user.id);
   });
 
   it('rejects local media payloads and accepts secure hosted media URLs', async () => {

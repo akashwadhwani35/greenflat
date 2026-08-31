@@ -270,8 +270,14 @@ Return only the match reason, nothing else.`;
   }
 };
 
+/**
+ * `answerSummary` is the output of describeAnswers() in utils/personalityQuestions:
+ * one line per answered question naming the option chosen and the traits it maps
+ * to. We pass resolved traits rather than bare letters because the quiz is
+ * situational — the same letter means something different on every question.
+ */
 export const analyzePersonality = async (
-  answers: string[],
+  answerSummary: string,
   aboutYouText: string
 ): Promise<{
   summary: string;
@@ -328,8 +334,8 @@ export const analyzePersonality = async (
 
   const prompt = `Based only on the two inputs below, provide personality insights.
 
-Input 1: Personality quiz answers (A/B/C/D)
-${answers.join(', ') || 'No quiz answers provided'}
+Input 1: Situational quiz answers, with the traits each chosen answer indicates
+${answerSummary || 'No quiz answers provided'}
 
 Input 2: "Tell us about yourself" text
 ${aboutYouText || 'No text provided'}
@@ -340,12 +346,7 @@ Important:
 - Write in SECOND PERSON.
 - The summary MUST start with "You are".
 - Do NOT use third-person phrasing like "The individual is", "This person is", or "They are".
-
-Quiz context:
-- A answers → Funny, Playful, Adventurous, Spontaneous
-- B answers → Caring, Empathetic, Romantic, Thoughtful
-- C answers → Logical, Calm, Serious, Mature, Structured
-- D answers → Responsible, Independent, Confident, Chill
+- Draw top_traits from the traits listed in Input 1, favouring ones that recur.
 
 Return JSON with:
 {

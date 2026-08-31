@@ -1,7 +1,15 @@
 import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
-import { PERSONALITY_TRAITS_MAP, TOKEN_COSTS } from '../utils/constants';
+import { TOKEN_COSTS } from '../utils/constants';
+import { PLACEHOLDER_CITY, PLACEHOLDER_NAME } from '../services/accounts.service';
+import {
+  PERSONALITY_QUESTIONS,
+  normalizeAnswer,
+  traitsForAnswers,
+  describeAnswers,
+  type QuizOptionKey,
+} from '../utils/personalityQuestions';
 import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
 import { normalizeMediaMessageUrl } from '../services/media.service';
@@ -15,6 +23,14 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
     const {
+      // Identity. The staged signup funnel creates the account before any of
+      // these are known, so onboarding sends them here.
+      name,
+      gender,
+      interested_in,
+      date_of_birth,
+      city,
+      pronouns,
       // Profile data
       height,
       body_type,
@@ -55,6 +71,10 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       question6_answer,
       question7_answer,
       question8_answer,
+      question9_answer,
+      question10_answer,
+      question11_answer,
+      question12_answer,
     } = req.body;
 
     await client.query('BEGIN');
@@ -102,44 +122,45 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       ]
     );
 
+    const answerColumns = PERSONALITY_QUESTIONS.map((q) => `question${q.number}_answer`);
+
     const existingPersonalityResult = await client.query(
-      `SELECT question1_answer, question2_answer, question3_answer, question4_answer,
-              question5_answer, question6_answer, question7_answer, question8_answer
+      `SELECT ${answerColumns.join(', ')}
        FROM personality_responses
        WHERE user_id = $1`,
       [userId]
     );
 
     const existingAnswers = existingPersonalityResult.rows[0] || {};
-    const normalizeAnswer = (value: unknown): string | null => {
-      if (typeof value !== 'string') return null;
-      const upper = value.trim().toUpperCase();
-      return ['A', 'B', 'C', 'D'].includes(upper) ? upper : null;
+    const incomingAnswers: Record<number, unknown> = {
+      1: question1_answer,
+      2: question2_answer,
+      3: question3_answer,
+      4: question4_answer,
+      5: question5_answer,
+      6: question6_answer,
+      7: question7_answer,
+      8: question8_answer,
+      9: question9_answer,
+      10: question10_answer,
+      11: question11_answer,
+      12: question12_answer,
     };
 
-    // Always preserve already-saved quiz answers when a request doesn't include them.
-    const answers = [
-      normalizeAnswer(question1_answer) ?? normalizeAnswer(existingAnswers.question1_answer),
-      normalizeAnswer(question2_answer) ?? normalizeAnswer(existingAnswers.question2_answer),
-      normalizeAnswer(question3_answer) ?? normalizeAnswer(existingAnswers.question3_answer),
-      normalizeAnswer(question4_answer) ?? normalizeAnswer(existingAnswers.question4_answer),
-      normalizeAnswer(question5_answer) ?? normalizeAnswer(existingAnswers.question5_answer),
-      normalizeAnswer(question6_answer) ?? normalizeAnswer(existingAnswers.question6_answer),
-      normalizeAnswer(question7_answer) ?? normalizeAnswer(existingAnswers.question7_answer),
-      normalizeAnswer(question8_answer) ?? normalizeAnswer(existingAnswers.question8_answer),
-    ];
+    // Always preserve already-saved quiz answers when a request doesn't include
+    // them. Users who took the original eight-question quiz keep those answers
+    // and simply have nothing stored for 9-12 until they retake it.
+    const answers: Array<QuizOptionKey | null> = PERSONALITY_QUESTIONS.map(
+      (question) =>
+        normalizeAnswer(incomingAnswers[question.number]) ??
+        normalizeAnswer(existingAnswers[`question${question.number}_answer`])
+    );
 
-    const personalityTraits: string[] = [];
-    answers.forEach((answer) => {
-      if (answer && PERSONALITY_TRAITS_MAP[answer]) {
-        personalityTraits.push(...PERSONALITY_TRAITS_MAP[answer]);
-      }
-    });
+    // Traits are resolved per question, not from a flat letter map: on a
+    // situational quiz the same letter means something different each time.
+    const uniqueTraits = traitsForAnswers(answers);
 
-    // Remove duplicates
-    const uniqueTraits = [...new Set(personalityTraits)];
-
-    const filteredAnswers = answers.filter((answer): answer is string => Boolean(answer));
+    const answerSummary = describeAnswers(answers);
     const aboutYouText = [bio, prompt1, prompt2, prompt3]
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
       .join('\n');
@@ -149,9 +170,9 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       compatibility_tips: 'You would match well with someone who shares your values.',
     };
 
-    if (process.env.OPENAI_API_KEY && (filteredAnswers.length > 0 || aboutYouText.length > 0)) {
+    if (process.env.OPENAI_API_KEY && (answerSummary.length > 0 || aboutYouText.length > 0)) {
       try {
-        const insights = await analyzePersonality(filteredAnswers, aboutYouText);
+        const insights = await analyzePersonality(answerSummary, aboutYouText);
         aiPersonalityInsights = {
           summary: insights.summary,
           top_traits: insights.top_traits && insights.top_traits.length > 0 ? insights.top_traits : uniqueTraits.slice(0, 3),
@@ -162,31 +183,98 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       }
     }
 
-    // Save personality responses
+    // Save personality responses. Built from the question bank so adding a
+    // question is a one-file change rather than an edit to this statement.
+    const answerPlaceholders = answers.map((_, i) => `$${i + 2}`);
+    const answerAssignments = answerColumns
+      .map((column, i) => `${column} = ${answerPlaceholders[i]}`)
+      .join(', ');
+    const traitsParam = `$${answers.length + 2}`;
+    const summaryParam = `$${answers.length + 3}`;
+    const tipsParam = `$${answers.length + 4}`;
+    const topTraitsParam = `$${answers.length + 5}`;
+
     await client.query(
       `INSERT INTO personality_responses (
-        user_id, question1_answer, question2_answer, question3_answer,
-        question4_answer, question5_answer, question6_answer,
-        question7_answer, question8_answer, personality_traits,
+        user_id, ${answerColumns.join(', ')}, personality_traits,
         personality_summary, compatibility_tips, top_traits, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
+      ) VALUES ($1, ${answerPlaceholders.join(', ')}, ${traitsParam}, ${summaryParam}, ${tipsParam}, ${topTraitsParam}, NOW())
       ON CONFLICT (user_id)
       DO UPDATE SET
-        question1_answer = $2, question2_answer = $3, question3_answer = $4,
-        question4_answer = $5, question5_answer = $6, question6_answer = $7,
-        question7_answer = $8, question8_answer = $9, personality_traits = $10,
-        personality_summary = $11, compatibility_tips = $12, top_traits = $13,
+        ${answerAssignments},
+        personality_traits = ${traitsParam},
+        personality_summary = ${summaryParam},
+        compatibility_tips = ${tipsParam},
+        top_traits = ${topTraitsParam},
         updated_at = NOW()
       RETURNING *`,
       [
-        userId, answers[0], answers[1], answers[2],
-        answers[3], answers[4], answers[5],
-        answers[6], answers[7], uniqueTraits,
+        userId,
+        ...answers,
+        uniqueTraits,
         aiPersonalityInsights.summary,
         aiPersonalityInsights.compatibility_tips,
         aiPersonalityInsights.top_traits,
       ]
     );
+
+    // Pronouns live on users beside name and gender, not in user_profiles: they
+    // are identity, shown wherever a name is shown, and were previously collected
+    // by the app and then dropped on the floor for want of a column.
+    const normalizedPronouns = Array.isArray(pronouns)
+      ? pronouns
+          .filter((value: unknown): value is string => typeof value === 'string')
+          .map((value: string) => value.trim())
+          .filter((value: string) => value.length > 0 && value.length <= 40)
+          .slice(0, 4)
+      : null;
+
+    // Identity fields live on users, not user_profiles. The staged signup funnel
+    // creates the account before asking for any of them, so this is where the
+    // placeholders put in at signup get replaced with what the user actually said.
+    const identityUpdate = await client.query(
+      `UPDATE users
+       SET name = COALESCE($2, name),
+           gender = COALESCE($3, gender),
+           interested_in = COALESCE($4, interested_in),
+           date_of_birth = COALESCE($5, date_of_birth),
+           city = COALESCE($6, city),
+           pronouns = COALESCE($7, pronouns),
+           cooldown_enabled = CASE WHEN $3::text = 'female' THEN TRUE ELSE cooldown_enabled END,
+           updated_at = NOW()
+       WHERE id = $1
+       RETURNING name, gender, city, date_of_birth`,
+      [
+        userId,
+        typeof name === 'string' && name.trim() ? name.trim().slice(0, 100) : null,
+        typeof gender === 'string' && ['male', 'female', 'other'].includes(gender) ? gender : null,
+        typeof interested_in === 'string' && ['male', 'female', 'both'].includes(interested_in)
+          ? interested_in
+          : null,
+        date_of_birth || null,
+        typeof city === 'string' && city.trim() ? city.trim().slice(0, 100) : null,
+        normalizedPronouns,
+      ]
+    );
+
+    // Onboarding counts as finished once the account has real identity values
+    // rather than the signup placeholders. Until this is stamped the user does
+    // not appear in anyone's discovery results.
+    const identity = identityUpdate.rows[0] || {};
+    const hasRealIdentity =
+      Boolean(identity.name) &&
+      identity.name !== PLACEHOLDER_NAME &&
+      Boolean(identity.city) &&
+      identity.city !== PLACEHOLDER_CITY;
+
+    if (hasRealIdentity) {
+      await client.query(
+        `UPDATE users
+         SET onboarding_completed_at = COALESCE(onboarding_completed_at, NOW())
+         WHERE id = $1`,
+        [userId]
+      );
+    }
 
     const personaSegments = [
       bio,
@@ -262,7 +350,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 
     // Get user data
     const userResult = await pool.query(
-      `SELECT id, email, name, gender, interested_in, date_of_birth, city,
+      `SELECT id, email, name, gender, interested_in, pronouns, date_of_birth, city,
               is_verified, is_premium, premium_expires_at, boost_expires_at, credit_balance, cooldown_enabled
        FROM users
        WHERE id = $1`,
@@ -529,9 +617,17 @@ export const reorderPhoto = async (req: AuthRequest, res: Response) => {
 export const updateUserBasics = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId;
-    const { name, city, gender, date_of_birth, interested_in } = req.body;
+    const { name, city, gender, date_of_birth, interested_in, pronouns } = req.body;
 
-    if (!name && !city && !gender && !date_of_birth && !interested_in) {
+    const normalizedPronouns = Array.isArray(pronouns)
+      ? pronouns
+          .filter((value: unknown): value is string => typeof value === 'string')
+          .map((value: string) => value.trim())
+          .filter((value: string) => value.length > 0 && value.length <= 40)
+          .slice(0, 4)
+      : null;
+
+    if (!name && !city && !gender && !date_of_birth && !interested_in && !normalizedPronouns) {
       return res.status(400).json({ error: 'Nothing to update' });
     }
 
@@ -542,10 +638,11 @@ export const updateUserBasics = async (req: AuthRequest, res: Response) => {
            gender = COALESCE($3, gender),
            date_of_birth = COALESCE($4, date_of_birth),
            interested_in = COALESCE($5, interested_in),
+           pronouns = COALESCE($6, pronouns),
            updated_at = NOW()
-       WHERE id = $6
-       RETURNING id, name, city, gender, date_of_birth, interested_in`,
-      [name || null, city || null, gender || null, date_of_birth || null, interested_in || null, userId]
+       WHERE id = $7
+       RETURNING id, name, city, gender, date_of_birth, interested_in, pronouns`,
+      [name || null, city || null, gender || null, date_of_birth || null, interested_in || null, normalizedPronouns, userId]
     );
 
     res.json({ user: result.rows[0] });

@@ -16,7 +16,11 @@ const LOGO_SIZE = Math.min(SCREEN_WIDTH * 1.75, 740);
 type WelcomeScreenProps = {
   onStart: () => void;
   onLogin?: () => void;
-  onGoogleAuth?: (payload: { token: string; user: { id: number; name: string; is_admin?: boolean }; isNewUser?: boolean }) => void;
+  onGoogleAuth?: (payload: {
+    token: string;
+    user: { id: number; name: string; is_admin?: boolean; onboarding_completed?: boolean };
+    isNewUser?: boolean;
+  }) => void;
   apiBaseUrl?: string;
 };
 
@@ -63,7 +67,12 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
       if (!data.token || !data.user?.id) throw new Error('Google sign-in response missing token');
       onGoogleAuth({
         token: data.token,
-        user: { id: data.user.id, name: data.user.name || 'friend', is_admin: data.user.is_admin },
+        user: {
+          id: data.user.id,
+          name: data.user.name || 'friend',
+          is_admin: data.user.is_admin,
+          onboarding_completed: data.user.onboarding_completed,
+        },
         isNewUser: data.is_new_user === true,
       });
     } catch (error: any) {

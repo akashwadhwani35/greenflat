@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
   Easing,
@@ -21,9 +22,9 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { toUploadableDataUrl } from '../utils/image';
 import { Button } from '../components/Button';
-import { Chip } from '../components/Chip';
 import { InputField } from '../components/InputField';
 import { UnderlineInput } from '../components/UnderlineInput';
+import { Chip } from '../components/Chip';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -36,7 +37,16 @@ type OnboardingScreenProps = {
   existingUserId?: number | null;
 };
 
-type SlideKey = 'basic' | 'intentions' | 'location' | 'physical' | 'lifestyle' | 'personality' | 'prompts' | 'photos' | 'contact';
+type SlideKey =
+  | 'basic'
+  | 'intentions'
+  | 'location'
+  | 'understand'
+  | 'prompts'
+  | 'world'
+  | 'photos'
+  | 'optional'
+  | 'safety';
 
 type Slide = {
   key: SlideKey;
@@ -45,18 +55,17 @@ type Slide = {
 };
 
 const allSlides: Slide[] = [
-  { key: 'basic', title: "Let's start with you", subtitle: 'Your name, identity, and age.' },
-  { key: 'intentions', title: 'What brings you here?', subtitle: 'Your relationship goals and vibe.' },
-  { key: 'location', title: 'Where are you?', subtitle: 'Detect or search your city.' },
-  { key: 'physical', title: 'A bit about your look', subtitle: 'Height and body type (optional).' },
-  { key: 'lifestyle', title: 'Your lifestyle', subtitle: 'Habits that matter to you.' },
-  { key: 'personality', title: 'Show your personality', subtitle: 'Interests and a quick quiz.' },
-  { key: 'prompts', title: 'Tell us about yourself', subtitle: 'This helps our AI understand you and find your best match.' },
-  { key: 'photos', title: 'Add your photos', subtitle: 'Show the real you.' },
-  { key: 'contact', title: 'Secure your profile', subtitle: 'Email or phone + verification.' },
+  { key: 'basic', title: 'Me', subtitle: 'Name, birthday, and how you identify.' },
+  { key: 'intentions', title: "Who I'm looking for", subtitle: 'Who you want to meet, and what for.' },
+  { key: 'location', title: 'Where', subtitle: 'Your city and how far you will travel.' },
+  { key: 'understand', title: 'Understand me', subtitle: 'Twelve situations. Pick what you would actually do.' },
+  { key: 'prompts', title: 'Tell me more', subtitle: 'In your own words. This is what our AI reads.' },
+  { key: 'world', title: 'My world', subtitle: 'What you spend your time on.' },
+  { key: 'photos', title: 'Show me', subtitle: 'Photos of you, not your holiday.' },
+  { key: 'optional', title: 'Optional details', subtitle: 'Skip anything you would rather not say.' },
+  { key: 'safety', title: 'Safety', subtitle: 'A quick face check keeps GreenFlag real.' },
 ];
 
-const identityOptions = ['She / Her', 'He / Him', 'They / Them', 'Another label'];
 const lookingForOptions = ['Friendship', 'Dating', 'Long-term', 'Exploring'];
 const bodyTypeOptions = ['Slim', 'Athletic', 'Average', 'Curvy', 'Muscular', 'Plus-size'];
 const drinkerOptions = ['Never', 'Social', 'Regular'];
@@ -64,26 +73,32 @@ const smokerOptions = ['Never', 'Social', 'Regular'];
 const dietOptions = ['Omnivore', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', 'Other'];
 const fitnessOptions = ['Not active', 'Lightly active', 'Active', 'Very active'];
 const interestedInOptions = ['Men', 'Women', 'Everyone'];
+const genderOptions = ['Woman', 'Man', 'Non-binary'];
+const pronounOptions = ['she/her', 'he/him', 'they/them', 'ze/zir', 'xe/xim', 'ey/em'];
+const drugsOptions = ['Never', 'Sometimes', 'Regularly'];
 const interestOptions = ['Travel', 'Fitness', 'Music', 'Art', 'Cooking', 'Gaming', 'Reading', 'Sports', 'Movies', 'Technology', 'Photography', 'Dancing'];
 
-const personalityQuestions = [
-  { q: 'At a party, I usually:', a: 'Socialize with everyone', b: 'Talk to a few close friends', c: 'Observe and listen', d: 'Leave early' },
-  { q: 'I make decisions based on:', a: 'Logic and facts', b: 'Feelings and values', c: 'Gut instinct', d: 'What others think' },
-  { q: 'My ideal weekend is:', a: 'Adventure and excitement', b: 'Relaxing at home', c: 'Trying something new', d: 'Time with loved ones' },
-  { q: 'When facing a problem, I:', a: 'Analyze all options', b: 'Ask for advice', c: 'Go with my instinct', d: 'Sleep on it' },
-  { q: 'I value most:', a: 'Honesty', b: 'Loyalty', c: 'Kindness', d: 'Ambition' },
-  { q: 'In relationships, I need:', a: 'Independence', b: 'Quality time', c: 'Deep conversations', d: 'Physical affection' },
-  { q: 'My communication style is:', a: 'Direct and clear', b: 'Thoughtful and careful', c: 'Playful and light', d: 'Emotional and expressive' },
-  { q: 'I handle conflict by:', a: 'Addressing it immediately', b: 'Taking time to process', c: 'Compromising', d: 'Avoiding when possible' },
-];
+/**
+ * The quiz is fetched from GET /api/personality/questions rather than hardcoded.
+ *
+ * The server owns the bank because it also owns the trait mapping each answer
+ * implies; a second copy here would drift the first time a question was reworded,
+ * and answers would then be scored against the wrong traits.
+ */
+type QuizQuestion = {
+  number: number;
+  prompt: string;
+  options: { key: string; label: string }[];
+};
+
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, onBack, apiBaseUrl, existingToken, existingUserId }) => {
   const theme = useTheme();
   // Skip the contact step when the user already has an account (e.g. Google OAuth)
-  const slides = useMemo(
-    () => (existingToken ? allSlides.filter((s) => s.key !== 'contact') : allSlides),
-    [existingToken]
-  );
+  // Every step is shown. Account creation happens before onboarding now, in the
+  // signup funnel, so there is no longer a contact/password step to drop for
+  // users who arrived already signed in.
+  const slides = allSlides;
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showIOSPicker, setShowIOSPicker] = useState(false);
@@ -93,7 +108,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   const [form, setForm] = useState({
     // Basic
     name: '',
-    identity: '',
+    gender: '' as '' | 'male' | 'female' | 'other',
+    pronouns: [] as string[],
     interestedIn: '' as '' | 'male' | 'female' | 'both',
     dateOfBirth: '',
 
@@ -114,12 +130,14 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     // Lifestyle
     smoker: 'Never' as 'Never' | 'Social' | 'Regular',
     drinker: 'Social' as 'Never' | 'Social' | 'Regular',
+    drugs: '',
     diet: '',
     fitnessLevel: '',
 
-    // Personality
+    // Personality. Keyed by question number so the bank can grow without
+    // touching this shape.
     interests: [] as string[],
-    q1: '', q2: '', q3: '', q4: '', q5: '', q6: '', q7: '', q8: '',
+    answers: {} as Record<number, string>,
 
     // Prompts
     bio: '',
@@ -131,18 +149,39 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     photos: [] as string[],
     primaryPhotoIndex: 0,
 
-    // Contact
-    contactValue: '',
-    contactType: 'email' as 'email' | 'phone',
-    otp: '',
-    password: '',
-    confirmPassword: '',
+    // Safety
+    faceCheckPhoto: '' as string,
+    faceCheckSkipped: false,
   });
+
+  const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  const [questionsError, setQuestionsError] = useState(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const isValidEmail = (value: string) => /\S+@\S+\.\S+/.test(value.trim());
-  const isValidPhone = (value: string) => /^[0-9+()\-\s]{8,}$/.test(value.trim());
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadQuestions = async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/personality/questions`);
+        const data = await response.json();
+        if (cancelled) return;
+        if (!response.ok || !Array.isArray(data?.questions)) throw new Error('bad payload');
+        setQuestions(data.questions);
+        setQuestionsError(false);
+      } catch {
+        if (!cancelled) setQuestionsError(true);
+      }
+    };
+
+    void loadQuestions();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl]);
+
+
 
   const progress = (step + 1) / slides.length;
 
@@ -184,43 +223,35 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     switch (current) {
       case 'basic':
         if (!form.name.trim()) nextErrors.name = 'Tell us your name.';
-        if (!form.identity) nextErrors.identity = 'Pick how you identify.';
-        if (!form.interestedIn) nextErrors.interestedIn = 'Tell us who you\'re interested in.';
+        if (!form.gender) nextErrors.gender = 'Pick how you identify.';
         if (!form.dateOfBirth) nextErrors.dateOfBirth = 'Select your birth date (18+).';
         break;
       case 'intentions':
+        if (!form.interestedIn) nextErrors.interestedIn = "Tell us who you're interested in.";
         if (form.lookingFor.length === 0) nextErrors.lookingFor = 'Choose at least one intention.';
         break;
       case 'location':
         if (!form.city.trim()) nextErrors.city = 'Add your city.';
         break;
-      case 'personality':
-        if (form.interests.length === 0) nextErrors.interests = 'Pick at least 3 interests.';
-        if (!form.q1 || !form.q2 || !form.q3 || !form.q4 || !form.q5 || !form.q6 || !form.q7 || !form.q8) {
-          nextErrors.quiz = 'Please answer all personality questions.';
+      case 'understand': {
+        const unanswered = questions.filter((question) => !form.answers[question.number]);
+        if (questions.length === 0) {
+          nextErrors.quiz = 'Questions could not load. Check your connection and try again.';
+        } else if (unanswered.length > 0) {
+          nextErrors.quiz = `${unanswered.length} left to answer.`;
         }
         break;
+      }
       case 'prompts':
         if (!form.bio.trim()) nextErrors.bio = 'Write a short bio.';
+        break;
+      case 'world':
+        if (form.interests.length < 3) nextErrors.interests = 'Pick at least 3 interests.';
         break;
       case 'photos':
         if (form.photos.length === 0) nextErrors.photos = 'Add at least one photo.';
         break;
-      case 'contact':
-        if (!form.contactValue.trim()) {
-          nextErrors.contact = 'Add email or phone.';
-        } else if (form.contactType === 'email' && !isValidEmail(form.contactValue)) {
-          nextErrors.contact = 'That email does not look right.';
-        } else if (form.contactType === 'phone' && !isValidPhone(form.contactValue)) {
-          nextErrors.contact = 'Add phone with country code.';
-        }
-        if (form.password.length < 8) {
-          nextErrors.password = 'Password must be at least 8 characters.';
-        }
-        if (form.confirmPassword !== form.password) {
-          nextErrors.confirmPassword = 'Passwords do not match.';
-        }
-        break;
+      // 'optional' and 'safety' are both skippable by design.
       default:
         break;
     }
@@ -229,95 +260,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     return Object.keys(nextErrors).length === 0;
   };
 
-  const mapIdentityToGender = (identity: string) => {
-    if (identity.toLowerCase().includes('she')) return 'female';
-    if (identity.toLowerCase().includes('he')) return 'male';
-    return 'other';
-  };
-
-  const resolveEmail = () => {
-    if (form.contactType === 'email') {
-      return form.contactValue.trim();
-    }
-    const digits = form.contactValue.replace(/[^0-9]/g, '');
-    return `${digits || 'user'}@phone.greenflag.app`;
-  };
-
   const submitToBackend = async () => {
-    let token: string | undefined;
-    let userId: number | undefined;
+    // Onboarding always runs signed in: the account was created either by the
+    // signup funnel or by Google before we ever got here.
+    const token = existingToken;
+    const userId = existingUserId ?? undefined;
 
-    if (existingToken) {
-      // Google OAuth user – already signed up, just need to complete profile
-      token = existingToken;
-      userId = existingUserId ?? undefined;
-
-      // Update basic user fields (gender, DOB, city, name) that were set to defaults during Google signup
-      const gender = mapIdentityToGender(form.identity || '');
-      const basicRes = await fetch(`${apiBaseUrl}/profile/basic`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          name: form.name.trim(),
-          gender,
-          interested_in: form.interestedIn,
-          date_of_birth: form.dateOfBirth,
-          city: form.city || 'Unknown',
-        }),
-      });
-      if (!basicRes.ok) {
-        const body = await basicRes.json().catch(() => ({}));
-        console.warn('Basic profile update failed:', body.error);
-      }
-    } else {
-      // Standard email/password signup
-      const email = resolveEmail();
-      const gender = mapIdentityToGender(form.identity || '');
-      const interested_in = form.interestedIn;
-      const password = form.password;
-
-      const signupResponse = await fetch(`${apiBaseUrl}/auth/signup`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email,
-          password,
-          name: form.name.trim(),
-          gender,
-          interested_in,
-          date_of_birth: form.dateOfBirth,
-          city: form.city || 'Unknown',
-        }),
-      });
-
-      const signupBody = await signupResponse.json().catch(() => ({}));
-      token = signupBody?.token as string | undefined;
-      userId = signupBody?.user?.id as number | undefined;
-
-      if (!signupResponse.ok) {
-        const errorMessage = signupBody.error || 'Unable to create your account.';
-        if (signupResponse.status === 400 && errorMessage.toLowerCase().includes('already')) {
-          const loginResponse = await fetch(`${apiBaseUrl}/auth/login`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, password }),
-          });
-
-          if (!loginResponse.ok) {
-            const loginBody = await loginResponse.json().catch(() => ({}));
-            throw new Error(loginBody.error || errorMessage);
-          }
-
-          const loginBody = await loginResponse.json();
-          token = loginBody.token;
-          userId = loginBody.user?.id;
-        } else {
-          throw new Error(errorMessage);
-        }
-      }
-    }
-
-    if (!token) throw new Error('No token returned from the server.');
+    if (!token) throw new Error('You are not signed in. Please start again.');
 
     const userHeaders = {
       'Content-Type': 'application/json',
@@ -325,6 +274,16 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     };
 
     const profilePayload = {
+      // Identity. The signup funnel created the account with placeholders for
+      // these; this is where the real values land, and stamping them is what
+      // makes the profile eligible to appear in anyone's discovery.
+      name: form.name.trim(),
+      gender: form.gender,
+      interested_in: form.interestedIn,
+      date_of_birth: form.dateOfBirth,
+      city: form.city || 'Unknown',
+      pronouns: form.pronouns,
+
       height: form.height || null,
       body_type: form.bodyType || null,
       interests: form.interests,
@@ -334,6 +293,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       prompt3: form.prompt3 || null,
       smoker: form.smoker.toLowerCase(),
       drinker: form.drinker.toLowerCase(),
+      drugs: form.drugs ? form.drugs.toLowerCase() : null,
       diet: form.diet || null,
       fitness_level: form.fitnessLevel || null,
       education: null,
@@ -348,14 +308,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       connection_preferences: form.vibe || null,
       dealbreakers: null,
       growth_journey: null,
-      question1_answer: form.q1 || null,
-      question2_answer: form.q2 || null,
-      question3_answer: form.q3 || null,
-      question4_answer: form.q4 || null,
-      question5_answer: form.q5 || null,
-      question6_answer: form.q6 || null,
-      question7_answer: form.q7 || null,
-      question8_answer: form.q8 || null,
+      ...Object.fromEntries(
+        questions.map((question) => [
+          `question${question.number}_answer`,
+          form.answers[question.number] || null,
+        ])
+      ),
     };
 
     const completeProfileResponse = await fetch(`${apiBaseUrl}/profile/complete`, {
@@ -382,6 +340,23 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         }
       } catch (err) {
         console.warn(`Photo upload ${i + 1} error:`, err);
+      }
+    }
+
+    // Face check, if they took one. Failure here must not fail onboarding: the
+    // step is optional by design and can be redone from Verification.
+    if (form.faceCheckPhoto) {
+      try {
+        const faceRes = await fetch(`${apiBaseUrl}/verification/selfie`, {
+          method: 'POST',
+          headers: userHeaders,
+          body: JSON.stringify({ photo_url: form.faceCheckPhoto }),
+        });
+        if (!faceRes.ok) {
+          console.warn(`Face check failed: HTTP ${faceRes.status}`);
+        }
+      } catch (err) {
+        console.warn('Face check error:', err);
       }
     }
 
@@ -430,6 +405,35 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       return;
     }
     setStep((prev) => prev - 1);
+  };
+
+  /**
+   * Selfie for the face check. Camera rather than library on purpose: a picture
+   * chosen from the gallery proves nothing about who is holding the phone.
+   */
+  const captureFaceCheck = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert('Camera needed', 'Allow camera access to verify your face, or skip this step.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        cameraType: ImagePicker.CameraType.front,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 1,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const dataUrl = await toUploadableDataUrl(result.assets[0].uri);
+      setForm((prev) => ({ ...prev, faceCheckPhoto: dataUrl, faceCheckSkipped: false }));
+    } catch (error: any) {
+      console.error('Face check capture error:', error);
+      Alert.alert('Error', error.message || 'Could not open the camera. You can skip this step.');
+    }
   };
 
   const selectPhoto = async () => {
@@ -645,17 +649,21 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                 error={errors.name}
               />
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>How do you identify?</Typography>
-              {renderChipRow(identityOptions, form.identity ? [form.identity] : [], (option) =>
-                setForm((prev) => ({ ...prev, identity: option }))
-              , false)}
-              {errors.identity ? <Typography variant="small" tone="error">{errors.identity}</Typography> : null}
+              {renderChipRow(
+                genderOptions,
+                form.gender ? [form.gender === 'female' ? 'Woman' : form.gender === 'male' ? 'Man' : 'Non-binary'] : [],
+                (option) => {
+                  const value = option === 'Woman' ? 'female' : option === 'Man' ? 'male' : 'other';
+                  setForm((prev) => ({ ...prev, gender: value as 'male' | 'female' | 'other' }));
+                },
+                false
+              )}
+              {errors.gender ? <Typography variant="small" tone="error">{errors.gender}</Typography> : null}
 
-              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Interested in</Typography>
-              {renderChipRow(interestedInOptions, form.interestedIn ? [form.interestedIn === 'male' ? 'Men' : form.interestedIn === 'female' ? 'Women' : 'Everyone'] : [], (option) => {
-                const value = option === 'Men' ? 'male' : option === 'Women' ? 'female' : 'both';
-                setForm((prev) => ({ ...prev, interestedIn: value as 'male' | 'female' | 'both' }));
-              }, false)}
-              {errors.interestedIn ? <Typography variant="small" tone="error">{errors.interestedIn}</Typography> : null}
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Your pronouns (optional)</Typography>
+              {renderChipRow(pronounOptions, form.pronouns, (option) =>
+                setForm((prev) => ({ ...prev, pronouns: toggleArrayValue(prev.pronouns, option) }))
+              )}
 
               <TouchableOpacity
                 style={[styles.dateButton, {
@@ -697,7 +705,21 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <Typography variant="body" style={{ color: theme.colors.muted }}>What are you looking for?</Typography>
+              <Typography variant="body" style={{ color: theme.colors.muted }}>Interested in</Typography>
+              {renderChipRow(
+                interestedInOptions,
+                form.interestedIn
+                  ? [form.interestedIn === 'male' ? 'Men' : form.interestedIn === 'female' ? 'Women' : 'Everyone']
+                  : [],
+                (option) => {
+                  const value = option === 'Men' ? 'male' : option === 'Women' ? 'female' : 'both';
+                  setForm((prev) => ({ ...prev, interestedIn: value as 'male' | 'female' | 'both' }));
+                },
+                false
+              )}
+              {errors.interestedIn ? <Typography variant="small" tone="error">{errors.interestedIn}</Typography> : null}
+
+              <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 20 }}>What are you looking for?</Typography>
               {renderChipRow(lookingForOptions, form.lookingFor, (option) =>
                 setForm((prev) => ({ ...prev, lookingFor: toggleArrayValue(prev.lookingFor, option) }))
               )}
@@ -830,61 +852,69 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           </View>
         );
 
-      case 'physical':
+      case 'understand':
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <UnderlineInput
-                placeholder="Height (e.g., 5'8 or 173cm)"
-                value={form.height}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, height: text }))}
-              />
-              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Body type (optional)</Typography>
-              {renderChipRow(bodyTypeOptions, form.bodyType ? [form.bodyType] : [], (option) =>
-                setForm((prev) => ({ ...prev, bodyType: option }))
-              , false)}
+              <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 4 }}>
+                There are no right answers. Pick what you would actually do.
+              </Typography>
+
+              {questionsError && questions.length === 0 ? (
+                <Typography variant="small" tone="error" style={{ marginTop: 12 }}>
+                  Questions could not load. Check your connection and go back a step to retry.
+                </Typography>
+              ) : null}
+
+              {questions.length === 0 && !questionsError ? (
+                <ActivityIndicator color={theme.colors.neonGreen} style={{ marginTop: 24 }} />
+              ) : null}
+
+              {questions.map((question) => (
+                <View key={question.number} style={{ marginTop: 24 }}>
+                  <Typography variant="small" style={{ color: theme.colors.text, marginBottom: 10 }}>
+                    {question.number}. {question.prompt}
+                  </Typography>
+                  <View style={styles.quizOptions}>
+                    {question.options.map((option) => {
+                      const isSelected = form.answers[question.number] === option.key;
+                      return (
+                        <TouchableOpacity
+                          key={option.key}
+                          accessibilityRole="button"
+                          accessibilityState={{ selected: isSelected }}
+                          onPress={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              answers: { ...prev.answers, [question.number]: option.key },
+                            }))
+                          }
+                          style={[
+                            styles.quizOption,
+                            {
+                              backgroundColor: isSelected ? theme.colors.neonGreen : theme.colors.surfaceLight,
+                              borderColor: isSelected ? theme.colors.neonGreen : theme.colors.border,
+                            },
+                          ]}
+                        >
+                          <Typography
+                            variant="tiny"
+                            style={{ color: isSelected ? theme.colors.deepBlack : theme.colors.text }}
+                          >
+                            {option.label}
+                          </Typography>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+              {errors.quiz ? <Typography variant="small" tone="error" style={{ marginTop: 16 }}>{errors.quiz}</Typography> : null}
             </View>
           </View>
         );
 
-      case 'lifestyle':
-        return (
-          <View style={styles.slideStack}>
-            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <View style={{ gap: 20 }}>
-                <View>
-                  <Typography variant="small" style={{ color: theme.colors.muted }}>Smoking habits</Typography>
-                  {renderChipRow(smokerOptions, [form.smoker], (option) =>
-                    setForm((prev) => ({ ...prev, smoker: option as 'Never' | 'Social' | 'Regular' }))
-                  , false)}
-                </View>
-
-                <View>
-                  <Typography variant="small" style={{ color: theme.colors.muted }}>Drinking habits</Typography>
-                  {renderChipRow(drinkerOptions, [form.drinker], (option) =>
-                    setForm((prev) => ({ ...prev, drinker: option as any }))
-                  , false)}
-                </View>
-
-                <View>
-                  <Typography variant="small" style={{ color: theme.colors.muted }}>Diet</Typography>
-                  {renderChipRow(dietOptions, form.diet ? [form.diet] : [], (option) =>
-                    setForm((prev) => ({ ...prev, diet: option }))
-                  , false)}
-                </View>
-
-                <View>
-                  <Typography variant="small" style={{ color: theme.colors.muted }}>Fitness level</Typography>
-                  {renderChipRow(fitnessOptions, form.fitnessLevel ? [form.fitnessLevel] : [], (option) =>
-                    setForm((prev) => ({ ...prev, fitnessLevel: option }))
-                  , false)}
-                </View>
-              </View>
-            </View>
-          </View>
-        );
-
-      case 'personality':
+      case 'world':
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
@@ -894,38 +924,52 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               )}
               {errors.interests ? <Typography variant="small" tone="error">{errors.interests}</Typography> : null}
             </View>
+          </View>
+        );
 
-            <View style={[styles.card, { backgroundColor: '#101D13', marginTop: 16 }]}>
-              <Typography variant="h2" style={{ color: theme.colors.text, marginBottom: 16 }}>Quick Personality Quiz</Typography>
-              {personalityQuestions.map((pq, idx) => (
-                <View key={idx} style={{ marginBottom: 20 }}>
-                  <Typography variant="small" style={{ color: theme.colors.text, marginBottom: 8 }}>{idx + 1}. {pq.q}</Typography>
-                  <View style={styles.quizOptions}>
-                    {['a', 'b', 'c', 'd'].map((opt) => {
-                      const qKey = `q${idx + 1}` as keyof typeof form;
-                      const isSelected = form[qKey] === opt.toUpperCase();
-                      return (
-                        <TouchableOpacity
-                          key={opt}
-                          onPress={() => setForm((prev) => ({ ...prev, [qKey]: opt.toUpperCase() }))}
-                          style={[
-                            styles.quizOption,
-                            {
-                              backgroundColor: isSelected ? theme.colors.neonGreen : theme.colors.surfaceLight,
-                              borderColor: isSelected ? theme.colors.neonGreen : theme.colors.border,
-                            }
-                          ]}
-                        >
-                          <Typography variant="tiny" style={{ color: isSelected ? theme.colors.deepBlack : theme.colors.text }}>
-                            {pq[opt as 'a' | 'b' | 'c' | 'd']}
-                          </Typography>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </View>
-              ))}
-              {errors.quiz ? <Typography variant="small" tone="error">{errors.quiz}</Typography> : null}
+      case 'optional':
+        return (
+          <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13' }]}>
+              <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 8 }}>
+                All optional. Leave anything blank.
+              </Typography>
+
+              <UnderlineInput
+                placeholder="Height (e.g., 5'8 or 173cm)"
+                value={form.height}
+                onChangeText={(text) => setForm((prev) => ({ ...prev, height: text }))}
+              />
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Body type</Typography>
+              {renderChipRow(bodyTypeOptions, form.bodyType ? [form.bodyType] : [], (option) =>
+                setForm((prev) => ({ ...prev, bodyType: option }))
+              , false)}
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Smoking</Typography>
+              {renderChipRow(smokerOptions, [form.smoker], (option) =>
+                setForm((prev) => ({ ...prev, smoker: option as 'Never' | 'Social' | 'Regular' }))
+              , false)}
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Drinking</Typography>
+              {renderChipRow(drinkerOptions, [form.drinker], (option) =>
+                setForm((prev) => ({ ...prev, drinker: option as 'Never' | 'Social' | 'Regular' }))
+              , false)}
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Drugs</Typography>
+              {renderChipRow(drugsOptions, form.drugs ? [form.drugs] : [], (option) =>
+                setForm((prev) => ({ ...prev, drugs: option }))
+              , false)}
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Diet</Typography>
+              {renderChipRow(dietOptions, form.diet ? [form.diet] : [], (option) =>
+                setForm((prev) => ({ ...prev, diet: option }))
+              , false)}
+
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Fitness level</Typography>
+              {renderChipRow(fitnessOptions, form.fitnessLevel ? [form.fitnessLevel] : [], (option) =>
+                setForm((prev) => ({ ...prev, fitnessLevel: option }))
+              , false)}
             </View>
           </View>
         );
@@ -987,50 +1031,53 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           </View>
         );
 
-      case 'contact':
+      case 'safety':
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 16 }}>
-                We'll send you a verification code
+              <Typography variant="body" style={{ color: theme.colors.muted }}>
+                Take a selfie so we can check you match your photos. It is never shown on your
+                profile and nobody else sees it.
               </Typography>
 
-              {/* Contact Type Selection */}
-              <View style={styles.chipRow}>
-                <Chip label="Email" selected={form.contactType === 'email'} onPress={() => setForm((prev) => ({ ...prev, contactType: 'email', contactValue: '', otp: '' }))} />
-                <Chip label="Phone" selected={form.contactType === 'phone'} onPress={() => setForm((prev) => ({ ...prev, contactType: 'phone', contactValue: '', otp: '' }))} />
-              </View>
+              {form.faceCheckPhoto ? (
+                <View style={[styles.locationSuccessCard, { backgroundColor: 'rgba(188, 246, 65, 0.1)', borderColor: theme.colors.neonGreen, marginTop: 20 }]}>
+                  <Feather name="check-circle" size={24} color={theme.colors.neonGreen} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
+                      Selfie captured
+                    </Typography>
+                    <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 4 }}>
+                      We'll check it in the background.
+                    </Typography>
+                  </View>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={[styles.dateButton, { borderColor: theme.colors.borderLight, marginTop: 20 }]}
+                  onPress={captureFaceCheck}
+                  disabled={loading}
+                  accessibilityRole="button"
+                >
+                  <Feather name="camera" size={20} color={theme.colors.neonGreen} />
+                  <Typography variant="body" style={{ flex: 1, color: theme.colors.muted }}>
+                    {loading ? 'Opening camera...' : 'Take a selfie'}
+                  </Typography>
+                </TouchableOpacity>
+              )}
 
-              {/* Contact Input */}
-                <UnderlineInput
-                  placeholder={form.contactType === 'email' ? 'you@example.com' : '+1 234 567 8900'}
-                  keyboardType={form.contactType === 'email' ? 'email-address' : 'phone-pad'}
-                  value={form.contactValue}
-                  onChangeText={(text) => setForm((prev) => ({ ...prev, contactValue: text }))}
-                  error={errors.contact}
-                  style={{ marginTop: 16 }}
-                />
+              <TouchableOpacity
+                onPress={() => setForm((prev) => ({ ...prev, faceCheckSkipped: true }))}
+                style={{ marginTop: 20, alignSelf: 'flex-start' }}
+                accessibilityRole="button"
+              >
+                <Typography variant="small" style={{ color: theme.colors.muted, textDecorationLine: 'underline' }}>
+                  Skip for now
+                </Typography>
+              </TouchableOpacity>
 
-              <UnderlineInput
-                placeholder="Create password"
-                value={form.password}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, password: text }))}
-                secureTextEntry
-                error={errors.password}
-                style={{ marginTop: 12 }}
-              />
-
-              <UnderlineInput
-                placeholder="Confirm password"
-                value={form.confirmPassword}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, confirmPassword: text }))}
-                secureTextEntry
-                error={errors.confirmPassword}
-                style={{ marginTop: 12 }}
-              />
-
-              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>
-                You can complete phone OTP and selfie verification in Verification after signup.
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 12 }}>
+                You can do this any time from Verification. Verified profiles get shown more.
               </Typography>
             </View>
           </View>

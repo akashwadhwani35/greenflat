@@ -22,6 +22,7 @@ import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
+import { useViewerProfile } from '../hooks/useViewerProfile';
 import { MatchCandidate } from './MatchboardScreen';
 
 type Message = {
@@ -74,6 +75,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [sending, setSending] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  // Drives the green shared-answer highlighting on the profile card.
+  const viewerProfile = useViewerProfile(token, apiBaseUrl);
   const [profileData, setProfileData] = useState<any | null>(null);
   const [androidKeyboardOffset, setAndroidKeyboardOffset] = useState(0);
   const [mediaUploadProvider, setMediaUploadProvider] = useState<MediaUploadProvider>('local');
@@ -710,6 +713,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
       <ProfileDetailScreen
         match={fullProfileMatch}
+        viewer={viewerProfile}
         visible={showProfile}
         onClose={() => setShowProfile(false)}
         onSwipeLeft={() => setShowProfile(false)}

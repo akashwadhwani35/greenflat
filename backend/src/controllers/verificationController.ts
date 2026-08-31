@@ -2,53 +2,19 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
 import { analyzeSelfieAgainstProfile } from '../services/openai.service';
-import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
-import { isEmailConfigured, normalizeEmail, sendOtpEmail } from '../services/email.service';
+import { normalizeEmail } from '../services/email.service';
+import {
+  checkOtp,
+  issueOtp,
+  maskPhone,
+  normalizeOtpCode,
+  normalizePhone,
+  resolveOtpTarget,
+  type OtpChannel,
+  type OtpTarget,
+} from '../services/otp.service';
 
-const OTP_TTL_SECONDS = 300;
-const OTP_REQUEST_COOLDOWN_SECONDS = 60;
-const OTP_REQUEST_LIMIT_PER_HOUR = 5;
-const OTP_VERIFY_MAX_ATTEMPTS = 5;
 const GOOGLE_MAPS_API_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
-
-const DEFAULT_COUNTRY_CODE = process.env.OTP_DEFAULT_COUNTRY_CODE || '+1';
-
-const normalizePhone = (raw: unknown): string | null => {
-  if (typeof raw !== 'string') return null;
-  const value = raw.trim();
-  if (!value) return null;
-
-  const plusPrefixed = value.startsWith('+');
-  const digitsOnly = value.replace(/\D/g, '');
-
-  if (!digitsOnly) return null;
-
-  let normalized = '';
-  if (plusPrefixed) {
-    normalized = `+${digitsOnly}`;
-  } else if (digitsOnly.length === 10) {
-    // Default to US when users enter a local 10-digit number.
-    normalized = `${DEFAULT_COUNTRY_CODE}${digitsOnly}`;
-  } else {
-    // Accept international numbers entered without a plus sign.
-    normalized = `+${digitsOnly}`;
-  }
-
-  const normalizedDigits = normalized.startsWith('+') ? normalized.slice(1) : normalized;
-  if (!/^\d{8,15}$/.test(normalizedDigits)) return null;
-  return `+${normalizedDigits}`;
-};
-
-const normalizeOtpCode = (raw: unknown): string | null => {
-  if (typeof raw !== 'string' && typeof raw !== 'number') return null;
-  const digits = String(raw).replace(/\D/g, '');
-  return /^\d{6}$/.test(digits) ? digits : null;
-};
-
-const maskPhone = (phone: string) => {
-  if (phone.length <= 4) return phone;
-  return `${'*'.repeat(Math.max(0, phone.length - 4))}${phone.slice(-4)}`;
-};
 
 const getOrCreateVerificationStatus = async (userId: number) => {
   const existing = await pool.query(
@@ -66,39 +32,6 @@ const getOrCreateVerificationStatus = async (userId: number) => {
   return inserted.rows[0];
 };
 
-/**
- * A verification code can go to an email address or a phone number.
- *
- * Email is the default path: it needs no carrier registration and Resend's free
- * tier covers our volume, whereas SMS needs a paid provider. The onboarding
- * screen already lets the user pick either.
- */
-type OtpChannel = 'email' | 'phone';
-type OtpTarget = { channel: OtpChannel; value: string };
-
-const resolveOtpTarget = (body: any): OtpTarget | null => {
-  const email = normalizeEmail(body?.email);
-  if (email) return { channel: 'email', value: email };
-
-  const phone = normalizePhone(body?.phone);
-  if (phone) return { channel: 'phone', value: phone };
-
-  return null;
-};
-
-const maskEmail = (email: string) => {
-  const [user, domain] = email.split('@');
-  if (!domain) return email;
-  const head = user.slice(0, 1);
-  return `${head}${'*'.repeat(Math.max(1, user.length - 1))}@${domain}`;
-};
-
-const maskTarget = (t: OtpTarget) => (t.channel === 'email' ? maskEmail(t.value) : maskPhone(t.value));
-
-/** Which provider must be live for this channel, and whether it is. */
-const isChannelConfigured = (channel: OtpChannel) =>
-  channel === 'email' ? isEmailConfigured() : isSmsConfigured();
-
 export const requestOtp = async (req: Request, res: Response) => {
   try {
     const target = resolveOtpTarget(req.body);
@@ -106,73 +39,24 @@ export const requestOtp = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'A valid email address or phone number is required' });
     }
 
-    const column = target.channel;
-    const configured = isChannelConfigured(target.channel);
-    const devBypass = canUseDevOtpBypass();
-    if (!configured && !devBypass) {
-      return res.status(503).json({
-        error: target.channel === 'email'
-          ? 'Email provider is not configured'
-          : 'SMS provider is not configured',
+    const outcome = await issueOtp(target);
+    if (!outcome.ok) {
+      return res.status(outcome.status).json({
+        error: outcome.error,
+        ...(outcome.status === 429 && 'retryInSeconds' in outcome && outcome.retryInSeconds !== undefined
+          ? { retry_in_seconds: outcome.retryInSeconds }
+          : {}),
+        ...(outcome.status === 429 && 'retryAfterSeconds' in outcome && outcome.retryAfterSeconds !== undefined
+          ? { retry_after_seconds: outcome.retryAfterSeconds }
+          : {}),
       });
-    }
-
-    const recentOtp = await pool.query(
-      `SELECT created_at FROM otp_codes WHERE ${column} = $1`,
-      [target.value]
-    );
-    if (recentOtp.rows.length > 0) {
-      const createdAt = new Date(recentOtp.rows[0].created_at).getTime();
-      const secondsSinceLast = Math.floor((Date.now() - createdAt) / 1000);
-      if (secondsSinceLast < OTP_REQUEST_COOLDOWN_SECONDS) {
-        return res.status(429).json({
-          error: 'Please wait before requesting another OTP',
-          retry_in_seconds: OTP_REQUEST_COOLDOWN_SECONDS - secondsSinceLast,
-        });
-      }
-    }
-
-    const hourlyCount = await pool.query(
-      `SELECT COUNT(*)::int AS count
-       FROM otp_request_audit
-       WHERE ${column} = $1 AND created_at >= NOW() - INTERVAL '1 hour'`,
-      [target.value]
-    );
-    if (hourlyCount.rows[0]?.count >= OTP_REQUEST_LIMIT_PER_HOUR) {
-      return res.status(429).json({
-        error: 'Too many OTP requests. Try again later.',
-        retry_after_seconds: 3600,
-      });
-    }
-
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
-
-    await pool.query(
-      `INSERT INTO otp_codes (${column}, code, expires_at, verify_attempts)
-       VALUES ($1, $2, $3, 0)
-       ON CONFLICT (${column}) DO UPDATE
-         SET code = $2, expires_at = $3, verify_attempts = 0, created_at = NOW()`,
-      [target.value, code, expiresAt]
-    );
-
-    await pool.query(`INSERT INTO otp_request_audit (${column}) VALUES ($1)`, [target.value]);
-
-    if (configured) {
-      if (target.channel === 'email') {
-        await sendOtpEmail(target.value, code);
-      } else {
-        await sendOtpSms(target.value, code);
-      }
-    } else {
-      console.log(`[DEV] Verification OTP for ${target.value}: ${code}`);
     }
 
     return res.json({
       message: 'OTP sent',
       channel: target.channel,
-      expires_in_seconds: OTP_TTL_SECONDS,
-      destination_hint: maskTarget(target),
+      expires_in_seconds: outcome.expiresInSeconds,
+      destination_hint: outcome.destinationHint,
       // Kept for older clients that read these fields.
       phone_hint: target.channel === 'phone' ? maskPhone(target.value) : undefined,
       normalized_phone: target.channel === 'phone' ? target.value : undefined,
@@ -198,33 +82,11 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
       });
     }
 
-    const column = target.channel;
-    const otpResult = await pool.query(
-      `SELECT * FROM otp_codes WHERE ${column} = $1`,
-      [target.value]
-    );
-    if (otpResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid or expired code' });
+    const outcome = await checkOtp(target, normalizedCode);
+    if (!outcome.ok) {
+      return res.status(outcome.status).json({ error: outcome.error });
     }
 
-    const record = otpResult.rows[0];
-    if (record.code !== normalizedCode) {
-      const nextAttempts = Number(record.verify_attempts || 0) + 1;
-      if (nextAttempts >= OTP_VERIFY_MAX_ATTEMPTS) {
-        await pool.query(`DELETE FROM otp_codes WHERE ${column} = $1`, [target.value]);
-        return res.status(429).json({ error: 'Too many invalid attempts. Request a new OTP.' });
-      }
-      await pool.query(
-        `UPDATE otp_codes SET verify_attempts = $2 WHERE ${column} = $1`,
-        [target.value, nextAttempts]
-      );
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    }
-    if (new Date(record.expires_at).getTime() < Date.now()) {
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    }
-
-    await pool.query(`DELETE FROM otp_codes WHERE ${column} = $1`, [target.value]);
     await pool.query('UPDATE users SET is_verified = TRUE WHERE id = $1', [userId]);
 
     const statusResult = target.channel === 'email'
@@ -257,7 +119,6 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to verify OTP' });
   }
 };
-
 
 export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
   try {
@@ -315,7 +176,6 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: error.message || 'Failed to verify selfie' });
   }
 };
-
 export const verifyLocation = async (req: AuthRequest, res: Response) => {
   try {
     const userId = req.userId!;

@@ -22,6 +22,7 @@ const tables = [
   'user_profiles',
   'user_activity_limits',
   'user_ai_profiles',
+  'pending_registrations',
   'otp_request_audit',
   'otp_codes',
   'verification_status',

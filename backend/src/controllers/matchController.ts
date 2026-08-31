@@ -321,9 +321,9 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
       let baseQuery = `
         SELECT
-          u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
-          p.height, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
-          p.smoker, p.drinker, p.relationship_goal,
+          u.id, u.name, u.gender, u.pronouns, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
+          p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
+          p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.relationship_goal,
           pr.personality_traits, pr.personality_summary, pr.compatibility_tips, pr.top_traits,
           privacy.hide_distance, privacy.hide_city, privacy.incognito_mode, privacy.show_online_status,
           uap.self_summary, uap.ideal_partner_prompt, uap.connection_preferences,
@@ -342,6 +342,10 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         WHERE u.id != $1
           AND existing_like.id IS NULL
           AND blocked_rel.id IS NULL
+          -- Accounts exist before profiles do (Google sign-in and the staged
+          -- signup funnel both create the user first), and an un-onboarded one
+          -- still carries placeholder name/city/date-of-birth. Never show those.
+          AND u.onboarding_completed_at IS NOT NULL
       `;
 
       const requestedInterestedIn =
@@ -807,9 +811,9 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
 
     const result = await pool.query(
       `SELECT
-        u.id, u.name, u.gender, u.date_of_birth, u.city, u.is_verified,
+        u.id, u.name, u.gender, u.pronouns, u.date_of_birth, u.city, u.is_verified,
         p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
-        p.smoker, p.drinker, p.diet, p.fitness_level, p.education, p.occupation,
+        p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.education, p.occupation,
         p.relationship_goal, p.family_oriented, p.spiritual, p.open_minded, p.career_focused,
         pr.personality_traits,
         pr.personality_summary,

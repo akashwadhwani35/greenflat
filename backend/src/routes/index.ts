@@ -28,8 +28,26 @@ import { getNotificationPreferences, updateNotificationPreferences } from '../co
 import { getMediaCapabilities, getUploadSignature, uploadLocalMedia, serveMedia } from '../controllers/mediaController';
 import { submitSupportMessage } from '../controllers/supportController';
 import { revenueCatWebhook } from '../controllers/webhookController';
+import {
+  getCapabilities,
+  startRegistration,
+  setRegistrationPhone,
+  verifyRegistrationPhone,
+  setRegistrationEmail,
+  verifyRegistrationEmail,
+  completeRegistration,
+} from '../controllers/registrationController';
+import { getPersonalityQuestions } from '../controllers/personalityController';
 import adminRouter from './admin';
-import { loginLimiter, signupLimiter, forgotPasswordLimiter, resetPasswordLimiter } from '../middleware/rateLimit';
+import {
+  loginLimiter,
+  signupLimiter,
+  forgotPasswordLimiter,
+  resetPasswordLimiter,
+  registrationStartLimiter,
+  registrationStepLimiter,
+  registrationCompleteLimiter,
+} from '../middleware/rateLimit';
 
 const router = express.Router();
 
@@ -38,6 +56,24 @@ router.post('/geocode', publicGeocode);
 
 // RevenueCat webhook. Authenticated by its own shared secret, not a user JWT.
 router.post('/webhooks/revenuecat', revenueCatWebhook);
+
+// What the client can actually use (which OTP channels are live). Public: the
+// signup screen reads it before an account exists.
+router.get('/auth/capabilities', getCapabilities);
+
+// The quiz. Public so the onboarding screen can render it without ordering
+// itself against auth, and it contains nothing user-specific.
+router.get('/personality/questions', getPersonalityQuestions);
+
+// Staged signup: phone -> OTP -> email -> OTP -> password. These get their own
+// limiters rather than sharing signupLimiter, whose five-per-hour budget is
+// smaller than the six requests one honest signup makes.
+router.post('/auth/register/start', registrationStartLimiter, startRegistration);
+router.post('/auth/register/phone', registrationStepLimiter, setRegistrationPhone);
+router.post('/auth/register/phone/verify', registrationStepLimiter, verifyRegistrationPhone);
+router.post('/auth/register/email', registrationStepLimiter, setRegistrationEmail);
+router.post('/auth/register/email/verify', registrationStepLimiter, verifyRegistrationEmail);
+router.post('/auth/register/complete', registrationCompleteLimiter, completeRegistration);
 
 // Auth routes (rate limited)
 router.post('/auth/signup', signupLimiter, signup);

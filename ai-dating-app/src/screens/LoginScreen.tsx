@@ -14,7 +14,11 @@ WebBrowser.maybeCompleteAuthSession();
 type Props = {
   apiBaseUrl: string;
   onBack: () => void;
-  onSuccess: (payload: { token: string; user: { id: number; name: string; is_admin?: boolean }; isNewUser?: boolean }) => void;
+  onSuccess: (payload: {
+    token: string;
+    user: { id: number; name: string; is_admin?: boolean; onboarding_completed?: boolean };
+    isNewUser?: boolean;
+  }) => void;
   onForgotPassword?: () => void;
 };
 
@@ -62,7 +66,12 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
       if (!data.token || !data.user?.id) throw new Error('Google login response missing token');
       onSuccess({
         token: data.token,
-        user: { id: data.user.id, name: data.user.name || 'friend', is_admin: data.user.is_admin },
+        user: {
+          id: data.user.id,
+          name: data.user.name || 'friend',
+          is_admin: data.user.is_admin,
+          onboarding_completed: data.user.onboarding_completed,
+        },
         isNewUser: data.is_new_user === true,
       });
     } catch (error: any) {
@@ -103,7 +112,15 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Login failed');
       if (!data.token || !data.user?.id) throw new Error('Login response missing token');
-      onSuccess({ token: data.token, user: { id: data.user.id, name: data.user.name || 'friend', is_admin: data.user.is_admin } });
+      onSuccess({
+        token: data.token,
+        user: {
+          id: data.user.id,
+          name: data.user.name || 'friend',
+          is_admin: data.user.is_admin,
+          onboarding_completed: data.user.onboarding_completed,
+        },
+      });
     } catch (error: any) {
       Alert.alert('Login failed', error.message || 'Please try again.');
     } finally {

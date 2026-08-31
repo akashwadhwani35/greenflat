@@ -4,8 +4,10 @@ import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisp
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { useSocket } from './src/hooks/useSocket';
+import { useViewerProfile } from './src/hooks/useViewerProfile';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { SignUpFlowScreen } from './src/screens/SignUpFlowScreen';
 import { ForgotPasswordScreen } from './src/screens/ForgotPasswordScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { PostOnboardingScreen } from './src/screens/PostOnboardingScreen';
@@ -41,7 +43,7 @@ import { configurePurchases, logOutPurchases } from './src/services/purchases';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
 
-type Stage = 'welcome' | 'login' | 'forgotPassword' | 'onboarding' | 'postOnboarding' | 'matchboard';
+type Stage = 'welcome' | 'signup' | 'login' | 'forgotPassword' | 'onboarding' | 'postOnboarding' | 'matchboard';
 type Overlay =
   | null
   | 'settings'
@@ -68,6 +70,23 @@ type Overlay =
 type OnboardingResult = {
   token: string;
   name: string;
+};
+
+/**
+ * Whether to send someone into onboarding rather than the app.
+ *
+ * `is_new_user` alone is not enough: accounts are created before a profile
+ * exists now, so anyone who abandoned onboarding halfway is a returning user
+ * with a placeholder name and city. The server reports what it actually knows
+ * via `onboarding_completed`; the isNewUser fallback covers older API builds
+ * that do not send the field.
+ */
+const needsOnboarding = (
+  user: { onboarding_completed?: boolean },
+  isNewUser?: boolean
+): boolean => {
+  if (typeof user.onboarding_completed === 'boolean') return !user.onboarding_completed;
+  return Boolean(isNewUser);
 };
 
 const AppShell: React.FC = () => {
@@ -129,6 +148,8 @@ const AppShell: React.FC = () => {
 
   // Socket.io connection for real-time messaging
   const { socket } = useSocket({ token: authToken, apiBaseUrl: API_BASE_URL });
+  // Drives the green "you both said this" highlighting on profile cards.
+  const viewerProfile = useViewerProfile(authToken, API_BASE_URL);
 
   useEffect(() => {
     const bootstrap = async () => {
@@ -680,17 +701,27 @@ const AppShell: React.FC = () => {
       case 'welcome':
         return (
           <WelcomeScreen
-            onStart={() => setStage('onboarding')}
+            onStart={() => setStage('signup')}
             onLogin={() => setStage('login')}
             apiBaseUrl={API_BASE_URL}
             onGoogleAuth={async ({ token, user, isNewUser }) => {
               if (user.is_admin) setIsAdmin(true);
               await persistAuth(token, user);
-              if (isNewUser) {
-                setStage('onboarding');
-              } else {
-                setStage('matchboard');
-              }
+              setStage(needsOnboarding(user, isNewUser) ? 'onboarding' : 'matchboard');
+            }}
+          />
+        );
+      case 'signup':
+        return (
+          <SignUpFlowScreen
+            apiBaseUrl={API_BASE_URL}
+            onBack={() => setStage('welcome')}
+            onComplete={async ({ token, user, isNewUser }) => {
+              if (user.is_admin) setIsAdmin(true);
+              await persistAuth(token, user);
+              // The account exists but has no profile yet: name, date of birth
+              // and the rest are collected in onboarding, which is next.
+              setStage(needsOnboarding(user, isNewUser) ? 'onboarding' : 'matchboard');
             }}
           />
         );
@@ -703,11 +734,7 @@ const AppShell: React.FC = () => {
             onSuccess={async ({ token, user, isNewUser }) => {
               if (user.is_admin) setIsAdmin(true);
               await persistAuth(token, user);
-              if (isNewUser) {
-                setStage('onboarding');
-              } else {
-                setStage('matchboard');
-              }
+              setStage(needsOnboarding(user, isNewUser) ? 'onboarding' : 'matchboard');
             }}
           />
         );
@@ -762,6 +789,7 @@ const AppShell: React.FC = () => {
               onSendCompliment={handleSendCompliment}
               onBlock={handleBlockFromProfile}
               onReport={handleReportFromProfile}
+              viewer={viewerProfile}
             />
 
             {/* Match Modal */}

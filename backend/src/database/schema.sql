@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS users (
     name VARCHAR(100) NOT NULL,
     gender VARCHAR(20) NOT NULL CHECK (gender IN ('male', 'female', 'other')),
     interested_in VARCHAR(20) NOT NULL CHECK (interested_in IN ('male', 'female', 'both')),
+    pronouns TEXT[],
     date_of_birth DATE NOT NULL,
     city VARCHAR(100) NOT NULL,
     latitude DECIMAL(10, 8),
@@ -30,6 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
     hide_city BOOLEAN DEFAULT FALSE,
     incognito_mode BOOLEAN DEFAULT FALSE,
     show_online_status BOOLEAN DEFAULT TRUE,
+    onboarding_completed_at TIMESTAMPTZ,
     is_admin BOOLEAN DEFAULT FALSE,
     is_banned BOOLEAN DEFAULT FALSE,
     is_shadow_banned BOOLEAN DEFAULT FALSE,
@@ -85,6 +87,10 @@ CREATE TABLE IF NOT EXISTS personality_responses (
     question6_answer CHAR(1),
     question7_answer CHAR(1),
     question8_answer CHAR(1),
+    question9_answer CHAR(1),
+    question10_answer CHAR(1),
+    question11_answer CHAR(1),
+    question12_answer CHAR(1),
     personality_traits TEXT[], -- Derived traits: funny, caring, serious, etc.
     personality_summary TEXT,
     compatibility_tips TEXT,
@@ -315,6 +321,27 @@ CREATE TABLE IF NOT EXISTS otp_request_audit (
 );
 
 -- Verification Status (phone/otp, face/age, location)
+-- Half-finished signups.
+--
+-- Signup is a funnel (phone -> OTP -> email -> OTP -> password), so the account
+-- does not exist until the final step. This holds what has been verified so far.
+-- Nothing here grants access; only the last step writes to users.
+CREATE TABLE IF NOT EXISTS pending_registrations (
+    id SERIAL PRIMARY KEY,
+    token VARCHAR(64) UNIQUE NOT NULL,
+    phone TEXT,
+    phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    email TEXT,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    google_sub VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_registrations_expires_at
+  ON pending_registrations(expires_at);
+
 CREATE TABLE IF NOT EXISTS verification_status (
     id SERIAL PRIMARY KEY,
     user_id INTEGER UNIQUE NOT NULL REFERENCES users(id) ON DELETE CASCADE,

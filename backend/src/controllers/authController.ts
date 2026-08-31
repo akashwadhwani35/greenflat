@@ -5,26 +5,18 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/database';
 import { JWT_CONFIG, DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
+import {
+  buildUserPayload,
+  initializeUserDefaults,
+  signAuthToken,
+  PLACEHOLDER_CITY,
+  PLACEHOLDER_DOB,
+  type AuthUserRow,
+} from '../services/accounts.service';
 
 const OTP_TTL_SECONDS = 300;
-const DEFAULT_GOOGLE_DOB = '1995-01-01';
-const DEFAULT_GOOGLE_CITY = 'Unknown';
-
-type AuthUserRow = {
-  id: number;
-  email: string;
-  name: string;
-  gender: string;
-  interested_in: string;
-  city: string;
-  is_verified: boolean;
-  is_premium: boolean;
-  credit_balance: number | string | null;
-  cooldown_enabled: boolean;
-  is_admin?: boolean | null;
-  is_banned?: boolean | null;
-  google_sub?: string | null;
-};
+const DEFAULT_GOOGLE_DOB = PLACEHOLDER_DOB;
+const DEFAULT_GOOGLE_CITY = PLACEHOLDER_CITY;
 
 type GoogleTokenInfo = {
   aud: string;
@@ -39,51 +31,6 @@ type GoogleTokenInfo = {
 };
 
 const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
-
-const buildUserPayload = (user: AuthUserRow) => ({
-  id: user.id,
-  email: user.email,
-  name: user.name,
-  gender: user.gender,
-  interested_in: user.interested_in,
-  city: user.city,
-  is_verified: user.is_verified,
-  is_premium: user.is_premium,
-  credit_balance: Number(user.credit_balance || 0),
-  cooldown_enabled: user.cooldown_enabled,
-  is_admin: user.is_admin || false,
-});
-
-const signAuthToken = (userId: number) =>
-  jwt.sign(
-    { userId },
-    JWT_CONFIG.secret,
-    { expiresIn: JWT_CONFIG.expiresIn } as any
-  );
-
-const initializeUserDefaults = async (client: any, userId: number) => {
-  await client.query(
-    `INSERT INTO user_activity_limits (user_id)
-     VALUES ($1)
-     ON CONFLICT (user_id) DO NOTHING`,
-    [userId]
-  );
-
-  await client.query(
-    `INSERT INTO user_privacy_settings (user_id, hide_distance, hide_city, incognito_mode, show_online_status)
-     VALUES ($1, FALSE, FALSE, FALSE, TRUE)
-     ON CONFLICT (user_id) DO NOTHING`,
-    [userId]
-  );
-
-  await client.query(
-    `INSERT INTO user_notification_preferences (
-       user_id, likes, matches, messages, daily_picks, product_updates
-     ) VALUES ($1, TRUE, TRUE, TRUE, TRUE, TRUE)
-     ON CONFLICT (user_id) DO NOTHING`,
-    [userId]
-  );
-};
 
 const getAllowedGoogleClientIds = (): string[] => {
   const raw = [process.env.GOOGLE_OAUTH_CLIENT_IDS, process.env.GOOGLE_OAUTH_CLIENT_ID]
@@ -207,7 +154,7 @@ export const signup = async (req: Request, res: Response) => {
     const userResult = await client.query(
       `INSERT INTO users (email, password_hash, name, gender, interested_in, date_of_birth, city, cooldown_enabled)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING id, email, name, gender, interested_in, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin, created_at`,
+       RETURNING id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin, onboarding_completed_at, created_at`,
       [email, password_hash, name, gender, interested_in, date_of_birth, city, cooldown_enabled]
     );
 
@@ -243,7 +190,7 @@ export const login = async (req: Request, res: Response) => {
 
     // Find user
     const result = await pool.query(
-      'SELECT id, email, password_hash, name, gender, interested_in, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin, is_banned FROM users WHERE email = $1',
+      'SELECT id, email, password_hash, name, gender, interested_in, pronouns, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin, is_banned, onboarding_completed_at FROM users WHERE email = $1',
       [email]
     );
 
@@ -320,8 +267,8 @@ export const googleAuth = async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const existingUserResult = await client.query(
-      `SELECT id, email, name, gender, interested_in, city, is_verified, is_premium, credit_balance,
-              cooldown_enabled, is_admin, is_banned, google_sub
+      `SELECT id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium, credit_balance,
+              cooldown_enabled, is_admin, is_banned, google_sub, onboarding_completed_at
        FROM users
        WHERE email = $1
        FOR UPDATE`,
@@ -352,8 +299,9 @@ export const googleAuth = async (req: Request, res: Response) => {
           `UPDATE users
            SET google_sub = $2, updated_at = NOW()
            WHERE id = $1
-           RETURNING id, email, name, gender, interested_in, city, is_verified,
-                     is_premium, credit_balance, cooldown_enabled, is_admin, is_banned, google_sub`,
+           RETURNING id, email, name, gender, interested_in, pronouns, city, is_verified,
+                     is_premium, credit_balance, cooldown_enabled, is_admin, is_banned, google_sub,
+                     onboarding_completed_at`,
           [user.id, googleSub]
         );
         user = linkResult.rows[0];
@@ -370,12 +318,42 @@ export const googleAuth = async (req: Request, res: Response) => {
            cooldown_enabled, auth_provider, google_sub
          )
          VALUES ($1, $2, $3, 'other', 'both', $4, $5, $6, 'google', $7)
-         RETURNING id, email, name, gender, interested_in, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin`,
+         RETURNING id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium, credit_balance, cooldown_enabled, is_admin, onboarding_completed_at`,
         [email, passwordHash, displayName, DEFAULT_GOOGLE_DOB, DEFAULT_GOOGLE_CITY, cooldown_enabled, googleSub]
       );
 
       user = userResult.rows[0];
       await initializeUserDefaults(client, user.id);
+    }
+
+    // The signup funnel offers "connect with Google" on the same screen as
+    // "add email". Taking that branch must not throw away the phone number the
+    // user already verified two screens earlier.
+    const registrationToken = typeof req.body?.registration_token === 'string'
+      ? req.body.registration_token
+      : null;
+
+    if (registrationToken) {
+      const pending = await client.query(
+        `SELECT id, phone, phone_verified
+         FROM pending_registrations
+         WHERE token = $1 AND expires_at > NOW()`,
+        [registrationToken]
+      );
+
+      const row = pending.rows[0];
+      if (row?.phone_verified && row.phone) {
+        await client.query(
+          `INSERT INTO verification_status (user_id, phone, email, email_verified, otp_verified, updated_at)
+           VALUES ($1, $2, $3, TRUE, TRUE, NOW())
+           ON CONFLICT (user_id) DO UPDATE
+             SET phone = $2, email = $3, email_verified = TRUE, otp_verified = TRUE, updated_at = NOW()`,
+          [user.id, row.phone, user.email]
+        );
+      }
+      if (row) {
+        await client.query('DELETE FROM pending_registrations WHERE id = $1', [row.id]);
+      }
     }
 
     await client.query('COMMIT');
