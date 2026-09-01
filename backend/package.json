@@ -13,7 +13,8 @@
     "test:watch": "NODE_ENV=test jest --watch",
     "cleanup:demo-profiles": "ts-node src/scripts/purgeDemoProfiles.ts",
     "seed:demo": "ts-node src/scripts/seedDemoProfiles.ts",
-    "test:email": "ts-node src/scripts/testEmail.ts"
+    "test:email": "ts-node src/scripts/testEmail.ts",
+    "seed:bulk": "ts-node src/scripts/seedBulkDemo.ts"
   },
   "keywords": [],
   "author": "",

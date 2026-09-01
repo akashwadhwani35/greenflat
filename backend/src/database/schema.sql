@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS users (
     incognito_mode BOOLEAN DEFAULT FALSE,
     show_online_status BOOLEAN DEFAULT TRUE,
     onboarding_completed_at TIMESTAMPTZ,
+    last_active TIMESTAMPTZ,
     is_admin BOOLEAN DEFAULT FALSE,
     is_banned BOOLEAN DEFAULT FALSE,
     is_shadow_banned BOOLEAN DEFAULT FALSE,
