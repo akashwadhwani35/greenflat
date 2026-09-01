@@ -64,9 +64,9 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
   })();
 
   const refillMessage = freeAllowance
-    ? `You get ${freeAllowance} GFT free every day` +
-      (refillCountdown ? `, topping back up ${refillCountdown}.` : '. Tokens top back up automatically.')
-    : 'Your tokens top back up automatically.';
+    ? `You get ${freeAllowance} free GFT every week` +
+      (refillCountdown ? `, next ones ${refillCountdown}.` : '.')
+    : 'Free tokens arrive weekly.';
 
   const handleUpgrade = (tier: PlanTier) => {
     if (!paymentsEnabled) return;

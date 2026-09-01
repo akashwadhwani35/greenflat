@@ -63,10 +63,16 @@ type Option = {
 };
 
 const RELIGION_OPTIONS: Option[] = [
-  { value: 'religious', label: 'Religious' },
+  { value: 'hindu', label: 'Hindu' },
+  { value: 'muslim', label: 'Muslim' },
+  { value: 'christian', label: 'Christian' },
+  { value: 'sikh', label: 'Sikh' },
+  { value: 'buddhist', label: 'Buddhist' },
+  { value: 'jain', label: 'Jain' },
   { value: 'spiritual', label: 'Spiritual' },
   { value: 'agnostic', label: 'Agnostic' },
   { value: 'atheist', label: 'Atheist' },
+  { value: 'other', label: 'Other' },
 ];
 
 const RELATIONSHIP_TYPE_OPTIONS: Option[] = [
@@ -228,15 +234,25 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
   };
 
   // Free filters allow several picks; a list means any-of.
+  // How many picks a field allows. Smoking, drinking and the like are one
+  // answer each; three of the trait facets cap at two; the rest are open.
+  const SELECTION_LIMIT: Partial<Record<MultiKey, number>> = {
+    religion: 1, have_kids: 1, smoking_habit: 1, drinker: 1, marijuana: 1, drugs: 1,
+    relationship_needs: 2, conflict_style: 2, lifestyle: 2,
+  };
+
   const toggleMulti = (key: MultiKey, value: string, isPaidFilter = false) => {
     if (isPaidFilter && !hasPaidPlan) {
       Alert.alert('Paid filter', 'This filter is available on paid plans only.');
       return;
     }
+    const limit = SELECTION_LIMIT[key];
     setFilters((prev) => {
       const current = asList(prev[key]);
-      const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
-      return { ...prev, [key]: next };
+      if (current.includes(value)) return { ...prev, [key]: current.filter((v) => v !== value) };
+      if (limit === 1) return { ...prev, [key]: [value] };
+      if (limit && current.length >= limit) return prev;
+      return { ...prev, [key]: [...current, value] };
     });
   };
   const isPicked = (key: MultiKey, value: string) => asList(filters[key]).includes(value);
@@ -320,7 +336,7 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Section title="Free filters" icon="unlock">
+        <Section title="Basic filters" icon="unlock">
           <Typography variant="small" style={{ color: theme.colors.muted }}>
             Available on all plans. Pick as many as you like.
           </Typography>
@@ -356,7 +372,7 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
           {renderMulti('Drugs', 'drugs', USAGE_OPTIONS)}
         </Section>
 
-        <Section title="Paid plan filters" icon="lock">
+        <Section title="Advanced filters" icon="lock">
           {loadingPlan ? (
             <View style={styles.planLoaderRow}>
               <ActivityIndicator size="small" color={theme.colors.neonGreen} />
@@ -545,7 +561,7 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 140,
+    paddingBottom: 220,
   },
   section: {
     marginBottom: 30,
@@ -629,7 +645,8 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 24,
+    // Sits above the bottom nav rather than underneath it.
+    paddingBottom: Platform.OS === 'ios' ? 110 : 96,
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.05)',

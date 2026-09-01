@@ -280,6 +280,7 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
          SELECT DISTINCT ON (msg.match_id)
            msg.match_id,
            msg.content,
+           msg.message_type,
            msg.created_at,
            msg.sender_id
          FROM messages msg
@@ -301,7 +302,12 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
         other_user.name,
         other_user.is_verified,
         other_photo.photo_url as photo,
-        last_msg.content as last_message,
+        CASE last_msg.message_type
+          WHEN 'image' THEN 'Photo'
+          WHEN 'voice' THEN 'Voice note'
+          ELSE last_msg.content
+        END as last_message,
+        last_msg.message_type as last_message_type,
         last_msg.created_at as last_message_time,
         last_msg.sender_id as last_message_sender_id,
         COALESCE(unread.unread_count, 0) as unread_count

@@ -428,7 +428,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
               </Typography>
             </View>
             <View style={styles.chipRow}>
-              {personalityTopTraits.slice(0, 6).map((trait) => {
+              {personalityTopTraits.slice(0, 10).map((trait) => {
                 const shared = sharesTrait(trait);
                 return (
                   <View key={`personality-trait-${trait}`} style={[styles.chip, bubbleStyle(shared)]}>
@@ -497,8 +497,9 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </View>
         </View>
 
+      </ScrollView>
         {!hideActionButtons ? (
-          <View style={styles.actionsWrap}>
+          <View style={[styles.actionsFixed, { backgroundColor: theme.colors.background }]}>
             <View style={styles.actionButtons}>
               <TouchableOpacity
                 onPress={onSwipeLeft}
@@ -532,7 +533,6 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             </View>
           </View>
         ) : null}
-      </ScrollView>
     </View>
   );
 
@@ -658,11 +658,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   locationText: {},
-  actionsWrap: {
-    marginTop: 8,
+  // Pinned to the bottom of the screen so the like / superlike / pass buttons
+  // are reachable without scrolling to the end of a long profile.
+  actionsFixed: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
-    paddingTop: 6,
-    paddingBottom: 12,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === 'ios' ? 30 : 18,
   },
   actionButtons: {
     flexDirection: 'row',

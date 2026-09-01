@@ -293,10 +293,58 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 80);
 
-    setTimeout(() => {
-      setIsTyping(false);
+    void probeForMatches(normalizedQuery);
+  };
+
+  // The green "We found a few matches" screen used to fire on a timer whether
+  // or not anyone matched. Ask the server first (no token charge for the
+  // probe) and only celebrate when there is someone to show.
+  const probeForMatches = async (query: string) => {
+    let found = true;
+    if (token && apiBaseUrl) {
+      try {
+        const response = await fetch(`${apiBaseUrl}/matches/search`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            is_on_grid: true,
+            search_query: query,
+            charge_credits: false,
+            filters: {},
+            limit: 1,
+          }),
+        });
+        if (response.ok) {
+          const data = await response.json();
+          found = (data.matches || []).length > 0;
+        }
+      } catch {
+        // Network trouble: fall through to the normal flow and let Discover report.
+      }
+    }
+
+    setIsTyping(false);
+    if (found) {
       setShowMatchesFoundPopup(true);
-    }, 2500);
+      return;
+    }
+
+    setPendingSearchQuery(null);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `${Date.now()}-none`,
+        type: 'ai',
+        text: "Couldn't find anyone for that yet. Try searching in broader terms, like \"someone who loves travel\".",
+        timestamp: new Date(),
+      },
+    ]);
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 80);
   };
 
   const handleOpenDiscoverFromPopup = () => {

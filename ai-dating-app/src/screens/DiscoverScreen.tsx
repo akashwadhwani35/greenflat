@@ -569,7 +569,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           </Typography>
           <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', paddingHorizontal: 40 }}>
             {activeTab === 'onGrid'
-              ? 'Complete your profile to get personalized AI matches'
+              ? 'AI Match only shows people who score 60% or more with you. Nobody nearby clears that yet, so check Explore in the meantime.'
               : 'Try adjusting your filters to find more profiles'}
           </Typography>
         </View>
@@ -700,9 +700,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   rewindIconButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255, 215, 0, 0.12)',
@@ -725,7 +725,8 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingBottom: 100,
+    // Enough to scroll the last row and the Drop more button clear of the nav.
+    paddingBottom: Platform.OS === 'ios' ? 170 : 150,
   },
   grid: {
     flexDirection: 'row',
@@ -868,9 +869,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     paddingVertical: 16,
     borderRadius: 999,
-    // Centred in the gap between the last row of tiles and the bottom nav.
-    marginTop: 28,
-    marginBottom: Platform.OS === 'ios' ? 132 : 112,
+    marginTop: 16,
+    marginBottom: 8,
   },
   loadingContainer: {
     flex: 1,

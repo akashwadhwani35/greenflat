@@ -1,5 +1,6 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput, Modal, Image, Pressable } from 'react-native';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput, Modal, Image, Pressable, BackHandler,
+} from 'react-native';
 import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisplay_600SemiBold, RedHatDisplay_700Bold } from '@expo-google-fonts/red-hat-display';
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
@@ -163,6 +164,32 @@ const AppShell: React.FC = () => {
     else if (overlay === 'profile' || overlay === 'profileOverview') setActiveTab('profile');
     else if (!overlay) setActiveTab('explore');
   }, [overlay, showMessages]);
+
+  // Android's hardware back button. There is no navigation library, so without
+  // this the OS default applies and back leaves the app for the launcher from
+  // every screen. Handled in the order a person expects: the thing on top
+  // closes first. Returning true swallows the event; false lets the OS act.
+  const backStateRef = useRef({ stage, overlay, showMessages, showProfileModal });
+  backStateRef.current = { stage, overlay, showMessages, showProfileModal };
+  useEffect(() => {
+    const onBack = () => {
+      const st = backStateRef.current;
+      if (st.showProfileModal) { handleCloseProfile(); return true; }
+      if (st.showMessages) {
+        setShowMessages(false);
+        setCurrentConversation(null);
+        setOverlay('conversations');
+        return true;
+      }
+      if (st.overlay) { setOverlay(null); return true; }
+      if (st.stage === 'login' || st.stage === 'signup' || st.stage === 'forgotPassword') { setStage('welcome'); return true; }
+      // Onboarding handles its own back inside the screen; welcome and the main
+      // screen fall through to the OS, which is the one place leaving is right.
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onBack);
+    return () => sub.remove();
+  }, []);
 
   useEffect(() => {
     const bootstrap = async () => {

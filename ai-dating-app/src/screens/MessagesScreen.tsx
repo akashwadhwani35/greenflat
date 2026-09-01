@@ -557,11 +557,23 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
   const togglePlayback = async (uri: string) => {
     try {
+      const wasPlayingThis = playingUri === uri;
       if (soundRef.current) {
-        await soundRef.current.unloadAsync();
+        try { await soundRef.current.stopAsync(); } catch {}
+        try { await soundRef.current.unloadAsync(); } catch {}
         soundRef.current = null;
-        if (playingUri === uri) { setPlayingUri(null); return; }
+        setPlayingUri(null);
+        if (wasPlayingThis) return; // second tap on the same note stops it
       }
+      // Recording leaves the session in record mode; put it back to playback
+      // every time, or the second play after a recording comes out silent.
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: false,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
       const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
       soundRef.current = sound;
       setPlayingUri(uri);
@@ -690,7 +702,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               onLongPress={() => setReplyTo(item)}
               activeOpacity={0.8}
             >
-              <Feather name="play-circle" size={18} color={isMyMessage ? theme.colors.deepBlack : theme.colors.text} />
+              <Feather name={playingUri === item.content ? 'pause-circle' : 'play-circle'} size={22} color={isMyMessage ? theme.colors.deepBlack : theme.colors.text} />
               <Typography
                 variant="body"
                 style={[
@@ -1116,7 +1128,7 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     paddingHorizontal: 12,
     paddingVertical: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 12,

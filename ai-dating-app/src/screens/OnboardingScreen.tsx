@@ -652,6 +652,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     }
   };
 
+  // Re-rendered once after each entry animation. The translateY runs on the
+  // native driver, and on Android the ScrollView's content size stayed stale
+  // until the next JS render, so a step would not scroll until something was
+  // tapped. Bumping state after the animation is that render.
+  const [, setLayoutTick] = useState(0);
+
   useEffect(() => {
     transition.setValue(0);
     Animated.timing(transition, {
@@ -659,7 +665,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       duration: 300,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
-    }).start();
+    }).start(() => setLayoutTick((t) => t + 1));
   }, [step, transition]);
 
   const renderChipRow = (options: string[], selectedValues: string[], toggle: (option: string) => void, multiSelect = true) => (
@@ -747,13 +753,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <Typography variant="body" style={{ color: theme.colors.muted }}>Your orientation</Typography>
-              {renderChipRow(orientationOptions, form.orientation ? [form.orientation] : [], (option) =>
-                setForm((prev) => ({ ...prev, orientation: option }))
-              , false)}
-              {errors.orientation ? <Typography variant="small" tone="error">{errors.orientation}</Typography> : null}
-
-              <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 20 }}>Interested in</Typography>
+              <Typography variant="body" style={{ color: theme.colors.muted }}>Interested in</Typography>
               {renderChipRow(
                 interestedInOptions,
                 form.interestedIn
@@ -772,6 +772,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                 setForm((prev) => ({ ...prev, lookingFor: toggleArrayValue(prev.lookingFor, option) }))
               )}
               {errors.lookingFor ? <Typography variant="small" tone="error">{errors.lookingFor}</Typography> : null}
+
+              <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 20 }}>Your orientation</Typography>
+              {renderChipRow(orientationOptions, form.orientation ? [form.orientation] : [], (option) =>
+                setForm((prev) => ({ ...prev, orientation: option }))
+              , false)}
+              {errors.orientation ? <Typography variant="small" tone="error">{errors.orientation}</Typography> : null}
+
 
               <View style={{ marginTop: 16 }}>
                 <View style={{ marginBottom: 0 }}>
@@ -793,26 +800,6 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       case 'location':
         return (
           <View style={styles.slideStack}>
-            <View style={[styles.card, { backgroundColor: '#101D13', marginBottom: 16 }]}>
-              <Typography variant="small" style={{ color: theme.colors.muted }}>
-                How far are you willing to travel?
-              </Typography>
-              {renderChipRow(
-                distanceOptions.map((option) => option.label),
-                [
-                  (distanceOptions.find((option) => option.value === form.distanceRadius) ||
-                    distanceOptions[2]).label,
-                ],
-                (label) => {
-                  const picked = distanceOptions.find((option) => option.label === label);
-                  if (picked) setForm((prev) => ({ ...prev, distanceRadius: picked.value }));
-                },
-                false
-              )}
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 8 }}>
-                You can change this later in search filters.
-              </Typography>
-            </View>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
               {/* If location not detected yet */}
               {!form.city || form.lat === null ? (
@@ -820,7 +807,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                   {/* Large centered map icon */}
                   <View style={styles.locationIconWrapper}>
                     <View style={[styles.locationIconLarge, { backgroundColor: theme.colors.neonGreen }]}>
-                      <Feather name="map-pin" size={64} color={theme.colors.deepBlack} />
+                      <Feather name="map-pin" size={28} color={theme.colors.deepBlack} />
                     </View>
                   </View>
 
@@ -883,7 +870,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                   {/* Location detected - show success state */}
                   <View style={styles.locationIconWrapper}>
                     <View style={[styles.locationIconLarge, { backgroundColor: 'rgba(188, 246, 65, 0.15)' }]}>
-                      <Feather name="map-pin" size={36} color={theme.colors.neonGreen} />
+                      <Feather name="map-pin" size={28} color={theme.colors.neonGreen} />
                     </View>
                   </View>
 
@@ -903,21 +890,55 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                     We'll use this to find matches near you
                   </Typography>
 
-                  {/* Option to change location */}
-                  <TouchableOpacity
-                    style={styles.changeLocationButton}
-                    onPress={selectCurrentLocation}
-                    disabled={loading}
-                  >
-                    <Feather name="refresh-cw" size={16} color={theme.colors.neonGreen} />
-                    <Typography variant="small" style={{ color: theme.colors.neonGreen, marginLeft: 8 }}>
-                      {loading ? 'Detecting...' : 'Detect Again'}
-                    </Typography>
-                  </TouchableOpacity>
+                  <View style={styles.locationActionsRow}>
+                    <TouchableOpacity
+                      style={styles.changeLocationButton}
+                      onPress={selectCurrentLocation}
+                      disabled={loading}
+                    >
+                      <Feather name="refresh-cw" size={16} color={theme.colors.neonGreen} />
+                      <Typography variant="small" style={{ color: theme.colors.neonGreen, marginLeft: 8 }}>
+                        {loading ? 'Detecting...' : 'Detect Again'}
+                      </Typography>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.changeLocationButton}
+                      onPress={() => {
+                        setForm((prev) => ({ ...prev, city: '', lat: null, lng: null, useCurrentCity: false }));
+                        setCitySuggestions([]);
+                        setLocationError(null);
+                      }}
+                      disabled={loading}
+                    >
+                      <Feather name="edit-2" size={16} color={theme.colors.neonGreen} />
+                      <Typography variant="small" style={{ color: theme.colors.neonGreen, marginLeft: 8 }}>
+                        Change
+                      </Typography>
+                    </TouchableOpacity>
+                  </View>
                 </>
               )}
             </View>
-
+            <View style={[styles.card, { backgroundColor: '#101D13', marginTop: 16 }]}>
+              <Typography variant="small" style={{ color: theme.colors.muted }}>
+                How far are you willing to travel?
+              </Typography>
+              {renderChipRow(
+                distanceOptions.map((option) => option.label),
+                [
+                  (distanceOptions.find((option) => option.value === form.distanceRadius) ||
+                    distanceOptions[2]).label,
+                ],
+                (label) => {
+                  const picked = distanceOptions.find((option) => option.label === label);
+                  if (picked) setForm((prev) => ({ ...prev, distanceRadius: picked.value }));
+                },
+                false
+              )}
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 8 }}>
+                You can change this later in search filters.
+              </Typography>
+            </View>
           </View>
         );
 
@@ -1215,7 +1236,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
         {/* Content */}
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.stage}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
@@ -1225,7 +1246,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
             // flexGrow so the content always fills the viewport and the list is
             // scrollable from the first render. The interests step would not
             // scroll until a chip was tapped: nothing had forced a re-measure.
-            contentContainerStyle={[styles.scrollContent, { flexGrow: 1 }]}
+            contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always"
             keyboardDismissMode="on-drag"
@@ -1424,16 +1445,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   locationIconLarge: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#ADFF1A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
+  },
+  locationActionsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
   },
   locationSuccessCard: {
     flexDirection: 'row',
