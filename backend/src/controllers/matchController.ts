@@ -321,7 +321,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
       let baseQuery = `
         SELECT
-          u.id, u.name, u.gender, u.pronouns, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
+          u.id, u.name, u.gender, u.orientation, u.pronouns, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
           p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
           p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.relationship_goal,
           pr.personality_traits, pr.personality_summary, pr.compatibility_tips, pr.top_traits,
@@ -932,7 +932,7 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
 
     const result = await pool.query(
       `SELECT
-        u.id, u.name, u.gender, u.pronouns, u.date_of_birth, u.city, u.is_verified,
+        u.id, u.name, u.gender, u.orientation, u.pronouns, u.date_of_birth, u.city, u.is_verified,
         p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
         p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.education, p.occupation,
         p.relationship_goal, p.family_oriented, p.spiritual, p.open_minded, p.career_focused,

@@ -273,6 +273,20 @@ export const publicGeocode = async (req: Request, res: Response) => {
       const geoResponse = await fetch(url);
       if (geoResponse.ok) {
         geoJson = (await geoResponse.json()) as any;
+
+        // Google reports configuration problems with HTTP 200 and a status
+        // field. Swallowing that made an invalid API key indistinguishable from
+        // "no such place": the app showed an empty suggestion list and nobody
+        // knew the key had been rejected. Say what actually happened.
+        const status = String(geoJson?.status || '');
+        if (status && status !== 'OK' && status !== 'ZERO_RESULTS') {
+          console.error(`Geocode rejected by Google: ${status} — ${geoJson?.error_message || ''}`);
+          return res.status(502).json({
+            error: 'Location lookup is unavailable right now',
+            provider_status: status,
+          });
+        }
+
         const loc = geoJson.results?.[0];
         const cityComponent = loc?.address_components?.find((c: any) =>
           c.types?.includes('locality')
@@ -282,6 +296,7 @@ export const publicGeocode = async (req: Request, res: Response) => {
       }
     } catch (geoError) {
       console.error('Geocode lookup failed', geoError);
+      return res.status(502).json({ error: 'Location lookup is unavailable right now' });
     }
 
     const suggestions = (geoJson?.results || []).slice(0, 5).map((r: any) => ({

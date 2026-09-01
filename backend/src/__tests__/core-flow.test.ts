@@ -1295,6 +1295,52 @@ describe('GreenFlag backend core flow', () => {
     expect(new Set(traits).size).toBe(traits.length);
   });
 
+
+  it('stores two answers to one question and derives traits from both', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `two_${Date.now()}@example.com`, name: 'Two Answers' },
+      // Sent unsorted and lowercase on purpose: the stored form is canonical.
+      { question1_answer: 'ca', question2_answer: ['D', 'B'] }
+    );
+
+    const stored = await pool.query(
+      'SELECT question1_answer, question2_answer, personality_traits FROM personality_responses WHERE user_id = $1',
+      [user.userId]
+    );
+    expect(stored.rows[0].question1_answer).toBe('AC');
+    expect(stored.rows[0].question2_answer).toBe('BD');
+
+    // Q1 A -> Playful, Q1 C -> Calm: both present means both options counted.
+    expect(stored.rows[0].personality_traits).toEqual(expect.arrayContaining(['Playful', 'Calm']));
+  });
+
+  it('caps a question at two answers rather than storing three', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `three_${Date.now()}@example.com`, name: 'Three Answers' },
+      { question1_answer: 'ABCD' }
+    );
+    const stored = await pool.query(
+      'SELECT question1_answer FROM personality_responses WHERE user_id = $1',
+      [user.userId]
+    );
+    expect(stored.rows[0].question1_answer).toHaveLength(2);
+  });
+
+  it('persists orientation separately from who the user is interested in', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `orient_${Date.now()}@example.com`, name: 'Orientation User', interested_in: 'both' },
+      { orientation: 'Bisexual' }
+    );
+    const me = await agent.get('/api/profile/me').set('Authorization', `Bearer ${user.token}`);
+    expect(me.body.user.orientation).toBe('Bisexual');
+    expect(me.body.user.interested_in).toBe('both');
+  });
+
+  it('advertises how many answers a question accepts', async () => {
+    const response = await agent.get('/api/personality/questions');
+    expect(response.body.max_answers_per_question).toBe(2);
+  });
+
   it('keeps quiz answers that a later profile update does not resend', async () => {
     const user = await signupAndCompleteProfile(
       { email: `quizkeep_${Date.now()}@example.com`, name: 'Quiz Keep' },

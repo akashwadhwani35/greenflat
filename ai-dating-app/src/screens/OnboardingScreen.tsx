@@ -74,6 +74,7 @@ const dietOptions = ['Omnivore', 'Vegetarian', 'Vegan', 'Pescatarian', 'Keto', '
 const fitnessOptions = ['Not active', 'Lightly active', 'Active', 'Very active'];
 const interestedInOptions = ['Men', 'Women', 'Everyone'];
 const genderOptions = ['Woman', 'Man', 'Non-binary'];
+const orientationOptions = ['Straight', 'Gay', 'Lesbian', 'Bisexual', 'Pansexual', 'Queer', 'Asexual', 'Prefer not to say'];
 const pronounOptions = ['she/her', 'he/him', 'they/them', 'ze/zir', 'xe/xim', 'ey/em'];
 const drugsOptions = ['Never', 'Sometimes', 'Regularly'];
 // Board step 3 is "Location + distance". Values are km; the widest is a
@@ -120,6 +121,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     gender: '' as '' | 'male' | 'female' | 'other',
     pronouns: [] as string[],
     interestedIn: '' as '' | 'male' | 'female' | 'both',
+    orientation: '',
     dateOfBirth: '',
 
     // Intentions
@@ -147,7 +149,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     // Personality. Keyed by question number so the bank can grow without
     // touching this shape.
     interests: [] as string[],
-    answers: {} as Record<number, string>,
+    // Up to two option keys per question, e.g. ['A'] or ['A','C'].
+    answers: {} as Record<number, string[]>,
 
     // Prompts
     bio: '',
@@ -165,9 +168,19 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   });
 
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
+  // Which question is on screen. The quiz shows one at a time.
+  const [quizIndex, setQuizIndex] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
   const [questionsError, setQuestionsError] = useState(false);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Every page starts at the top. Without this the scroll offset from the
+  // previous step carried over, so after scrolling down and tapping Continue
+  // the next page opened already scrolled to the middle.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [step, quizIndex]);
 
   useEffect(() => {
     let cancelled = false;
@@ -237,6 +250,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         if (!form.dateOfBirth) nextErrors.dateOfBirth = 'Select your birth date (18+).';
         break;
       case 'intentions':
+        if (!form.orientation) nextErrors.orientation = 'Pick your orientation.';
         if (!form.interestedIn) nextErrors.interestedIn = "Tell us who you're interested in.";
         if (form.lookingFor.length === 0) nextErrors.lookingFor = 'Choose at least one intention.';
         break;
@@ -244,11 +258,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         if (!form.city.trim()) nextErrors.city = 'Add your city.';
         break;
       case 'understand': {
-        const unanswered = questions.filter((question) => !form.answers[question.number]);
         if (questions.length === 0) {
           nextErrors.quiz = 'Questions could not load. Check your connection and try again.';
-        } else if (unanswered.length > 0) {
-          nextErrors.quiz = `${unanswered.length} left to answer.`;
+          break;
+        }
+        const current = questions[quizIndex];
+        if (current && (form.answers[current.number]?.length ?? 0) === 0) {
+          nextErrors.quiz = 'Pick at least one.';
         }
         break;
       }
@@ -293,9 +309,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       date_of_birth: form.dateOfBirth,
       city: form.city || 'Unknown',
       distance_radius: form.distanceRadius,
+      orientation: form.orientation || null,
       pronouns: form.pronouns,
 
-      height: form.height || null,
+      height: form.height ? Number(form.height) : null,
       body_type: form.bodyType || null,
       interests: form.interests,
       bio: form.bio,
@@ -322,7 +339,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       ...Object.fromEntries(
         questions.map((question) => [
           `question${question.number}_answer`,
-          form.answers[question.number] || null,
+          (form.answers[question.number] || []).join('') || null,
         ])
       ),
     };
@@ -394,6 +411,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     Keyboard.dismiss();
     if (!validateStep()) return;
 
+    // Inside the quiz, Continue means "next question" until the last one.
+    if (slides[step].key === 'understand' && quizIndex < questions.length - 1) {
+      setQuizIndex((i) => i + 1);
+      return;
+    }
+
     if (step === slides.length - 1) {
       setLoading(true);
       try {
@@ -411,6 +434,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   };
 
   const handleBack = () => {
+    if (slides[step].key === 'understand' && quizIndex > 0) {
+      setQuizIndex((i) => i - 1);
+      return;
+    }
     if (step === 0) {
       onBack?.();
       return;
@@ -601,6 +628,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       const data = await response.json();
 
       if (!response.ok) {
+        // A dead Maps key used to look exactly like "no matching city". Tell the
+        // person what is going on so they type their city and carry on.
+        setCitySuggestions([]);
+        setLocationError(data.error || 'City search is unavailable right now. Type your city and continue.');
         if (!silent) throw new Error(data.error || 'Unable to verify city');
         return;
       }
@@ -716,7 +747,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <Typography variant="body" style={{ color: theme.colors.muted }}>Interested in</Typography>
+              <Typography variant="body" style={{ color: theme.colors.muted }}>Your orientation</Typography>
+              {renderChipRow(orientationOptions, form.orientation ? [form.orientation] : [], (option) =>
+                setForm((prev) => ({ ...prev, orientation: option }))
+              , false)}
+              {errors.orientation ? <Typography variant="small" tone="error">{errors.orientation}</Typography> : null}
+
+              <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 20 }}>Interested in</Typography>
               {renderChipRow(
                 interestedInOptions,
                 form.interestedIn
@@ -756,6 +793,26 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       case 'location':
         return (
           <View style={styles.slideStack}>
+            <View style={[styles.card, { backgroundColor: '#101D13', marginBottom: 16 }]}>
+              <Typography variant="small" style={{ color: theme.colors.muted }}>
+                How far are you willing to travel?
+              </Typography>
+              {renderChipRow(
+                distanceOptions.map((option) => option.label),
+                [
+                  (distanceOptions.find((option) => option.value === form.distanceRadius) ||
+                    distanceOptions[2]).label,
+                ],
+                (label) => {
+                  const picked = distanceOptions.find((option) => option.label === label);
+                  if (picked) setForm((prev) => ({ ...prev, distanceRadius: picked.value }));
+                },
+                false
+              )}
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 8 }}>
+                You can change this later in search filters.
+              </Typography>
+            </View>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
               {/* If location not detected yet */}
               {!form.city || form.lat === null ? (
@@ -826,7 +883,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                   {/* Location detected - show success state */}
                   <View style={styles.locationIconWrapper}>
                     <View style={[styles.locationIconLarge, { backgroundColor: 'rgba(188, 246, 65, 0.15)' }]}>
-                      <Feather name="map-pin" size={64} color={theme.colors.neonGreen} />
+                      <Feather name="map-pin" size={36} color={theme.colors.neonGreen} />
                     </View>
                   </View>
 
@@ -861,76 +918,68 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               )}
             </View>
 
-            <View style={[styles.card, { backgroundColor: '#101D13', marginTop: 16 }]}>
-              <Typography variant="small" style={{ color: theme.colors.muted }}>
-                How far are you willing to travel?
-              </Typography>
-              {renderChipRow(
-                distanceOptions.map((option) => option.label),
-                [
-                  (distanceOptions.find((option) => option.value === form.distanceRadius) ||
-                    distanceOptions[2]).label,
-                ],
-                (label) => {
-                  const picked = distanceOptions.find((option) => option.label === label);
-                  if (picked) setForm((prev) => ({ ...prev, distanceRadius: picked.value }));
-                },
-                false
-              )}
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 8 }}>
-                You can change this later in search filters.
-              </Typography>
-            </View>
           </View>
         );
 
-      case 'understand':
+      case 'understand': {
+        const question = questions[quizIndex];
+        const chosen = question ? form.answers[question.number] || [] : [];
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <Typography variant="body" style={{ color: theme.colors.muted, marginBottom: 4 }}>
-                There are no right answers. Pick what you would actually do.
-              </Typography>
-
               {questionsError && questions.length === 0 ? (
-                <Typography variant="small" tone="error" style={{ marginTop: 12 }}>
+                <Typography variant="small" tone="error">
                   Questions could not load. Check your connection and go back a step to retry.
                 </Typography>
               ) : null}
 
               {questions.length === 0 && !questionsError ? (
-                <ActivityIndicator color={theme.colors.neonGreen} style={{ marginTop: 24 }} />
+                <ActivityIndicator color={theme.colors.neonGreen} style={{ marginVertical: 24 }} />
               ) : null}
 
-              {questions.map((question) => (
-                <View key={question.number} style={{ marginTop: 24 }}>
-                  <Typography variant="small" style={{ color: theme.colors.text, marginBottom: 10 }}>
-                    {question.number}. {question.prompt}
+              {question ? (
+                <>
+                  <Typography variant="tiny" style={{ color: theme.colors.muted, letterSpacing: 1 }}>
+                    QUESTION {quizIndex + 1} OF {questions.length}
                   </Typography>
-                  <View style={styles.quizOptions}>
+                  <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 8, marginBottom: 6 }}>
+                    {question.prompt}
+                  </Typography>
+                  <Typography variant="small" style={{ color: theme.colors.muted, marginBottom: 16 }}>
+                    Pick one. Pick two if you are honestly between them.
+                  </Typography>
+
+                  <View style={{ gap: 10 }}>
                     {question.options.map((option) => {
-                      const isSelected = form.answers[question.number] === option.key;
+                      const isSelected = chosen.includes(option.key);
+                      const atLimit = chosen.length >= 2 && !isSelected;
                       return (
                         <TouchableOpacity
                           key={option.key}
                           accessibilityRole="button"
-                          accessibilityState={{ selected: isSelected }}
+                          accessibilityState={{ selected: isSelected, disabled: atLimit }}
+                          disabled={atLimit}
                           onPress={() =>
-                            setForm((prev) => ({
-                              ...prev,
-                              answers: { ...prev.answers, [question.number]: option.key },
-                            }))
+                            setForm((prev) => {
+                              const current = prev.answers[question.number] || [];
+                              const next = current.includes(option.key)
+                                ? current.filter((k) => k !== option.key)
+                                : [...current, option.key].slice(0, 2);
+                              return { ...prev, answers: { ...prev.answers, [question.number]: next } };
+                            })
                           }
                           style={[
                             styles.quizOption,
                             {
                               backgroundColor: isSelected ? theme.colors.neonGreen : theme.colors.surfaceLight,
                               borderColor: isSelected ? theme.colors.neonGreen : theme.colors.border,
+                              opacity: atLimit ? 0.45 : 1,
+                              paddingVertical: 14,
                             },
                           ]}
                         >
                           <Typography
-                            variant="tiny"
+                            variant="body"
                             style={{ color: isSelected ? theme.colors.deepBlack : theme.colors.text }}
                           >
                             {option.label}
@@ -939,12 +988,14 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                       );
                     })}
                   </View>
-                </View>
-              ))}
+                </>
+              ) : null}
+
               {errors.quiz ? <Typography variant="small" tone="error" style={{ marginTop: 16 }}>{errors.quiz}</Typography> : null}
             </View>
           </View>
         );
+      }
 
       case 'world':
         return (
@@ -968,9 +1019,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               </Typography>
 
               <UnderlineInput
-                placeholder="Height (e.g., 5'8 or 173cm)"
+                placeholder="Height in cm (e.g. 173)"
                 value={form.height}
-                onChangeText={(text) => setForm((prev) => ({ ...prev, height: text }))}
+                keyboardType="number-pad"
+                maxLength={3}
+                // Numbers only. It used to accept anything, including a name.
+                onChangeText={(text) => setForm((prev) => ({ ...prev, height: text.replace(/[^0-9]/g, '') }))}
               />
 
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Body type</Typography>
@@ -1166,6 +1220,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <ScrollView
+            ref={scrollRef}
             style={styles.scrollView}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
@@ -1363,12 +1418,12 @@ const styles = StyleSheet.create({
   },
   locationIconWrapper: {
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   locationIconLarge: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#ADFF1A',

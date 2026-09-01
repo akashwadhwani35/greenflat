@@ -8,7 +8,7 @@ import {
   normalizeAnswer,
   traitsForAnswers,
   describeAnswers,
-  type QuizOptionKey,
+  type QuizAnswer,
 } from '../utils/personalityQuestions';
 import { analyzePersonality, generateProfileEmbedding, generateBioSuggestions } from '../services/openai.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
@@ -31,6 +31,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       date_of_birth,
       city,
       distance_radius,
+      orientation,
       pronouns,
       // Profile data
       height,
@@ -151,7 +152,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
     // Always preserve already-saved quiz answers when a request doesn't include
     // them. Users who took the original eight-question quiz keep those answers
     // and simply have nothing stored for 9-12 until they retake it.
-    const answers: Array<QuizOptionKey | null> = PERSONALITY_QUESTIONS.map(
+    const answers: Array<QuizAnswer | null> = PERSONALITY_QUESTIONS.map(
       (question) =>
         normalizeAnswer(incomingAnswers[question.number]) ??
         normalizeAnswer(existingAnswers[`question${question.number}_answer`])
@@ -251,6 +252,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
            city = COALESCE($6, city),
            pronouns = COALESCE($7, pronouns),
            distance_radius = COALESCE($8, distance_radius),
+           orientation = COALESCE($9, orientation),
            cooldown_enabled = CASE WHEN $3::text = 'female' THEN TRUE ELSE cooldown_enabled END,
            updated_at = NOW()
        WHERE id = $1
@@ -266,6 +268,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         typeof city === 'string' && city.trim() ? city.trim().slice(0, 100) : null,
         normalizedPronouns,
         normalizedRadius,
+        typeof orientation === 'string' && orientation.trim() ? orientation.trim().slice(0, 30) : null,
       ]
     );
 
@@ -362,7 +365,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 
     // Get user data
     const userResult = await pool.query(
-      `SELECT id, email, name, gender, interested_in, pronouns, date_of_birth, city, distance_radius,
+      `SELECT id, email, name, gender, interested_in, orientation, pronouns, date_of_birth, city, distance_radius,
               is_verified, is_premium, premium_expires_at, boost_expires_at, credit_balance, cooldown_enabled
        FROM users
        WHERE id = $1`,

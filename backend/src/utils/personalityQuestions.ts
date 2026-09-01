@@ -165,11 +165,34 @@ export const ANSWER_COLUMNS = PERSONALITY_QUESTIONS.map((q) => `question${q.numb
 
 const VALID_KEYS: QuizOptionKey[] = ['A', 'B', 'C', 'D'];
 
-export const normalizeAnswer = (value: unknown): QuizOptionKey | null => {
-  if (typeof value !== 'string') return null;
-  const upper = value.trim().toUpperCase() as QuizOptionKey;
-  return VALID_KEYS.includes(upper) ? upper : null;
+/** Up to two option keys per question, stored as sorted letters: "A" or "AC". */
+export type QuizAnswer = string;
+
+export const MAX_ANSWERS_PER_QUESTION = 2;
+
+/**
+ * Accepts "A", "ac", ["C","A"], and returns the canonical form ("AC"), or null.
+ * Sorted and deduplicated so "CA" and "AC" are the same stored value, and capped
+ * at two because the point is "I'm between these", not "all of the above".
+ */
+export const normalizeAnswer = (value: unknown): QuizAnswer | null => {
+  const raw: string[] = Array.isArray(value)
+    ? value.map((v) => String(v))
+    : typeof value === 'string'
+      ? value.split('')
+      : [];
+
+  const keys = [...new Set(raw.map((c) => c.trim().toUpperCase()))]
+    .filter((c): c is QuizOptionKey => VALID_KEYS.includes(c as QuizOptionKey))
+    .sort()
+    .slice(0, MAX_ANSWERS_PER_QUESTION);
+
+  return keys.length > 0 ? keys.join('') : null;
 };
+
+/** The individual option keys inside a stored answer. */
+export const answerKeys = (answer: QuizAnswer | null): QuizOptionKey[] =>
+  answer ? (answer.split('') as QuizOptionKey[]) : [];
 
 /**
  * Traits for a full answer sheet, deduplicated and in question order.
@@ -178,27 +201,31 @@ export const normalizeAnswer = (value: unknown): QuizOptionKey | null => {
  * contributes nothing. Unlike the old flat A/B/C/D map, the same letter means
  * different things on different questions, which is the point of asking twelve.
  */
-export const traitsForAnswers = (answers: Array<QuizOptionKey | null>): string[] => {
+export const traitsForAnswers = (answers: Array<QuizAnswer | null>): string[] => {
   const traits: string[] = [];
 
   PERSONALITY_QUESTIONS.forEach((question, index) => {
-    const answer = answers[index];
-    if (!answer) return;
-    const option = question.options.find((o) => o.key === answer);
-    if (option) traits.push(...option.traits);
+    for (const key of answerKeys(answers[index])) {
+      const option = question.options.find((o) => o.key === key);
+      if (option) traits.push(...option.traits);
+    }
   });
 
   return [...new Set(traits)];
 };
 
 /** Compact "1A: Funny, Playful, Positive" lines, used to ground the AI prompt. */
-export const describeAnswers = (answers: Array<QuizOptionKey | null>): string =>
+export const describeAnswers = (answers: Array<QuizAnswer | null>): string =>
   PERSONALITY_QUESTIONS.map((question, index) => {
-    const answer = answers[index];
-    if (!answer) return null;
-    const option = question.options.find((o) => o.key === answer);
-    if (!option) return null;
-    return `Q${question.number}${answer} (${option.label}) → ${option.traits.join(', ')}`;
+    const keys = answerKeys(answers[index]);
+    if (keys.length === 0) return null;
+    const parts = keys
+      .map((key) => question.options.find((o) => o.key === key))
+      .filter((o): o is QuizOption => Boolean(o))
+      .map((o) => `${o.key} (${o.label}) → ${o.traits.join(', ')}`);
+    if (parts.length === 0) return null;
+    // Two answers read as "between these", which the model should treat as a blend.
+    return `Q${question.number}: ${parts.join('  |  ')}`;
   })
     .filter((line): line is string => line !== null)
     .join('\n');

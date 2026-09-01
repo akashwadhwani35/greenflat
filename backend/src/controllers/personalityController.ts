@@ -8,11 +8,13 @@
  * ours to know, not something to hand a client that could then game its answers.
  */
 import { Request, Response } from 'express';
-import { publicQuestions, QUESTION_COUNT } from '../utils/personalityQuestions';
+import { publicQuestions, QUESTION_COUNT, MAX_ANSWERS_PER_QUESTION } from '../utils/personalityQuestions';
 
 export const getPersonalityQuestions = (_req: Request, res: Response) => {
   res.json({
     count: QUESTION_COUNT,
+    // The app lets a person pick up to this many options per question.
+    max_answers_per_question: MAX_ANSWERS_PER_QUESTION,
     questions: publicQuestions(),
   });
 };
