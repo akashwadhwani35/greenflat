@@ -58,7 +58,7 @@ const allSlides: Slide[] = [
   { key: 'basic', title: 'Me', subtitle: 'Name, birthday, and how you identify.' },
   { key: 'intentions', title: "Who I'm looking for", subtitle: 'Who you want to meet, and what for.' },
   { key: 'location', title: 'Where', subtitle: 'Your city and how far you will travel.' },
-  { key: 'understand', title: 'Understand me', subtitle: 'Twelve situations. Pick what you would actually do.' },
+  { key: 'understand', title: 'Understand me', subtitle: 'Ten situations. Pick what you would actually do.' },
   { key: 'prompts', title: 'Tell me more', subtitle: 'In your own words. This is what our AI reads.' },
   { key: 'world', title: 'My world', subtitle: 'What you spend your time on.' },
   { key: 'photos', title: 'Show me', subtitle: 'Photos of you, not your holiday.' },
@@ -1222,13 +1222,16 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           <ScrollView
             ref={scrollRef}
             style={styles.scrollView}
-            contentContainerStyle={styles.scrollContent}
+            // flexGrow so the content always fills the viewport and the list is
+            // scrollable from the first render. The interests step would not
+            // scroll until a chip was tapped: nothing had forced a re-measure.
+            contentContainerStyle={[styles.scrollContent, { flexGrow: 1 }]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always"
             keyboardDismissMode="on-drag"
             nestedScrollEnabled
           >
-            <Animated.View style={[styles.contentColumn, animatedContentStyle]}>
+            <Animated.View key={`${step}-${quizIndex}`} style={[styles.contentColumn, animatedContentStyle]}>
               <View style={styles.titleSection}>
                 <Typography variant="display" style={{ color: theme.colors.text }}>
                   {slides[step].title}

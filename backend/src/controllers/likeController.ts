@@ -107,8 +107,9 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     const blockResult = await client.query(
       `SELECT 1
        FROM blocks
-       WHERE (blocker_id = $1 AND blocked_id = $2)
-          OR (blocker_id = $2 AND blocked_id = $1)
+       WHERE ((blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1))
+         AND unblocked_at IS NULL
        LIMIT 1`,
       [userId, target_user_id]
     );
@@ -509,6 +510,7 @@ export const getMatches = async (req: AuthRequest, res: Response) => {
       LEFT JOIN blocks blocked_rel
         ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
          OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
+          AND blocked_rel.unblocked_at IS NULL
       WHERE (m.user1_id = $1 OR m.user2_id = $1)
         AND blocked_rel.id IS NULL
       ORDER BY m.matched_at DESC`,

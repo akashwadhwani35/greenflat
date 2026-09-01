@@ -153,6 +153,17 @@ const AppShell: React.FC = () => {
   // Drives the green "you both said this" highlighting on profile cards.
   const viewerProfile = useViewerProfile(authToken, API_BASE_URL);
 
+  // The bottom nav highlight follows what is actually on screen. Likes and
+  // Chats can be opened from places other than the nav (profile menu, a match
+  // modal), and the highlight was left on whatever tab was pressed last.
+  useEffect(() => {
+    if (showMessages || overlay === 'conversations') setActiveTab('messages');
+    else if (overlay === 'likes' || overlay === 'matches') setActiveTab('likes');
+    else if (overlay === 'aiSearch') setActiveTab('ai');
+    else if (overlay === 'profile' || overlay === 'profileOverview') setActiveTab('profile');
+    else if (!overlay) setActiveTab('explore');
+  }, [overlay, showMessages]);
+
   useEffect(() => {
     const bootstrap = async () => {
       try {
@@ -964,8 +975,12 @@ const AppShell: React.FC = () => {
                   apiBaseUrl={API_BASE_URL}
                   socket={socket}
                   onBack={() => {
+                    // Back means the conversation list, one screen up. It used
+                    // to drop the user on Home.
                     setShowMessages(false);
                     setCurrentConversation(null);
+                    setOverlay('conversations');
+                    setActiveTab('messages');
                   }}
                 />
               </View>

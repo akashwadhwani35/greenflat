@@ -80,6 +80,7 @@ export const getBlockedUsers = async (req: AuthRequest, res: Response) => {
        FROM blocks b
        JOIN users u ON u.id = b.blocked_id
        WHERE b.blocker_id = $1
+         AND b.unblocked_at IS NULL
        ORDER BY b.created_at DESC`,
       [userId]
     );
@@ -104,7 +105,7 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
     await client.query(
       `INSERT INTO blocks (blocker_id, blocked_id)
        VALUES ($1, $2)
-       ON CONFLICT (blocker_id, blocked_id) DO NOTHING`,
+       ON CONFLICT (blocker_id, blocked_id) DO UPDATE SET unblocked_at = NULL, created_at = NOW()`,
       [userId, target_user_id]
     );
 
@@ -151,7 +152,9 @@ export const unblockUser = async (req: AuthRequest, res: Response) => {
     }
 
     await pool.query(
-      `DELETE FROM blocks WHERE blocker_id = $1 AND blocked_id = $2`,
+      // Soft delete: the row is kept so AI Match never resurfaces someone you
+      // once blocked. Search can still find them, which is your own choice.
+      `UPDATE blocks SET unblocked_at = NOW() WHERE blocker_id = $1 AND blocked_id = $2 AND unblocked_at IS NULL`,
       [userId, target_user_id]
     );
     return res.json({ message: 'User unblocked' });

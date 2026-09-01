@@ -617,10 +617,14 @@ Return JSON: {"isAdult": true/false, "confidence": 0-1, "reasoning": "short reas
  * - selfie appears 18+
  * - selfie person matches profile primary photo person
  */
+/** Similarity at or above this counts as the same person. */
+const SELFIE_MATCH_THRESHOLD = 0.5;
+
 export const analyzeSelfieAgainstProfile = async (
   selfieUrl: string,
-  profilePhotoUrl: string
+  profilePhotoUrls: string | string[]
 ): Promise<{ isAdult: boolean; isMatch: boolean; confidence: number; reasoning: string }> => {
+  const photos = (Array.isArray(profilePhotoUrls) ? profilePhotoUrls : [profilePhotoUrls]).slice(0, 3);
   if (!process.env.OPENAI_API_KEY) {
     return {
       isAdult: false,
@@ -630,18 +634,23 @@ export const analyzeSelfieAgainstProfile = async (
     };
   }
 
-  const prompt = `You are verifying a dating app selfie against a profile photo.
-Image 1 is the newly captured selfie.
-Image 2 is the user's profile photo.
-
-Rules:
-1) Selfie (image 1) must contain exactly one clear face.
-2) The person in image 1 must appear 18+.
-3) The primary person in image 1 and image 2 must be the same person.
-If uncertain on any rule, set booleans to false.
-
+  // The earlier prompt told the model to answer false whenever uncertain and
+  // compared against a single photo. Real users failed against their own
+  // pictures: a front-camera selfie indoors versus an outdoor profile shot reads
+  // as "uncertain" to a conservative model. Now every profile photo is offered,
+  // a match against any one is enough, and the model reports a similarity score
+  // that we threshold ourselves.
+  const prompt = `You are verifying a dating app selfie against a user's own profile photos.
+Image 1 is the newly captured selfie. Images 2 onward are that user's profile photos.
+Answer these:
+1) Does image 1 contain exactly one clear, real human face (not a photo of a screen or print)?
+2) Does the person in image 1 appear to be 18 or older?
+3) Is the person in image 1 the same person as in ANY of the other images? Allow for
+   different lighting, angle, hairstyle, glasses, expression, and time between photos.
+   Judge by stable facial structure, not styling.
+Give "similarity" as a number from 0 to 1 for the best-matching profile photo.
 Return strict JSON:
-{"isAdult": true/false, "isMatch": true/false, "confidence": 0-1, "reasoning": "short reason"}`;
+{"isAdult": true/false, "singleFace": true/false, "similarity": 0-1, "reasoning": "one short sentence"}`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -653,14 +662,8 @@ Return strict JSON:
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            {
-              type: 'image_url',
-              image_url: { url: selfieUrl },
-            },
-            {
-              type: 'image_url',
-              image_url: { url: profilePhotoUrl },
-            },
+            { type: 'image_url', image_url: { url: selfieUrl } },
+            ...photos.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
           ],
         },
       ],
@@ -672,10 +675,14 @@ Return strict JSON:
       throw new Error('No vision response');
     }
     const parsed = JSON.parse(content);
+    const similarity = Math.max(0, Math.min(1, Number(parsed.similarity) || 0));
+    const singleFace = parsed.singleFace === undefined ? true : Boolean(parsed.singleFace);
     return {
       isAdult: Boolean(parsed.isAdult),
-      isMatch: Boolean(parsed.isMatch),
-      confidence: Number(parsed.confidence) || 0,
+      // 0.5 rather than the old 0.6-on-a-boolean: the score is now the model's
+      // own similarity estimate against the best of several photos.
+      isMatch: singleFace && similarity >= SELFIE_MATCH_THRESHOLD,
+      confidence: similarity,
       reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : 'No reasoning provided',
     };
   } catch (error) {

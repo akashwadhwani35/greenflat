@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_premium BOOLEAN DEFAULT FALSE,
     premium_expires_at TIMESTAMP,
     boost_expires_at TIMESTAMP,
-    credit_balance INTEGER NOT NULL DEFAULT 50,
+    credit_balance INTEGER NOT NULL DEFAULT 19,
     last_token_refill_at TIMESTAMP,
     cooldown_enabled BOOLEAN DEFAULT FALSE,
     cooldown_until TIMESTAMP,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS users (
     hide_distance BOOLEAN DEFAULT FALSE,
     hide_city BOOLEAN DEFAULT FALSE,
     incognito_mode BOOLEAN DEFAULT FALSE,
-    show_online_status BOOLEAN DEFAULT TRUE,
+    show_online_status BOOLEAN DEFAULT FALSE,
     onboarding_completed_at TIMESTAMPTZ,
     last_active TIMESTAMPTZ,
     is_admin BOOLEAN DEFAULT FALSE,
@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS personality_responses (
     personality_summary TEXT,
     compatibility_tips TEXT,
     top_traits TEXT[],
+    trait_profile JSONB,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -145,6 +146,7 @@ CREATE TABLE IF NOT EXISTS messages (
     message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'voice')),
     is_read BOOLEAN DEFAULT FALSE,
     is_deleted BOOLEAN DEFAULT FALSE,
+    reply_to_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -278,7 +280,7 @@ CREATE TABLE IF NOT EXISTS user_privacy_settings (
     hide_distance BOOLEAN DEFAULT FALSE,
     hide_city BOOLEAN DEFAULT FALSE,
     incognito_mode BOOLEAN DEFAULT FALSE,
-    show_online_status BOOLEAN DEFAULT TRUE,
+    show_online_status BOOLEAN DEFAULT FALSE,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -299,6 +301,7 @@ CREATE TABLE IF NOT EXISTS blocks (
     id SERIAL PRIMARY KEY,
     blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    unblocked_at TIMESTAMPTZ,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(blocker_id, blocked_id),
     CHECK (blocker_id <> blocked_id)

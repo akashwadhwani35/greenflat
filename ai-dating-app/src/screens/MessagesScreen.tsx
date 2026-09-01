@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
 import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -30,6 +31,7 @@ type Message = {
   sender_id: number;
   content: string;
   message_type?: 'text' | 'image' | 'voice';
+  reply_to_message_id?: number | null;
   created_at: string;
   is_read: boolean;
   is_deleted: boolean;
@@ -75,6 +77,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  // Full-screen image viewer, instead of handing the URL to the browser.
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  // The message being replied to, shown above the composer until sent.
+  const [replyTo, setReplyTo] = useState<Message | null>(null);
+  // Voice notes: press-and-hold recording with expo-av, and inline playback.
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+  const [playingUri, setPlayingUri] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   // Drives the green shared-answer highlighting on the profile card.
@@ -500,6 +511,72 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   };
 
+  /**
+   * Voice notes are recorded as audio. The previous button opened the video
+   * camera and sent an 8-second clip labelled "voice note".
+   */
+  const startRecording = async () => {
+    if (isRecording || sending) return;
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Microphone needed', 'Allow microphone access to send voice notes.');
+        return;
+      }
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setIsRecording(true);
+    } catch (error: any) {
+      Alert.alert('Could not record', error?.message || 'Please try again.');
+    }
+  };
+
+  const stopRecordingAndSend = async () => {
+    const recording = recordingRef.current;
+    recordingRef.current = null;
+    setIsRecording(false);
+    if (!recording) return;
+    try {
+      await recording.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      const uri = recording.getURI();
+      if (!uri) return;
+      const status = await recording.getStatusAsync();
+      // A tap rather than a hold produces a fraction of a second of silence.
+      if ((status.durationMillis || 0) < 700) return;
+      setSending(true);
+      const content = await uploadMediaAsset({ uri } as unknown as ImagePicker.ImagePickerAsset, 'voice');
+      await sendMessage({ content, message_type: 'voice' });
+    } catch (error: any) {
+      Alert.alert('Upload failed', error?.message || 'Could not send the voice note.');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const togglePlayback = async (uri: string) => {
+    try {
+      if (soundRef.current) {
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+        if (playingUri === uri) { setPlayingUri(null); return; }
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri }, { shouldPlay: true });
+      soundRef.current = sound;
+      setPlayingUri(uri);
+      sound.setOnPlaybackStatusUpdate((st) => {
+        if ('didJustFinish' in st && st.didJustFinish) {
+          setPlayingUri(null);
+          void sound.unloadAsync();
+          soundRef.current = null;
+        }
+      });
+    } catch (error: any) {
+      Alert.alert('Could not play', error?.message || 'Please try again.');
+    }
+  };
+
   const sendMessage = async (payload?: { content: string; message_type: 'text' | 'image' | 'voice' }) => {
     const fallbackText = newMessage.trim();
     const messageText = payload?.content ?? fallbackText;
@@ -528,6 +605,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           match_id: matchId,
           content: messageText,
           message_type: messageType,
+          reply_to_message_id: replyTo?.id ?? null,
         }),
       });
 
@@ -536,6 +614,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       }
 
       const body = await response.json().catch(() => ({}));
+      setReplyTo(null);
       if (body.data) {
         setMessages((prev) => {
           if (prev.some((m) => m.id === body.data.id)) return prev;
@@ -543,10 +622,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         });
       }
 
-      // Scroll to bottom
+      // Jump straight to the latest message. Animated used to play a visible
+      // top-to-bottom scroll every time a conversation opened.
       setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+        flatListRef.current?.scrollToEnd({ animated: false });
+      }, 50);
     } catch (error) {
       console.error('Error sending message:', error);
       Alert.alert('Error', 'Failed to send message. Please try again.');
@@ -569,7 +649,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           isMyMessage ? styles.myMessageContainer : styles.theirMessageContainer,
         ]}
       >
-        <View
+        <Pressable
+          onLongPress={() => { if (!isDeleted) setReplyTo(item); }}
+          delayLongPress={250}
           style={[
             styles.messageBubble,
             isMyMessage
@@ -577,14 +659,25 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               : [styles.theirMessageBubble, { backgroundColor: theme.colors.charcoal }],
           ]}
         >
+          {item.reply_to_message_id ? (() => {
+            const quoted = messages.find((m) => m.id === item.reply_to_message_id);
+            if (!quoted) return null;
+            const text = quoted.message_type === 'image' ? 'Photo' : quoted.message_type === 'voice' ? 'Voice note' : quoted.content;
+            return (
+              <View style={[styles.quoteBlock, { borderLeftColor: isMyMessage ? '#0B1410' : theme.colors.neonGreen }]}>
+                <Typography variant="tiny" numberOfLines={2} style={{ color: isMyMessage ? '#0B1410' : theme.colors.textDark, opacity: 0.8 }}>
+                  {text}
+                </Typography>
+              </View>
+            );
+          })() : null}
           {item.message_type === 'image' ? (
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => {
-                if (item.content) {
-                  Linking.openURL(item.content).catch(() => {});
-                }
+                if (item.content) setViewerUri(item.content);
               }}
+              onLongPress={() => setReplyTo(item)}
             >
               <Image source={{ uri: item.content }} style={styles.messageImage} />
             </TouchableOpacity>
@@ -592,10 +685,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             <TouchableOpacity
               style={styles.voiceNote}
               onPress={() => {
-                if (item.content) {
-                  Linking.openURL(item.content).catch(() => {});
-                }
+                if (item.content) void togglePlayback(item.content);
               }}
+              onLongPress={() => setReplyTo(item)}
               activeOpacity={0.8}
             >
               <Feather name="play-circle" size={18} color={isMyMessage ? theme.colors.deepBlack : theme.colors.text} />
@@ -633,7 +725,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               minute: '2-digit',
             })}
           </Typography>
-        </View>
+        </Pressable>
       </View>
     );
   };
@@ -759,9 +851,31 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           keyExtractor={(item) => item.id.toString()}
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContent}
-          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
         />
       )}
+
+      {replyTo ? (
+        <View style={[styles.replyStrip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+          <View style={{ flex: 1 }}>
+            <Typography variant="tiny" style={{ color: theme.colors.neonGreen }}>
+              Replying to {replyTo.sender_id === currentUserId ? 'yourself' : matchName}
+            </Typography>
+            <Typography variant="small" numberOfLines={1} style={{ color: theme.colors.textDark }}>
+              {replyTo.message_type === 'image' ? 'Photo' : replyTo.message_type === 'voice' ? 'Voice note' : replyTo.content}
+            </Typography>
+          </View>
+          <TouchableOpacity onPress={() => setReplyTo(null)} accessibilityLabel="Cancel reply">
+            <Feather name="x" size={18} color={theme.colors.muted} />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      <Modal visible={Boolean(viewerUri)} transparent animationType="fade" onRequestClose={() => setViewerUri(null)}>
+        <Pressable style={styles.viewerBackdrop} onPress={() => setViewerUri(null)}>
+          {viewerUri ? <Image source={{ uri: viewerUri }} style={styles.viewerImage} resizeMode="contain" /> : null}
+        </Pressable>
+      </Modal>
 
       {/* Typing indicator */}
       {peerTyping && (
@@ -814,34 +928,13 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.attachButton}
-            onPress={async () => {
-              const permission = await ImagePicker.requestCameraPermissionsAsync();
-              if (!permission.granted) {
-                Alert.alert('Camera required', 'Allow camera access to capture a quick voice/video note.');
-                return;
-              }
-              const result = await ImagePicker.launchCameraAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Videos,
-                allowsEditing: false,
-                videoMaxDuration: mediaUploadProvider === 'cloudinary' ? 20 : 8,
-                quality: mediaUploadProvider === 'cloudinary' ? 0.4 : 0.3,
-              });
-              if (!result.canceled && result.assets[0]) {
-                try {
-                  setSending(true);
-                  const content = await uploadMediaAsset(result.assets[0], 'voice');
-                  await sendMessage({ content, message_type: 'voice' });
-                } catch (error: any) {
-                  Alert.alert('Upload failed', error?.message || 'Could not upload voice note.');
-                } finally {
-                  setSending(false);
-                }
-              }
-            }}
+            style={[styles.attachButton, isRecording && { backgroundColor: 'rgba(255,77,138,0.25)', borderRadius: 999 }]}
+            onPressIn={() => { void startRecording(); }}
+            onPressOut={() => { void stopRecordingAndSend(); }}
             disabled={sending}
+            accessibilityLabel={isRecording ? 'Recording, release to send' : 'Hold to record a voice note'}
           >
-            <Feather name="mic" size={22} color={theme.colors.text} />
+            <Feather name="mic" size={22} color={isRecording ? '#FF4D8A' : theme.colors.text} />
           </TouchableOpacity>
 
           <TextInput
@@ -953,6 +1046,26 @@ const styles = StyleSheet.create({
   messagesList: {
     flex: 1,
   },
+  quoteBlock: {
+    borderLeftWidth: 2,
+    paddingLeft: 8,
+    marginBottom: 6,
+    opacity: 0.9,
+  },
+  replyStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 6,
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderLeftWidth: 3,
+    borderLeftColor: '#ADFF1A',
+  },
+  viewerBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.94)', alignItems: 'center', justifyContent: 'center' },
+  viewerImage: { width: '100%', height: '80%' },
   messagesContent: {
     paddingHorizontal: 16,
     paddingVertical: 20,

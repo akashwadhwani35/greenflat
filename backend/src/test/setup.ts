@@ -32,8 +32,12 @@ const tables = [
 ];
 
 const truncateTables = async () => {
+  // Plain DELETEs, in the child-first order the list is already in. No CASCADE:
+  // messages references itself (reply_to_message_id) and pg-mem follows a
+  // cascade back into the same table forever, from any parent that reaches it.
+  // Real Postgres does not have this problem; only the in-memory test DB does.
   for (const table of tables) {
-    await pool.query(`TRUNCATE TABLE ${table} RESTART IDENTITY CASCADE`);
+    await pool.query(`DELETE FROM ${table}`);
   }
 };
 

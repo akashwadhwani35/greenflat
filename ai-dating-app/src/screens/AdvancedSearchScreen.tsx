@@ -21,20 +21,26 @@ export type AdvancedFilters = {
   maxAge?: string;
   distance_km?: string;
   interested_in?: 'male' | 'female' | 'both' | '';
-  religion?: string;
-  relationship_goal?: string;
+  religion?: string | string[];
+  relationship_goal?: string | string[];
 
   ethnicity?: string;
   minHeight?: string;
   maxHeight?: string;
   dating_intentions?: string;
-  have_kids?: string;
-  drugs?: string;
-  smoking_habit?: string;
-  marijuana?: string;
-  drinker?: string;
+  have_kids?: string | string[];
+  drugs?: string | string[];
+  smoking_habit?: string | string[];
+  marijuana?: string | string[];
+  drinker?: string | string[];
   politics?: string;
   education_level?: string;
+  // Trait facets from the quiz. Any-of within a facet.
+  personality_traits?: string[];
+  communication_style?: string[];
+  relationship_needs?: string[];
+  conflict_style?: string[];
+  lifestyle?: string[];
 
   // Kept for AI flow compatibility (not editable in this screen).
   keywords?: string;
@@ -117,18 +123,35 @@ const EDUCATION_OPTIONS: Option[] = [
   { value: 'other', label: 'Other' },
 ];
 
+// Per the board. Free: gender, age, distance, relationship intention, religion,
+// children, smoking, drinking, marijuana, drugs. Dating intentions moved to
+// free (and is the same thing as relationship type, so it is not shown twice).
 const PAID_FILTER_KEYS: Array<keyof AdvancedFilters> = [
   'ethnicity',
   'minHeight',
   'maxHeight',
-  'dating_intentions',
-  'have_kids',
-  'drugs',
-  'smoking_habit',
-  'marijuana',
-  'drinker',
   'politics',
   'education_level',
+  'personality_traits',
+  'communication_style',
+  'relationship_needs',
+  'conflict_style',
+  'lifestyle',
+];
+
+type MultiKey =
+  | 'religion' | 'relationship_goal' | 'have_kids' | 'drugs' | 'smoking_habit' | 'marijuana' | 'drinker'
+  | 'personality_traits' | 'communication_style' | 'relationship_needs' | 'conflict_style' | 'lifestyle';
+
+const asList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : typeof value === 'string' && value ? [value] : [];
+
+const FACETS: { key: MultiKey; title: string }[] = [
+  { key: 'personality_traits', title: 'Personality traits' },
+  { key: 'communication_style', title: 'Communication style' },
+  { key: 'relationship_needs', title: 'Relationship needs' },
+  { key: 'conflict_style', title: 'Conflict style' },
+  { key: 'lifestyle', title: 'Lifestyle' },
 ];
 
 const isNonEmptyValue = (value: unknown) => {
@@ -145,7 +168,25 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
   onOpenCheckout,
 }) => {
   const theme = useTheme();
-  const [filters, setFilters] = useState<AdvancedFilters>(initialFilters || {});
+  // Age defaults to the full range rather than blank, per the board.
+  const [filters, setFilters] = useState<AdvancedFilters>({ minAge: '18', maxAge: '100', ...(initialFilters || {}) });
+  // The trait labels the quiz produces, grouped by facet. Same source as the
+  // quiz mappings, so a chip can never name a trait nobody has.
+  const [vocab, setVocab] = useState<Record<string, string[]> | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/personality/questions`);
+        const data = await response.json().catch(() => ({}));
+        if (!cancelled && data?.trait_vocabulary) setVocab(data.trait_vocabulary);
+      } catch {
+        // Facet chips simply don't render; everything else still works.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [apiBaseUrl]);
   const [hasPaidPlan, setHasPaidPlan] = useState(false);
   const [loadingPlan, setLoadingPlan] = useState(true);
 
@@ -185,6 +226,38 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
 
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
+
+  // Free filters allow several picks; a list means any-of.
+  const toggleMulti = (key: MultiKey, value: string, isPaidFilter = false) => {
+    if (isPaidFilter && !hasPaidPlan) {
+      Alert.alert('Paid filter', 'This filter is available on paid plans only.');
+      return;
+    }
+    setFilters((prev) => {
+      const current = asList(prev[key]);
+      const next = current.includes(value) ? current.filter((v) => v !== value) : [...current, value];
+      return { ...prev, [key]: next };
+    });
+  };
+  const isPicked = (key: MultiKey, value: string) => asList(filters[key]).includes(value);
+
+  const renderMulti = (title: string, key: MultiKey, options: Option[], isPaidFilter = false) => (
+    <>
+      <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>{title}</Typography>
+      <View style={styles.chipGrid}>
+        {options.map((option) => (
+          <ChipToggle
+            key={`${key}-${option.value}`}
+            label={option.label}
+            icon={(option as any).icon}
+            active={isPicked(key, option.value)}
+            disabled={isPaidFilter && !hasPaidPlan}
+            onPress={() => toggleMulti(key, option.value, isPaidFilter)}
+          />
+        ))}
+      </View>
+    </>
+  );
 
   const hasActiveVisibleFilters = useMemo(
     () =>
@@ -249,280 +322,90 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Section title="Free filters" icon="unlock">
           <Typography variant="small" style={{ color: theme.colors.muted }}>
-            Available on all plans
+            Available on all plans. Pick as many as you like.
           </Typography>
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 12 }}>Interested in gender</Typography>
           <View style={styles.chipGrid}>
-            <ChipToggle
-              label="Men"
-              icon="user"
-              active={filters.interested_in === 'male'}
-              onPress={() => update('interested_in', filters.interested_in === 'male' ? '' : 'male')}
-            />
-            <ChipToggle
-              label="Women"
-              icon="user"
-              active={filters.interested_in === 'female'}
-              onPress={() => update('interested_in', filters.interested_in === 'female' ? '' : 'female')}
-            />
-            <ChipToggle
-              label="Everyone"
-              icon="users"
-              active={filters.interested_in === 'both'}
-              onPress={() => update('interested_in', filters.interested_in === 'both' ? '' : 'both')}
-            />
+            {([['male', 'Men', 'user'], ['female', 'Women', 'user'], ['both', 'Everyone', 'users']] as const).map(([value, label, icon]) => (
+              <ChipToggle key={value} label={label} icon={icon} active={filters.interested_in === value}
+                onPress={() => update('interested_in', filters.interested_in === value ? '' : value)} />
+            ))}
+          </View>
+
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Age</Typography>
+          <View style={styles.rangeRow}>
+            <View style={{ flex: 1 }}>
+              <Input placeholder="18" keyboardType="numeric" value={filters.minAge} onChangeText={(text) => update('minAge', text)} />
+            </View>
+            <View style={styles.rangeDivider}><View style={[styles.rangeLine, { backgroundColor: theme.colors.border }]} /></View>
+            <View style={{ flex: 1 }}>
+              <Input placeholder="100" keyboardType="numeric" value={filters.maxAge} onChangeText={(text) => update('maxAge', text)} />
+            </View>
           </View>
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Max distance (km)</Typography>
-          <Input
-            placeholder="e.g. 25"
-            keyboardType="numeric"
-            value={filters.distance_km}
-            onChangeText={(text) => update('distance_km', text)}
-            leftIcon="navigation"
-          />
+          <Input placeholder="e.g. 25" keyboardType="numeric" leftIcon="navigation" value={filters.distance_km} onChangeText={(text) => update('distance_km', text)} />
 
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Age group</Typography>
-          <View style={styles.rangeRow}>
-            <View style={{ flex: 1 }}>
-              <Input
-                placeholder="Min"
-                keyboardType="numeric"
-                value={filters.minAge}
-                onChangeText={(text) => update('minAge', text)}
-              />
-            </View>
-            <View style={styles.rangeDivider}>
-              <View style={[styles.rangeLine, { backgroundColor: theme.colors.border }]} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Input
-                placeholder="Max"
-                keyboardType="numeric"
-                value={filters.maxAge}
-                onChangeText={(text) => update('maxAge', text)}
-              />
-            </View>
-          </View>
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Religion</Typography>
-          <View style={styles.chipGrid}>
-            {RELIGION_OPTIONS.map((option) => {
-              const selected = filters.religion?.toLowerCase() === option.value;
-              return (
-                <ChipToggle
-                  key={option.value}
-                  label={option.label}
-                  active={selected}
-                  onPress={() => update('religion', selected ? '' : option.value)}
-                />
-              );
-            })}
-          </View>
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Relationship type</Typography>
-          <View style={styles.chipGrid}>
-            {RELATIONSHIP_TYPE_OPTIONS.map((option) => {
-              const selected = filters.relationship_goal === option.value;
-              return (
-                <ChipToggle
-                  key={option.value}
-                  label={option.label}
-                  icon={option.icon}
-                  active={selected}
-                  onPress={() => update('relationship_goal', selected ? '' : option.value)}
-                />
-              );
-            })}
-          </View>
+          {renderMulti('Relationship intention', 'relationship_goal', RELATIONSHIP_TYPE_OPTIONS)}
+          {renderMulti('Religion', 'religion', RELIGION_OPTIONS)}
+          {renderMulti('Children', 'have_kids', CHILDREN_OPTIONS)}
+          {renderMulti('Smoking', 'smoking_habit', SMOKING_OPTIONS)}
+          {renderMulti('Drinking', 'drinker', DRINKING_OPTIONS)}
+          {renderMulti('Marijuana', 'marijuana', USAGE_OPTIONS)}
+          {renderMulti('Drugs', 'drugs', USAGE_OPTIONS)}
         </Section>
 
         <Section title="Paid plan filters" icon="lock">
           {loadingPlan ? (
             <View style={styles.planLoaderRow}>
               <ActivityIndicator size="small" color={theme.colors.neonGreen} />
-              <Typography variant="small" style={{ color: theme.colors.muted, marginLeft: 8 }}>
-                Checking plan access...
-              </Typography>
+              <Typography variant="small" style={{ color: theme.colors.muted, marginLeft: 8 }}>Checking plan access...</Typography>
             </View>
           ) : !hasPaidPlan ? (
-            <View style={[styles.lockCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}> 
-              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-                Upgrade to unlock paid filters
+            <TouchableOpacity onPress={onPressPaidLocked} activeOpacity={0.85} style={[styles.lockCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Upgrade to unlock paid filters</Typography>
+              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 4 }}>
+                Height, ethnicity, education, politics, and how someone actually is: personality, communication, needs, conflict style, lifestyle.
               </Typography>
-              <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 6 }}>
-                Ethnicity, height, intentions, children, lifestyle and education filters are paid-plan only.
-              </Typography>
-              <View style={{ marginTop: 12 }}>
-                <Button label="View plans" onPress={onPressPaidLocked} fullWidth />
-              </View>
-            </View>
+            </TouchableOpacity>
           ) : null}
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 10 }}>Ethnicity</Typography>
-          <Input
-            placeholder="e.g. South Asian"
-            value={filters.ethnicity}
-            onChangeText={(text) => update('ethnicity', text, true)}
-            disabled={!hasPaidPlan}
-            onLockedPress={onPressPaidLocked}
-          />
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Height (cm)</Typography>
           <View style={styles.rangeRow}>
             <View style={{ flex: 1 }}>
-              <Input
-                placeholder="Min"
-                keyboardType="numeric"
-                value={filters.minHeight}
-                onChangeText={(text) => update('minHeight', text, true)}
-                disabled={!hasPaidPlan}
-                onLockedPress={onPressPaidLocked}
-              />
+              <Input placeholder="Min" keyboardType="numeric" value={filters.minHeight} disabled={!hasPaidPlan} onLockedPress={onPressPaidLocked} onChangeText={(text) => update('minHeight', text, true)} />
             </View>
-            <View style={styles.rangeDivider}>
-              <View style={[styles.rangeLine, { backgroundColor: theme.colors.border }]} />
-            </View>
+            <View style={styles.rangeDivider}><View style={[styles.rangeLine, { backgroundColor: theme.colors.border }]} /></View>
             <View style={{ flex: 1 }}>
-              <Input
-                placeholder="Max"
-                keyboardType="numeric"
-                value={filters.maxHeight}
-                onChangeText={(text) => update('maxHeight', text, true)}
-                disabled={!hasPaidPlan}
-                onLockedPress={onPressPaidLocked}
-              />
+              <Input placeholder="Max" keyboardType="numeric" value={filters.maxHeight} disabled={!hasPaidPlan} onLockedPress={onPressPaidLocked} onChangeText={(text) => update('maxHeight', text, true)} />
             </View>
           </View>
 
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Dating intentions</Typography>
-          <View style={styles.chipGrid}>
-            {DATING_INTENTION_OPTIONS.map((option) => {
-              const selected = filters.dating_intentions === option.value;
-              return (
-                <ChipToggle
-                  key={option.value}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('dating_intentions', selected ? '' : option.value, true)}
-                />
-              );
-            })}
-          </View>
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Ethnicity</Typography>
+          <Input placeholder="e.g. South Asian" value={filters.ethnicity} disabled={!hasPaidPlan} onLockedPress={onPressPaidLocked} onChangeText={(text) => update('ethnicity', text, true)} />
 
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Children</Typography>
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Education</Typography>
           <View style={styles.chipGrid}>
-            {CHILDREN_OPTIONS.map((option) => {
-              const selected = filters.have_kids?.toLowerCase() === option.value;
-              return (
-                <ChipToggle
-                  key={option.value}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('have_kids', selected ? '' : option.value, true)}
-                />
-              );
-            })}
-          </View>
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Drugs</Typography>
-          <View style={styles.chipGrid}>
-            {USAGE_OPTIONS.map((option) => {
-              const selected = filters.drugs === option.value;
-              return (
-                <ChipToggle
-                  key={`drugs-${option.value}`}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('drugs', selected ? '' : option.value, true)}
-                />
-              );
-            })}
-          </View>
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Smoking</Typography>
-          <View style={styles.chipGrid}>
-            {SMOKING_OPTIONS.map((option) => {
-              const selected = filters.smoking_habit === option.value;
-              return (
-                <ChipToggle
-                  key={`smoke-${option.value}`}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('smoking_habit', selected ? '' : option.value, true)}
-                />
-              );
-            })}
-          </View>
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Marijuana</Typography>
-          <View style={styles.chipGrid}>
-            {USAGE_OPTIONS.map((option) => {
-              const selected = filters.marijuana === option.value;
-              return (
-                <ChipToggle
-                  key={`mj-${option.value}`}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('marijuana', selected ? '' : option.value, true)}
-                />
-              );
-            })}
-          </View>
-
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Drinking</Typography>
-          <View style={styles.chipGrid}>
-            {DRINKING_OPTIONS.map((option) => {
-              const selected = filters.drinker === option.value;
-              return (
-                <ChipToggle
-                  key={`drink-${option.value}`}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('drinker', selected ? '' : option.value, true)}
-                />
-              );
-            })}
+            {EDUCATION_OPTIONS.map((option) => (
+              <ChipToggle key={option.value} label={option.label} active={filters.education_level === option.value} disabled={!hasPaidPlan}
+                onPress={() => update('education_level', filters.education_level === option.value ? '' : option.value, true)} />
+            ))}
           </View>
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Politics</Typography>
           <View style={styles.chipGrid}>
-            {POLITICS_OPTIONS.map((option) => {
-              const selected = filters.politics === option.value;
-              return (
-                <ChipToggle
-                  key={`politics-${option.value}`}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('politics', selected ? '' : option.value, true)}
-                />
-              );
-            })}
+            {POLITICS_OPTIONS.map((option) => (
+              <ChipToggle key={option.value} label={option.label} active={filters.politics === option.value} disabled={!hasPaidPlan}
+                onPress={() => update('politics', filters.politics === option.value ? '' : option.value, true)} />
+            ))}
           </View>
 
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Education</Typography>
-          <View style={styles.chipGrid}>
-            {EDUCATION_OPTIONS.map((option) => {
-              const selected = filters.education_level === option.value;
-              return (
-                <ChipToggle
-                  key={`edu-${option.value}`}
-                  label={option.label}
-                  active={selected}
-                  disabled={!hasPaidPlan}
-                  onPress={() => update('education_level', selected ? '' : option.value, true)}
-                />
-              );
-            })}
-          </View>
+          {FACETS.map((facet) =>
+            vocab?.[facet.key]?.length
+              ? <React.Fragment key={facet.key}>{renderMulti(facet.title, facet.key, vocab[facet.key].map((label) => ({ value: label, label })), true)}</React.Fragment>
+              : null
+          )}
         </Section>
       </ScrollView>
 

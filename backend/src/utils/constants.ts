@@ -32,19 +32,20 @@ export const PREMIUM_BENEFITS = {
   search_shine: true,
 };
 
-// Free token allowance.
+// Free tokens.
 //
-// Tokens cannot be bought until in-app billing exists, so without this a user
-// spends their signup balance and is then permanently locked out of AI search,
-// superlikes, compliments and boost.
+// A new account starts with SIGNUP_TOKENS (the column default) and is then
+// granted WEEKLY_FREE_TOKENS once per interval. The grant is additive, per the
+// product board ("5 free tokens each week"), replacing an earlier top-up-to-a-
+// floor design. At five a week the stockpiling that design guarded against is
+// not worth guarding against, and this is what was asked for.
 //
-// This is a top-up to a floor, not an addition: a user already at or above the
-// floor receives nothing, so tokens cannot be stockpiled day over day. It also
-// serves as the per-user ceiling on our OpenAI spend, since AI search is the
-// main token sink and every search is a real model call.
-export const FREE_TOKEN_ALLOWANCE = Number(process.env.FREE_TOKEN_ALLOWANCE || 30);
+// Every AI search is a real model call, so the weekly grant is also the per-user
+// ceiling on OpenAI spend for anyone who does not buy tokens.
+export const SIGNUP_TOKENS = 19;
+export const WEEKLY_FREE_TOKENS = Number(process.env.FREE_TOKEN_ALLOWANCE || 5);
 export const TOKEN_ALLOWANCE_INTERVAL_HOURS = Number(
-  process.env.TOKEN_ALLOWANCE_INTERVAL_HOURS || 24
+  process.env.TOKEN_ALLOWANCE_INTERVAL_HOURS || 24 * 7
 );
 
 export const TOKEN_COSTS = {

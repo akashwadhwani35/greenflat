@@ -36,21 +36,21 @@ export interface UserProfile {
   prompt2?: string;
   prompt3?: string;
   smoker?: boolean;
-  smoking_habit?: string;
-  marijuana?: string;
-  drugs?: string;
-  drinker?: string;
+  smoking_habit?: string | string[];
+  marijuana?: string | string[];
+  drugs?: string | string[];
+  drinker?: string | string[];
   diet?: string;
   fitness_level?: string;
   education?: string;
   education_level?: string;
   occupation?: string;
   hometown?: string;
-  relationship_goal?: string;
-  have_kids?: string;
+  relationship_goal?: string | string[];
+  have_kids?: string | string[];
   star_sign?: string;
   politics?: string;
-  religion?: string;
+  religion?: string | string[];
   family_oriented?: boolean;
   spiritual?: boolean;
   open_minded?: boolean;
@@ -149,7 +149,13 @@ export interface SearchFilters {
   drugs?: string;
   marijuana?: string;
   relationship_goal?: string;
-  dating_intentions?: string;
+  dating_intentions?: string | string[];
+  // Trait facets, derived from the quiz. Any-of within a facet.
+  personality_traits?: string[];
+  communication_style?: string[];
+  relationship_needs?: string[];
+  conflict_style?: string[];
+  lifestyle?: string[];
   keywords?: string;
 }
 

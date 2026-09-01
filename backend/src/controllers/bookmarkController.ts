@@ -59,8 +59,9 @@ export const createBookmark = async (req: AuthRequest, res: Response) => {
     // A block in either direction hides the profile, so it must not be saveable.
     const blocked = await pool.query(
       `SELECT 1 FROM blocks
-       WHERE (blocker_id = $1 AND blocked_id = $2)
-          OR (blocker_id = $2 AND blocked_id = $1)`,
+       WHERE ((blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1))
+         AND unblocked_at IS NULL`,
       [userId, targetUserId]
     );
     if (blocked.rows.length > 0) {
@@ -111,6 +112,7 @@ export const getBookmarks = async (req: AuthRequest, res: Response) => {
        LEFT JOIN blocks blocked_rel
          ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
           OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
+          AND blocked_rel.unblocked_at IS NULL
        WHERE b.user_id = $1
          AND u.is_banned = FALSE
          AND u.onboarding_completed_at IS NOT NULL

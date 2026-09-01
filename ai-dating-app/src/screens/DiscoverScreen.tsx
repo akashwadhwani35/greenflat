@@ -110,6 +110,11 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   const [offGridHistory, setOffGridHistory] = useState<MatchCandidate[][]>([]);
   const [isPremium, setIsPremium] = useState(false);
 
+  // What is on the Explore tab right now. Switching to AI Match and back used
+  // to refetch, which excluded everything already seen, so the tab showed
+  // fewer tiles each time until it showed none.
+  const offGridCacheRef = useRef<MatchCandidate[]>([]);
+
   const fetchNewOffGridProfiles = useCallback(async () => {
     setLoading(true);
     setRefreshing(true);
@@ -135,8 +140,14 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           setOffGridHistory((prev) => [...prev.slice(-9), matches]);
         }
         setMatches(newProfiles);
-        // Track the new profile IDs
-        setViewedProfileIds(prev => [...prev, ...newProfiles.map((m: MatchCandidate) => m.id)]);
+        offGridCacheRef.current = newProfiles;
+        if (newProfiles.length < 4) {
+          // The pool of unseen people is used up. Start over next time rather
+          // than shrinking to an empty grid; Rewind still has the history.
+          setViewedProfileIds(newProfiles.map((m: MatchCandidate) => m.id));
+        } else {
+          setViewedProfileIds((prev) => [...prev, ...newProfiles.map((m: MatchCandidate) => m.id)]);
+        }
       }
     } catch (error) {
       console.error('Failed to fetch new off-grid profiles:', error);
@@ -150,30 +161,38 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     const parsed: Record<string, any> = {};
     if (!filters) return parsed;
 
-    const minAge = filters.minAge ? Number(filters.minAge) : null;
-    const maxAge = filters.maxAge ? Number(filters.maxAge) : null;
-    const minHeight = filters.minHeight ? Number(filters.minHeight) : null;
-    const maxHeight = filters.maxHeight ? Number(filters.maxHeight) : null;
-    const distance_km = filters.distance_km ? Number(filters.distance_km) : null;
+    const num = (value?: string) => {
+      const n = value ? Number(value) : NaN;
+      return Number.isFinite(n) ? n : null;
+    };
+    // A free filter is one value or a list; either goes through as-is.
+    const passValue = (key: keyof AdvancedFilters) => {
+      const v = (filters as any)[key];
+      if (Array.isArray(v)) {
+        if (v.length > 0) parsed[key] = v;
+      } else if (typeof v === 'string' && v.trim()) {
+        parsed[key] = v.trim();
+      }
+    };
 
-    if (Number.isFinite(minAge)) parsed.minAge = minAge;
-    if (Number.isFinite(maxAge)) parsed.maxAge = maxAge;
-    if (Number.isFinite(minHeight)) parsed.minHeight = minHeight;
-    if (Number.isFinite(maxHeight)) parsed.maxHeight = maxHeight;
-    if (filters.interested_in && filters.interested_in.trim()) parsed.interested_in = filters.interested_in.trim();
-    if (filters.city && filters.city.trim()) parsed.city = filters.city.trim();
-    if (filters.religion && filters.religion.trim()) parsed.religion = filters.religion.trim();
-    if (filters.relationship_goal && filters.relationship_goal.trim()) parsed.relationship_goal = filters.relationship_goal.trim();
-    if (filters.dating_intentions && filters.dating_intentions.trim()) parsed.dating_intentions = filters.dating_intentions.trim();
-    if (filters.have_kids && filters.have_kids.trim()) parsed.have_kids = filters.have_kids.trim();
-    if (filters.smoking_habit && filters.smoking_habit.trim()) parsed.smoking_habit = filters.smoking_habit.trim();
-    if (filters.drinker && filters.drinker.trim()) parsed.drinker = filters.drinker.trim();
-    if (filters.politics && filters.politics.trim()) parsed.politics = filters.politics.trim();
-    if (filters.education_level && filters.education_level.trim()) parsed.education_level = filters.education_level.trim();
-    if (filters.ethnicity && filters.ethnicity.trim()) parsed.ethnicity = filters.ethnicity.trim();
-    if (filters.drugs && filters.drugs.trim()) parsed.drugs = filters.drugs.trim();
-    if (filters.marijuana && filters.marijuana.trim()) parsed.marijuana = filters.marijuana.trim();
-    if (Number.isFinite(distance_km)) parsed.distance_km = distance_km;
+    const minAge = num(filters.minAge);
+    const maxAge = num(filters.maxAge);
+    const minHeight = num(filters.minHeight);
+    const maxHeight = num(filters.maxHeight);
+    const distance_km = num(filters.distance_km);
+    if (minAge !== null) parsed.minAge = minAge;
+    if (maxAge !== null) parsed.maxAge = maxAge;
+    if (minHeight !== null) parsed.minHeight = minHeight;
+    if (maxHeight !== null) parsed.maxHeight = maxHeight;
+    if (distance_km !== null) parsed.distance_km = distance_km;
+
+    for (const key of [
+      'interested_in', 'city', 'religion', 'relationship_goal', 'dating_intentions', 'have_kids',
+      'smoking_habit', 'drinker', 'politics', 'education_level', 'ethnicity', 'drugs', 'marijuana',
+      'personality_traits', 'communication_style', 'relationship_needs', 'conflict_style', 'lifestyle',
+    ] as const) {
+      passValue(key);
+    }
 
     return parsed;
   }, [filters]);
@@ -253,6 +272,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   useEffect(() => {
     if (activeTab === 'onGrid') {
       fetchOnGridMatches();
+    } else if (offGridCacheRef.current.length > 0) {
+      // Coming back to Explore shows what was there, not a fresh (smaller) set.
+      setMatches(offGridCacheRef.current);
     } else {
       fetchNewOffGridProfiles();
     }
@@ -351,7 +373,8 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     return (
       <Animated.View
         style={{
-          opacity: fadeAnim,
+          // Already liked, passed or messaged: still there, visibly dealt with.
+          opacity: likedIds?.has(match.id) ? Animated.multiply(fadeAnim, 0.45) : fadeAnim,
           transform: [{ scale: scaleAnim }],
         }}
       >
@@ -435,7 +458,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
       <View style={styles.headerTop}>
         {/* Logo */}
         <View style={styles.logoContainer}>
-          <PixelFlag size={28} color={theme.colors.neonGreen} />
+          <PixelFlag size={24} color={theme.colors.neonGreen} />
           <Typography variant="h1" style={styles.logoText}>
             GreenFlag
           </Typography>
@@ -601,7 +624,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 16,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 12,
   },
   logoContainer: {
     flexDirection: 'row',
@@ -610,7 +633,7 @@ const styles = StyleSheet.create({
   },
   logoText: {
     color: '#FFFFFF',
-    fontSize: 24,
+    fontSize: 22,
     fontFamily: 'RedHatDisplay_700Bold',
     letterSpacing: -0.5,
   },
@@ -623,9 +646,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
     borderRadius: 24,
+    height: 40,
     borderWidth: 1,
   },
   walletIcon: {
@@ -668,9 +692,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   filterButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -844,7 +868,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     paddingVertical: 16,
     borderRadius: 999,
-    marginBottom: Platform.OS === 'ios' ? 100 : 80,
+    // Centred in the gap between the last row of tiles and the bottom nav.
+    marginTop: 28,
+    marginBottom: Platform.OS === 'ios' ? 132 : 112,
   },
   loadingContainer: {
     flex: 1,

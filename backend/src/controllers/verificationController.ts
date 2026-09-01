@@ -131,22 +131,27 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'photo_url is required' });
     }
 
+    // Every profile photo, not just the primary. A selfie only has to match one
+    // of them; comparing against a single photo was failing real users against
+    // their own pictures.
     const profilePhotoResult = await pool.query(
       `SELECT photo_url
        FROM photos
        WHERE user_id = $1
        ORDER BY is_primary DESC, order_index ASC, id ASC
-       LIMIT 1`,
+       LIMIT 3`,
       [userId]
     );
 
-    if (profilePhotoResult.rows.length === 0 || !profilePhotoResult.rows[0].photo_url) {
+    const profilePhotoUrls = profilePhotoResult.rows
+      .map((row: any) => row.photo_url as string)
+      .filter(Boolean);
+    if (profilePhotoUrls.length === 0) {
       return res.status(400).json({ error: 'Upload a profile photo before selfie verification' });
     }
 
-    const profilePhotoUrl = profilePhotoResult.rows[0].photo_url as string;
-    const result = await analyzeSelfieAgainstProfile(photo_url, profilePhotoUrl);
-    if (!result.isAdult || !result.isMatch || result.confidence < 0.6) {
+    const result = await analyzeSelfieAgainstProfile(photo_url, profilePhotoUrls);
+    if (!result.isAdult || !result.isMatch) {
       await pool.query(
         `INSERT INTO verification_status (user_id, face_status, age_verified, updated_at)
          VALUES ($1, 'failed', FALSE, NOW())

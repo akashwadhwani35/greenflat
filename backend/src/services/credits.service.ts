@@ -1,5 +1,5 @@
 import pool from '../config/database';
-import { FREE_TOKEN_ALLOWANCE, TOKEN_ALLOWANCE_INTERVAL_HOURS } from '../utils/constants';
+import { WEEKLY_FREE_TOKENS, TOKEN_ALLOWANCE_INTERVAL_HOURS } from '../utils/constants';
 
 type Queryable = {
   query: (text: string, params?: any[]) => Promise<{ rows: any[] }>;
@@ -12,18 +12,15 @@ export type AllowanceResult = {
 };
 
 /**
- * Tops a user's balance up to the free allowance floor, at most once per
- * interval. Call this before reading a balance or spending tokens.
+ * Grants the weekly free tokens if they are due. Call this before reading a
+ * balance or spending tokens.
  *
- * Tops up TO the floor rather than adding to it, so a user who still has tokens
- * keeps them but cannot accumulate a stockpile across days. A user above the
- * floor (for example someone who bought a pack) is left alone entirely.
- *
- * The whole statement is a single conditional UPDATE so two concurrent requests
- * cannot both grant an allowance: the second matches zero rows.
+ * Additive: WEEKLY_FREE_TOKENS is added on top of whatever the user has, once
+ * per interval. The row is locked for the check-and-grant so two concurrent
+ * requests cannot both pay out.
  */
 export const ensureDailyAllowance = async (userId: number): Promise<AllowanceResult> => {
-  if (FREE_TOKEN_ALLOWANCE <= 0) {
+  if (WEEKLY_FREE_TOKENS <= 0) {
     const current = await pool.query('SELECT credit_balance FROM users WHERE id = $1', [userId]);
     return {
       credit_balance: Number(current.rows[0]?.credit_balance || 0),
@@ -36,9 +33,8 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
   try {
     await client.query('BEGIN');
 
-    // FOR UPDATE serialises concurrent requests so an allowance is granted once.
     const existing = await client.query(
-      'SELECT credit_balance, last_token_refill_at FROM users WHERE id = $1 FOR UPDATE',
+      'SELECT credit_balance, last_token_refill_at, created_at FROM users WHERE id = $1 FOR UPDATE',
       [userId]
     );
 
@@ -48,45 +44,39 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
     }
 
     const balance = Number(existing.rows[0].credit_balance || 0);
-    const lastRefillAt = existing.rows[0].last_token_refill_at;
+    // A brand new account's first weekly grant is a week after signup, not
+    // immediately: the signup tokens are the first week's allowance.
+    const lastRefillAt = existing.rows[0].last_token_refill_at || existing.rows[0].created_at;
 
     const intervalMs = TOKEN_ALLOWANCE_INTERVAL_HOURS * 60 * 60 * 1000;
-    const dueForRefill =
-      !lastRefillAt || Date.now() - new Date(lastRefillAt).getTime() >= intervalMs;
+    const dueForRefill = !lastRefillAt || Date.now() - new Date(lastRefillAt).getTime() >= intervalMs;
 
-    // Someone above the floor (for example after buying a pack) keeps their tokens.
-    if (!dueForRefill || balance >= FREE_TOKEN_ALLOWANCE) {
+    if (!dueForRefill) {
       await client.query('COMMIT');
-      return {
-        credit_balance: balance,
-        granted: 0,
-        next_refill_at: nextRefillAt(lastRefillAt),
-      };
+      return { credit_balance: balance, granted: 0, next_refill_at: nextRefillAt(lastRefillAt) };
     }
-
-    const granted = FREE_TOKEN_ALLOWANCE - balance;
 
     const updated = await client.query(
       `UPDATE users
-       SET credit_balance = $2::int,
+       SET credit_balance = credit_balance + $2::int,
            last_token_refill_at = NOW(),
            updated_at = NOW()
        WHERE id = $1
        RETURNING credit_balance, last_token_refill_at`,
-      [userId, FREE_TOKEN_ALLOWANCE]
+      [userId, WEEKLY_FREE_TOKENS]
     );
 
     await client.query(
       `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
-       VALUES ($1, $2, 'credit', 'daily_allowance', $3)`,
-      [userId, granted, JSON.stringify({ topped_up_to: FREE_TOKEN_ALLOWANCE, from: balance })]
+       VALUES ($1, $2, 'credit', 'weekly_allowance', $3)`,
+      [userId, WEEKLY_FREE_TOKENS, JSON.stringify({ from: balance })]
     );
 
     await client.query('COMMIT');
 
     return {
       credit_balance: Number(updated.rows[0].credit_balance),
-      granted,
+      granted: WEEKLY_FREE_TOKENS,
       next_refill_at: nextRefillAt(updated.rows[0].last_token_refill_at),
     };
   } catch (error) {

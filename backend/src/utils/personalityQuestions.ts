@@ -5,27 +5,50 @@
  * GET /api/personality/questions rather than shipping its own, so question text
  * and trait mappings cannot drift apart between client and server.
  *
- * Questions 1-8 are taken verbatim from the product spec ("Copy of AI DATING APP
- * - Answers"), including its per-option trait triples. Questions 9-12 were added
- * to reach the twelve the design calls for and follow the same construction: a
- * concrete situation, four plausible answers, no obviously "right" one.
+ * The ten questions are Adhiraj's, from the "Greenflag edits" board, verbatim.
+ * They replaced an earlier twelve. The board's Filters page defines the vocabulary
+ * the answers should produce — it says the personality filters "will be derived
+ * from the personality questions" and lists them — so every option here maps to
+ * one or two labels from exactly that list, in four categories:
  *
- * The A/B/C/D axis is consistent throughout and the matching engine leans on it:
- *   A → funny / playful / spontaneous
- *   B → caring / empathetic / warm
- *   C → logical / serious / measured
- *   D → responsible / independent / steady
+ *   personality        Very social · Social but selective · More private ·
+ *                      Adventurous · Curious / open-minded · Practical / grounded ·
+ *                      Ambitious / driven · Calm / easygoing
+ *   communication      Direct and clear · Thoughtful and careful ·
+ *                      Playful and light · Emotional and expressive
+ *   relationship_needs Independent · Balanced · Close and affectionate ·
+ *                      Takes things slowly · Deeply committed
+ *   conflict_style     Talks about it right away · Needs time to think ·
+ *                      Looks for a compromise · Focuses on understanding first ·
+ *                      Avoids conflict when possible
  *
- * Traits derived here land in personality_responses.personality_traits and feed
- * both the profile's personality snapshot and the match score's trait overlap.
+ * A fifth category on the board, lifestyle, is not something a quiz answer can
+ * tell you; it comes from interests instead (see lifestyleFromInterests).
+ *
+ * The mappings are a first pass and should be reviewed by whoever owns the
+ * questions. They are deliberately visible in one place for that reason.
+ *
+ * Derived labels land in personality_responses.personality_traits (flat, used
+ * for the profile snapshot, the green shared-answer highlight and the match
+ * score's trait overlap) and personality_responses.trait_profile (grouped by
+ * category, used by the paid filters).
  */
 
 export type QuizOptionKey = 'A' | 'B' | 'C' | 'D';
 
+export type TraitCategory =
+  | 'personality'
+  | 'communication'
+  | 'relationship_needs'
+  | 'conflict_style'
+  | 'lifestyle';
+
+export type Trait = { category: TraitCategory; label: string };
+
 export type QuizOption = {
   key: QuizOptionKey;
   label: string;
-  traits: string[];
+  traits: Trait[];
 };
 
 export type QuizQuestion = {
@@ -35,125 +58,112 @@ export type QuizQuestion = {
   options: QuizOption[];
 };
 
+// Short constructors keep the bank below readable.
+const P = (label: string): Trait => ({ category: 'personality', label });
+const C = (label: string): Trait => ({ category: 'communication', label });
+const R = (label: string): Trait => ({ category: 'relationship_needs', label });
+const X = (label: string): Trait => ({ category: 'conflict_style', label });
+const L = (label: string): Trait => ({ category: 'lifestyle', label });
+
 export const PERSONALITY_QUESTIONS: QuizQuestion[] = [
   {
     number: 1,
-    prompt: "When your partner has a rough day, what's your first instinct?",
+    prompt: 'You have a free day, nothing planned. What sounds best?',
     options: [
-      { key: 'A', label: 'Make them laugh with something silly', traits: ['Funny', 'Playful', 'Positive'] },
-      { key: 'B', label: 'Listen carefully and comfort them', traits: ['Caring', 'Empathetic', 'Emotionally aware'] },
-      { key: 'C', label: 'Give them space and check in later', traits: ['Logical', 'Respectful', 'Calm'] },
-      { key: 'D', label: 'Try to fix the problem right away', traits: ['Responsible', 'Serious', 'Supportive'] },
+      { key: 'A', label: 'Go somewhere new', traits: [P('Adventurous'), L('Travel-loving')] },
+      { key: 'B', label: 'Meet friends or family', traits: [P('Very social'), R('Close and affectionate')] },
+      { key: 'C', label: 'Work on something I care about', traits: [P('Ambitious / driven'), L('Creative')] },
+      { key: 'D', label: 'Stay home and recharge', traits: [P('More private'), L('Homebody')] },
     ],
   },
   {
     number: 2,
-    prompt: "You're planning a weekend date. What's your idea of fun?",
+    prompt: 'Big opportunity comes up — exciting, but it could fail. What do you do?',
     options: [
-      { key: 'A', label: 'A surprise road trip with no plan', traits: ['Adventurous', 'Spontaneous', 'Fun'] },
-      { key: 'B', label: 'A cozy dinner and movie night', traits: ['Romantic', 'Caring', 'Thoughtful'] },
-      { key: 'C', label: 'A stand-up show or something funny', traits: ['Funny', 'Outgoing', 'Social'] },
-      { key: 'D', label: 'Visiting a museum or learning something new', traits: ['Intellectual', 'Serious', 'Curious'] },
+      { key: 'A', label: 'Take it', traits: [P('Adventurous'), P('Ambitious / driven')] },
+      { key: 'B', label: 'Weigh the risks first', traits: [P('Practical / grounded'), C('Thoughtful and careful')] },
+      { key: 'C', label: 'Ask someone I trust', traits: [P('Social but selective'), R('Close and affectionate')] },
+      { key: 'D', label: 'Wait until I feel ready', traits: [P('Calm / easygoing'), R('Takes things slowly')] },
     ],
   },
   {
     number: 3,
-    prompt: 'How do you handle disagreements?',
+    prompt: "You're stuck on a hard problem with no clear answer. What's your first move?",
     options: [
-      { key: 'A', label: 'I use humor to cool things down', traits: ['Funny', 'Mature', 'Emotionally intelligent'] },
-      { key: 'B', label: 'I try to understand both sides calmly', traits: ['Empathetic', 'Mature', 'Peaceful'] },
-      { key: 'C', label: 'I stick to facts and logic', traits: ['Logical', 'Serious', 'Rational'] },
-      { key: 'D', label: 'I prefer to drop it and move on', traits: ['Chill', 'Easy-going', 'Non-confrontational'] },
+      { key: 'A', label: 'Look at the facts', traits: [P('Practical / grounded'), C('Direct and clear')] },
+      { key: 'B', label: 'Brainstorm different angles', traits: [P('Curious / open-minded'), L('Creative')] },
+      { key: 'C', label: 'Talk it through with someone', traits: [P('Very social'), C('Emotional and expressive')] },
+      { key: 'D', label: 'Trust my gut', traits: [P('Adventurous'), C('Direct and clear')] },
     ],
   },
   {
     number: 4,
-    prompt: 'Your partner forgets your birthday. You…',
+    prompt: "Your partner's had a rough day. What's your instinct?",
     options: [
-      { key: 'A', label: 'Joke about it but secretly tease them later', traits: ['Funny', 'Forgiving', 'Lighthearted'] },
-      { key: 'B', label: 'Feel hurt but want to talk about it', traits: ['Caring', 'Emotionally open', 'Honest'] },
-      { key: 'C', label: 'Say it’s fine but quietly take note', traits: ['Serious', 'Observant', 'Reserved'] },
-      { key: 'D', label: 'Laugh and plan your own celebration', traits: ['Independent', 'Confident', 'Chill'] },
+      { key: 'A', label: 'Try to lighten the mood', traits: [C('Playful and light')] },
+      { key: 'B', label: 'Just listen and comfort them', traits: [R('Close and affectionate'), C('Emotional and expressive')] },
+      { key: 'C', label: 'Give space, check in later', traits: [R('Independent'), X('Needs time to think')] },
+      { key: 'D', label: 'Try to help fix it', traits: [P('Practical / grounded'), X('Talks about it right away')] },
     ],
   },
   {
     number: 5,
-    prompt: "You're in a group chat with friends — how do you show up?",
+    prompt: "Your partner says something hurt them, but you didn't mean it that way. What do you do?",
     options: [
-      { key: 'A', label: "I'm the meme-sender", traits: ['Funny', 'Outgoing', 'Social'] },
-      { key: 'B', label: 'The emotional support one', traits: ['Caring', 'Empathetic', 'Reliable'] },
-      { key: 'C', label: 'The planner who organizes everything', traits: ['Responsible', 'Structured', 'Serious'] },
-      { key: 'D', label: 'I reply when needed — quality over quantity', traits: ['Calm', 'Introverted', 'Selective'] },
+      { key: 'A', label: 'Ask exactly what hurt them', traits: [X('Focuses on understanding first'), C('Thoughtful and careful')] },
+      { key: 'B', label: 'Explain what you actually meant', traits: [C('Direct and clear'), X('Talks about it right away')] },
+      { key: 'C', label: 'Apologize and adjust, no questions needed', traits: [R('Close and affectionate'), X('Looks for a compromise')] },
+      { key: 'D', label: 'Take a beat before responding', traits: [X('Needs time to think'), P('Calm / easygoing')] },
     ],
   },
   {
     number: 6,
-    prompt: "If someone you like cancels plans last minute, what's your reaction?",
+    prompt: 'Someone you trusted breaks that trust — but genuinely changes after. What happens next?',
     options: [
-      { key: 'A', label: 'Make a joke and reschedule', traits: ['Funny', 'Light-hearted', 'Positive'] },
-      { key: 'B', label: "Ask if they're okay", traits: ['Caring', 'Thoughtful', 'Loyal'] },
-      { key: 'C', label: 'Feel disappointed but keep it cool', traits: ['Serious', 'Grounded', 'Mature'] },
-      { key: 'D', label: 'Take it personally — effort matters', traits: ['Committed', 'Intense', 'Sensitive'] },
+      { key: 'A', label: 'I forgive and move forward fully', traits: [R('Balanced'), P('Calm / easygoing')] },
+      { key: 'B', label: 'I forgive, but need time to feel it', traits: [X('Needs time to think'), C('Thoughtful and careful')] },
+      { key: 'C', label: 'I forgive, but it stays in the back of my mind', traits: [P('Social but selective'), R('Takes things slowly')] },
+      { key: 'D', label: "Trust like that doesn't fully come back for me", traits: [R('Independent'), P('Practical / grounded')] },
     ],
   },
   {
     number: 7,
-    prompt: 'Your ideal compliment sounds like…',
+    prompt: "Your partner wants noticeably more alone time than you do. What's your read?",
     options: [
-      { key: 'A', label: '“You’re hilarious.”', traits: ['Funny', 'Charismatic', 'Witty'] },
-      { key: 'B', label: '“You’re so thoughtful.”', traits: ['Caring', 'Empathetic', 'Warm'] },
-      { key: 'C', label: '“You always stay calm.”', traits: ['Serious', 'Reliable', 'Mature'] },
-      { key: 'D', label: '“You make me feel safe.”', traits: ['Responsible', 'Supportive', 'Loyal'] },
+      { key: 'A', label: 'I respect it and give them room', traits: [R('Independent')] },
+      { key: 'B', label: 'I give room, but want reassurance too', traits: [R('Close and affectionate'), C('Emotional and expressive')] },
+      { key: 'C', label: 'I look for a middle ground', traits: [R('Balanced'), X('Looks for a compromise')] },
+      { key: 'D', label: "I start to wonder if something's wrong", traits: [R('Deeply committed'), C('Emotional and expressive')] },
     ],
   },
   {
     number: 8,
-    prompt: 'Which quote feels most like you?',
+    prompt: 'Six months in, what tells you "this is real"?',
     options: [
-      { key: 'A', label: '“Life’s too short to take too seriously.”', traits: ['Funny', 'Adventurous', 'Free-spirited'] },
-      { key: 'B', label: '“Kindness never goes out of style.”', traits: ['Caring', 'Compassionate', 'Selfless'] },
-      { key: 'C', label: '“Discipline equals freedom.”', traits: ['Serious', 'Structured', 'Focused'] },
-      { key: 'D', label: '“Go with the flow and see where it leads.”', traits: ['Chill', 'Adaptable', 'Laid-back'] },
+      { key: 'A', label: 'We still make each other laugh', traits: [C('Playful and light')] },
+      { key: 'B', label: 'I can tell them anything', traits: [C('Emotional and expressive'), R('Close and affectionate')] },
+      { key: 'C', label: 'I trust them fully', traits: [R('Deeply committed')] },
+      { key: 'D', label: 'We support each other and still have our own lives', traits: [R('Balanced'), R('Independent')] },
     ],
   },
   {
     number: 9,
-    prompt: "It's Sunday morning and neither of you has plans. What happens?",
+    prompt: "Someone gives you honest, unflattering feedback about yourself. What's your first reaction?",
     options: [
-      { key: 'A', label: 'I suggest something daft and we end up somewhere random', traits: ['Spontaneous', 'Playful', 'Fun'] },
-      { key: 'B', label: 'We stay in bed talking for an hour', traits: ['Romantic', 'Warm', 'Present'] },
-      { key: 'C', label: 'I get up, make coffee, and start on my list', traits: ['Structured', 'Focused', 'Independent'] },
-      { key: 'D', label: 'Whatever they feel like doing is fine by me', traits: ['Easy-going', 'Adaptable', 'Supportive'] },
+      { key: 'A', label: 'I get defensive, then think about it later', traits: [C('Emotional and expressive'), X('Needs time to think')] },
+      { key: 'B', label: 'I take it seriously right away', traits: [C('Direct and clear'), P('Ambitious / driven')] },
+      { key: 'C', label: 'I ask follow-up questions to understand it', traits: [P('Curious / open-minded'), X('Focuses on understanding first')] },
+      { key: 'D', label: 'I brush it off unless it comes from someone close', traits: [P('Social but selective'), R('Independent')] },
     ],
   },
   {
     number: 10,
-    prompt: 'You meet their closest friends for the first time. You…',
+    prompt: 'In a serious argument, what feels most natural to you?',
     options: [
-      { key: 'A', label: 'Crack a joke in the first minute', traits: ['Outgoing', 'Charismatic', 'Witty'] },
-      { key: 'B', label: 'Ask them questions and actually listen', traits: ['Empathetic', 'Curious', 'Warm'] },
-      { key: 'C', label: 'Hang back and read the room first', traits: ['Observant', 'Calm', 'Reserved'] },
-      { key: 'D', label: 'Offer to get the first round in', traits: ['Generous', 'Responsible', 'Social'] },
-    ],
-  },
-  {
-    number: 11,
-    prompt: 'Money is tight this month and they suggest an expensive dinner. You…',
-    options: [
-      { key: 'A', label: 'Counter with somewhere cheaper and funnier', traits: ['Playful', 'Resourceful', 'Honest'] },
-      { key: 'B', label: 'Say yes and quietly cover it', traits: ['Selfless', 'Giving', 'Private'] },
-      { key: 'C', label: "Tell them straight that it's not in the budget", traits: ['Rational', 'Direct', 'Grounded'] },
-      { key: 'D', label: 'Suggest cooking together at home instead', traits: ['Practical', 'Thoughtful', 'Domestic'] },
-    ],
-  },
-  {
-    number: 12,
-    prompt: "Six months in, what tells you it's working?",
-    options: [
-      { key: 'A', label: 'We still make each other laugh', traits: ['Playful', 'Light-hearted', 'Optimistic'] },
-      { key: 'B', label: 'I feel safe telling them anything', traits: ['Emotionally open', 'Trusting', 'Warm'] },
-      { key: 'C', label: 'Our plans line up without much effort', traits: ['Compatible', 'Structured', 'Realistic'] },
-      { key: 'D', label: 'We handle the boring days well', traits: ['Steady', 'Committed', 'Mature'] },
+      { key: 'A', label: 'Fix it as fast as possible', traits: [X('Talks about it right away'), X('Looks for a compromise')] },
+      { key: 'B', label: 'Make sure we truly understand each other', traits: [X('Focuses on understanding first'), C('Thoughtful and careful')] },
+      { key: 'C', label: 'Say exactly how I feel, no filtering', traits: [C('Direct and clear'), C('Emotional and expressive')] },
+      { key: 'D', label: 'Step back and return to it later', traits: [X('Needs time to think'), X('Avoids conflict when possible')] },
     ],
   },
 ];
@@ -194,27 +204,97 @@ export const normalizeAnswer = (value: unknown): QuizAnswer | null => {
 export const answerKeys = (answer: QuizAnswer | null): QuizOptionKey[] =>
   answer ? (answer.split('') as QuizOptionKey[]) : [];
 
-/**
- * Traits for a full answer sheet, deduplicated and in question order.
- *
- * `answers` is indexed by question number minus one; a null means unanswered and
- * contributes nothing. Unlike the old flat A/B/C/D map, the same letter means
- * different things on different questions, which is the point of asking twelve.
- */
-export const traitsForAnswers = (answers: Array<QuizAnswer | null>): string[] => {
-  const traits: string[] = [];
-
+const chosenTraits = (answers: Array<QuizAnswer | null>): Trait[] => {
+  const out: Trait[] = [];
   PERSONALITY_QUESTIONS.forEach((question, index) => {
     for (const key of answerKeys(answers[index])) {
       const option = question.options.find((o) => o.key === key);
-      if (option) traits.push(...option.traits);
+      if (option) out.push(...option.traits);
     }
   });
-
-  return [...new Set(traits)];
+  return out;
 };
 
-/** Compact "1A: Funny, Playful, Positive" lines, used to ground the AI prompt. */
+/**
+ * Flat, deduplicated labels for a full answer sheet, in question order. Labels
+ * are unique across categories, so the category is recoverable from the label.
+ */
+export const traitsForAnswers = (answers: Array<QuizAnswer | null>): string[] =>
+  [...new Set(chosenTraits(answers).map((t) => t.label))];
+
+export type TraitProfile = Record<TraitCategory, string[]>;
+
+const emptyProfile = (): TraitProfile => ({
+  personality: [],
+  communication: [],
+  relationship_needs: [],
+  conflict_style: [],
+  lifestyle: [],
+});
+
+/**
+ * The same labels grouped by category, which is the shape the paid filters
+ * read. Within a category, labels are ordered by how often the answers pointed
+ * at them, so the first entry is the strongest signal.
+ */
+export const traitProfileForAnswers = (
+  answers: Array<QuizAnswer | null>,
+  interests: string[] = []
+): TraitProfile => {
+  const profile = emptyProfile();
+  const counts = new Map<string, number>();
+
+  for (const trait of [...chosenTraits(answers), ...lifestyleFromInterests(interests)]) {
+    const id = `${trait.category} ${trait.label}`;
+    counts.set(id, (counts.get(id) || 0) + 1);
+  }
+
+  [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .forEach(([id]) => {
+      const [category, label] = id.split(' ') as [TraitCategory, string];
+      if (!profile[category].includes(label)) profile[category].push(label);
+    });
+
+  return profile;
+};
+
+/**
+ * Lifestyle is the one filter category on the board that a situational quiz
+ * cannot tell you, so it is read off the interests the person picked instead.
+ */
+const INTEREST_TO_LIFESTYLE: Record<string, string[]> = {
+  fitness: ['Fitness-focused', 'Active'],
+  sports: ['Active'],
+  running: ['Active', 'Fitness-focused'],
+  cycling: ['Active', 'Outdoorsy'],
+  yoga: ['Active'],
+  hiking: ['Outdoorsy', 'Active'],
+  travel: ['Travel-loving'],
+  cooking: ['Foodie'],
+  art: ['Creative'],
+  music: ['Creative'],
+  'live music': ['Creative', 'Night owl'],
+  photography: ['Creative'],
+  dancing: ['Creative', 'Night owl'],
+  theatre: ['Creative'],
+  reading: ['Homebody'],
+  movies: ['Homebody'],
+  gaming: ['Homebody', 'Night owl'],
+  'board games': ['Homebody'],
+  technology: ['Career-focused'],
+};
+
+export const lifestyleFromInterests = (interests: string[]): Trait[] => {
+  const out: Trait[] = [];
+  for (const raw of interests) {
+    const labels = INTEREST_TO_LIFESTYLE[String(raw).trim().toLowerCase()];
+    if (labels) out.push(...labels.map(L));
+  }
+  return out;
+};
+
+/** Compact per-question lines, used to ground the AI prompt. */
 export const describeAnswers = (answers: Array<QuizAnswer | null>): string =>
   PERSONALITY_QUESTIONS.map((question, index) => {
     const keys = answerKeys(answers[index]);
@@ -222,7 +302,7 @@ export const describeAnswers = (answers: Array<QuizAnswer | null>): string =>
     const parts = keys
       .map((key) => question.options.find((o) => o.key === key))
       .filter((o): o is QuizOption => Boolean(o))
-      .map((o) => `${o.key} (${o.label}) → ${o.traits.join(', ')}`);
+      .map((o) => `${o.key} (${o.label}) → ${o.traits.map((t) => t.label).join(', ')}`);
     if (parts.length === 0) return null;
     // Two answers read as "between these", which the model should treat as a blend.
     return `Q${question.number}: ${parts.join('  |  ')}`;
@@ -237,3 +317,12 @@ export const publicQuestions = () =>
     prompt: q.prompt,
     options: q.options.map((o) => ({ key: o.key, label: o.label })),
   }));
+
+/** The filter vocabulary, for the app to render paid-filter chips from. */
+export const TRAIT_VOCABULARY: TraitProfile = {
+  personality: ['Very social', 'Social but selective', 'More private', 'Adventurous', 'Curious / open-minded', 'Practical / grounded', 'Ambitious / driven', 'Calm / easygoing'],
+  communication: ['Direct and clear', 'Thoughtful and careful', 'Playful and light', 'Emotional and expressive'],
+  relationship_needs: ['Independent', 'Balanced', 'Close and affectionate', 'Takes things slowly', 'Deeply committed'],
+  conflict_style: ['Talks about it right away', 'Needs time to think', 'Looks for a compromise', 'Focuses on understanding first', 'Avoids conflict when possible'],
+  lifestyle: ['Active', 'Fitness-focused', 'Creative', 'Career-focused', 'Travel-loving', 'Homebody', 'Foodie', 'Outdoorsy', 'Night owl'],
+};

@@ -26,6 +26,9 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'audio/mp4': 'm4a',
   'audio/mpeg': 'mp3',
   'audio/aac': 'aac',
+  'audio/x-m4a': 'm4a',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
   'audio/webm': 'weba',
   // expo-av records voice notes with a video/* container on both platforms.
   'video/mp4': 'm4a',

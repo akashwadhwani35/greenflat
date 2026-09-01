@@ -7,6 +7,7 @@ import {
   PERSONALITY_QUESTIONS,
   normalizeAnswer,
   traitsForAnswers,
+  traitProfileForAnswers,
   describeAnswers,
   type QuizAnswer,
 } from '../utils/personalityQuestions';
@@ -161,6 +162,11 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
     // Traits are resolved per question, not from a flat letter map: on a
     // situational quiz the same letter means something different each time.
     const uniqueTraits = traitsForAnswers(answers);
+    // Grouped by facet for the paid filters. Lifestyle comes from interests.
+    const traitProfile = traitProfileForAnswers(
+      answers,
+      Array.isArray(interests) ? interests.map((i: unknown) => String(i)) : []
+    );
 
     const answerSummary = describeAnswers(answers);
     const aboutYouText = [bio, prompt1, prompt2, prompt3]
@@ -195,12 +201,13 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
     const summaryParam = `$${answers.length + 3}`;
     const tipsParam = `$${answers.length + 4}`;
     const topTraitsParam = `$${answers.length + 5}`;
+    const traitProfileParam = `$${answers.length + 6}`;
 
     await client.query(
       `INSERT INTO personality_responses (
         user_id, ${answerColumns.join(', ')}, personality_traits,
-        personality_summary, compatibility_tips, top_traits, updated_at
-      ) VALUES ($1, ${answerPlaceholders.join(', ')}, ${traitsParam}, ${summaryParam}, ${tipsParam}, ${topTraitsParam}, NOW())
+        personality_summary, compatibility_tips, top_traits, trait_profile, updated_at
+      ) VALUES ($1, ${answerPlaceholders.join(', ')}, ${traitsParam}, ${summaryParam}, ${tipsParam}, ${topTraitsParam}, ${traitProfileParam}, NOW())
       ON CONFLICT (user_id)
       DO UPDATE SET
         ${answerAssignments},
@@ -208,6 +215,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         personality_summary = ${summaryParam},
         compatibility_tips = ${tipsParam},
         top_traits = ${topTraitsParam},
+        trait_profile = ${traitProfileParam},
         updated_at = NOW()
       RETURNING *`,
       [
@@ -217,6 +225,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         aiPersonalityInsights.summary,
         aiPersonalityInsights.compatibility_tips,
         aiPersonalityInsights.top_traits,
+        JSON.stringify(traitProfile),
       ]
     );
 

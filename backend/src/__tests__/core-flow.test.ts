@@ -259,73 +259,45 @@ describe('GreenFlag backend core flow', () => {
       .get('/api/wallet/summary')
       .set('Authorization', `Bearer ${user.token}`);
     expect(walletResponse.status).toBe(200);
-    expect(walletResponse.body.credit_balance).toBe(50);
+    // New accounts start with 19 tokens.
+    expect(walletResponse.body.credit_balance).toBe(19);
   });
 
-  it('tops spent tokens back up to the free allowance once per interval', async () => {
+  it('grants the weekly free tokens on top of the balance, once per interval', async () => {
     const user = await signupAndCompleteProfile({
-      email: `allowance_${Date.now()}@example.com`,
-      name: 'Reeta',
+      email: `weekly_${Date.now()}@example.com`,
+      name: 'Weekly User',
     });
 
-    // Spend down to nothing, as an active user eventually would.
+    // Fresh account: the signup tokens are the first week's allowance, so no
+    // grant is due yet.
+    await pool.query('UPDATE users SET credit_balance = 7, last_token_refill_at = NULL WHERE id = $1', [
+      user.userId,
+    ]);
+    const early = await agent.get('/api/wallet/summary').set('Authorization', `Bearer ${user.token}`);
+    expect(early.body.credit_balance).toBe(7);
+
+    // A week later: +5, additive, whatever the balance was.
     await pool.query(
-      'UPDATE users SET credit_balance = 0, last_token_refill_at = NULL WHERE id = $1',
+      "UPDATE users SET last_token_refill_at = NOW() - INTERVAL '8 days' WHERE id = $1",
       [user.userId]
     );
+    const due = await agent.get('/api/wallet/summary').set('Authorization', `Bearer ${user.token}`);
+    expect(due.body.credit_balance).toBe(12);
 
-    const first = await agent
-      .get('/api/wallet/summary')
-      .set('Authorization', `Bearer ${user.token}`);
-    expect(first.status).toBe(200);
-    expect(first.body.credit_balance).toBe(30);
-    expect(first.body.free_allowance).toBe(30);
-    expect(first.body.next_refill_at).toBeTruthy();
-
-    // The grant is ledgered so the wallet history stays truthful.
-    const ledger = await pool.query(
-      `SELECT amount, direction FROM credit_transactions
-       WHERE user_id = $1 AND reason = 'daily_allowance'`,
-      [user.userId]
-    );
-    expect(ledger.rows).toHaveLength(1);
-    expect(Number(ledger.rows[0].amount)).toBe(30);
-    expect(ledger.rows[0].direction).toBe('credit');
-
-    // Spending then immediately re-reading must NOT hand out a second allowance.
-    await pool.query('UPDATE users SET credit_balance = 4 WHERE id = $1', [user.userId]);
-    const second = await agent
-      .get('/api/wallet/summary')
-      .set('Authorization', `Bearer ${user.token}`);
-    expect(second.body.credit_balance).toBe(4);
-
-    // Once the interval has elapsed, they are topped back up to the floor.
-    await pool.query(
-      "UPDATE users SET last_token_refill_at = NOW() - INTERVAL '25 hours' WHERE id = $1",
-      [user.userId]
-    );
-    const third = await agent
-      .get('/api/wallet/summary')
-      .set('Authorization', `Bearer ${user.token}`);
-    expect(third.body.credit_balance).toBe(30);
+    // Not again until another interval passes.
+    const again = await agent.get('/api/wallet/summary').set('Authorization', `Bearer ${user.token}`);
+    expect(again.body.credit_balance).toBe(12);
   });
 
-  it('does not reduce a balance that is already above the free allowance', async () => {
-    const user = await signupAndCompleteProfile({
-      email: `abovefloor_${Date.now()}@example.com`,
-      name: 'Ira',
+  it('starts a new account with 19 tokens', async () => {
+    const email = `nineteen_${Date.now()}@example.com`;
+    const signup = await agent.post('/api/auth/signup').send({
+      email, password: 'Passw0rd!', name: 'Nineteen', gender: 'female',
+      interested_in: 'male', date_of_birth: '1995-01-01', city: 'Delhi',
     });
-
-    // Someone who bought a pack sits above the floor and must keep every token.
-    await pool.query(
-      "UPDATE users SET credit_balance = 120, last_token_refill_at = NOW() - INTERVAL '25 hours' WHERE id = $1",
-      [user.userId]
-    );
-
-    const wallet = await agent
-      .get('/api/wallet/summary')
-      .set('Authorization', `Bearer ${user.token}`);
-    expect(wallet.body.credit_balance).toBe(120);
+    expect(signup.status).toBe(201);
+    expect(signup.body.user.credit_balance).toBe(19);
   });
 
   it('refuses subscriptions while payments are not configured', async () => {
@@ -381,7 +353,7 @@ describe('GreenFlag backend core flow', () => {
         .set('Authorization', `Bearer ${user.token}`)
         .send({ pack_id: '15', receipt: 'store-receipt-blob' });
       expect(purchase.status).toBe(200);
-      expect(purchase.body.wallet.credit_balance).toBe(65);
+      expect(purchase.body.wallet.credit_balance).toBe(34) /* 19 signup + 15 pack */;
 
       // Replaying the same receipt must not credit a second time.
       const replay = await agent
@@ -394,7 +366,7 @@ describe('GreenFlag backend core flow', () => {
       const wallet = await agent
         .get('/api/wallet/summary')
         .set('Authorization', `Bearer ${user.token}`);
-      expect(wallet.body.credit_balance).toBe(65);
+      expect(wallet.body.credit_balance).toBe(34) /* 19 signup + 15 pack */;
     } finally {
       delete process.env.PAYMENTS_ENABLED;
       resetReceiptValidator();
@@ -407,6 +379,10 @@ describe('GreenFlag backend core flow', () => {
       name: 'Boost Token User',
     });
 
+    // A fresh account starts with 19 tokens, one short of a boost. Give it a
+    // known balance so the assertion is about the charge, not the default.
+    await pool.query('UPDATE users SET credit_balance = 40 WHERE id = $1', [user.userId]);
+
     const boostResponse = await agent
       .post('/api/profile/boost')
       .set('Authorization', `Bearer ${user.token}`)
@@ -415,7 +391,7 @@ describe('GreenFlag backend core flow', () => {
     expect(boostResponse.status).toBe(200);
     expect(boostResponse.body.boost_active).toBe(true);
     expect(boostResponse.body.charged_tokens).toBe(20);
-    expect(boostResponse.body.credit_balance).toBe(30);
+    expect(boostResponse.body.credit_balance).toBe(20);
 
     const boostExpiresAt = new Date(boostResponse.body.boost_expires_at).getTime();
     const diffHours = (boostExpiresAt - Date.now()) / (1000 * 60 * 60);
@@ -1250,13 +1226,91 @@ describe('GreenFlag backend core flow', () => {
     expect(again.status).toBe(404);
   });
 
+
+  it('starts every privacy toggle off, including online status', async () => {
+    const user = await signupAndCompleteProfile({ email: `priv_${Date.now()}@example.com`, name: 'Priv' });
+    const settings = await agent.get('/api/privacy/settings').set('Authorization', `Bearer ${user.token}`);
+    expect(settings.status).toBe(200);
+    const s = settings.body.settings || settings.body;
+    expect(Boolean(s.hide_distance)).toBe(false);
+    expect(Boolean(s.hide_city)).toBe(false);
+    expect(Boolean(s.incognito_mode)).toBe(false);
+    expect(Boolean(s.show_online_status)).toBe(false);
+  });
+
+  it('never brings an unblocked profile back into AI Match, but search still can', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `ub_seeker_${Date.now()}@example.com`, name: 'Unblock Seeker', gender: 'male', interested_in: 'female',
+    });
+    const target = await signupAndCompleteProfile({
+      email: `ub_target_${Date.now()}@example.com`, name: 'Unblock Target', gender: 'female', interested_in: 'male',
+    });
+
+    const block = await agent.post('/api/privacy/block').set('Authorization', `Bearer ${seeker.token}`).send({ target_user_id: target.userId });
+    expect(block.status).toBe(200);
+    const unblock = await agent.post('/api/privacy/unblock').set('Authorization', `Bearer ${seeker.token}`).send({ target_user_id: target.userId });
+    expect(unblock.status).toBe(200);
+
+    // Gone from the blocked list...
+    const list = await agent.get('/api/privacy/blocked').set('Authorization', `Bearer ${seeker.token}`);
+    expect((list.body.blocked_users || []).map((b: any) => b.user_id)).not.toContain(target.userId);
+
+    // ...absent from AI Match (on-grid)...
+    const onGrid = await agent.post('/api/matches/search').set('Authorization', `Bearer ${seeker.token}`).send({ search_query: '', is_on_grid: true });
+    expect((onGrid.body.matches || []).map((m: any) => m.id)).not.toContain(target.userId);
+
+    // ...but findable when the user goes looking (off-grid / search).
+    const offGrid = await agent.post('/api/matches/search').set('Authorization', `Bearer ${seeker.token}`).send({ search_query: '', is_on_grid: false });
+    expect((offGrid.body.matches || []).map((m: any) => m.id)).toContain(target.userId);
+  });
+
+  it('keeps anything under 60% out of AI Match', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `sixty_${Date.now()}@example.com`, name: 'Sixty Seeker', gender: 'male', interested_in: 'female',
+    });
+    // A candidate with nothing in common: no shared interests, opposite answers.
+    await signupAndCompleteProfile(
+      { email: `sixty_t_${Date.now()}@example.com`, name: 'Low Match', gender: 'female', interested_in: 'male' },
+      {
+        interests: ['knitting', 'chess'],
+        question1_answer: 'D', question2_answer: 'D', question3_answer: 'D', question4_answer: 'D',
+        question5_answer: 'D', question6_answer: 'D', question7_answer: 'D', question8_answer: 'D',
+      }
+    );
+    const onGrid = await agent.post('/api/matches/search').set('Authorization', `Bearer ${seeker.token}`).send({ search_query: '', is_on_grid: true });
+    expect(onGrid.status).toBe(200);
+    for (const m of onGrid.body.matches || []) {
+      expect(m.match_percentage).toBeGreaterThanOrEqual(60);
+    }
+  });
+
+  it('filters by a trait facet, any-of within the facet, and gates it behind a plan', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `facet_${Date.now()}@example.com`, name: 'Facet Seeker', gender: 'male', interested_in: 'female',
+    });
+    const direct = await signupAndCompleteProfile(
+      { email: `facet_d_${Date.now()}@example.com`, name: 'Direct Person', gender: 'female', interested_in: 'male' },
+      { question3_answer: 'A', question10_answer: 'C' } // -> Direct and clear
+    );
+
+    const free = await agent.post('/api/matches/search').set('Authorization', `Bearer ${seeker.token}`)
+      .send({ search_query: '', is_on_grid: false, filters: { communication_style: ['Direct and clear'] } });
+    expect(free.status).toBe(402);
+
+    await pool.query('UPDATE users SET is_premium = TRUE, premium_expires_at = NULL WHERE id = $1', [seeker.userId]);
+    const paid = await agent.post('/api/matches/search').set('Authorization', `Bearer ${seeker.token}`)
+      .send({ search_query: '', is_on_grid: false, filters: { communication_style: ['Direct and clear'] } });
+    expect(paid.status).toBe(200);
+    expect((paid.body.matches || []).map((m: any) => m.id)).toContain(direct.userId);
+  });
+
   // --- Quiz, pronouns, and discovery eligibility ----------------------------
 
-  it('serves twelve situational questions with four options each', async () => {
+  it('serves the ten situational questions with four options each', async () => {
     const response = await agent.get('/api/personality/questions');
     expect(response.status).toBe(200);
-    expect(response.body.count).toBe(12);
-    expect(response.body.questions).toHaveLength(12);
+    expect(response.body.count).toBe(10);
+    expect(response.body.questions).toHaveLength(10);
 
     response.body.questions.forEach((question: any, index: number) => {
       expect(question.number).toBe(index + 1);
@@ -1268,30 +1322,31 @@ describe('GreenFlag backend core flow', () => {
     });
   });
 
-  it('stores all twelve answers and derives traits per question, not per letter', async () => {
+  it('stores all answers and derives traits per question, not per letter', async () => {
     const user = await signupAndCompleteProfile(
       { email: `quiz_${Date.now()}@example.com`, name: 'Quiz User' },
-      {
-        question9_answer: 'A',
-        question10_answer: 'B',
-        question11_answer: 'C',
-        question12_answer: 'D',
-      }
+      { question9_answer: 'A', question10_answer: 'B' }
     );
 
     const stored = await pool.query(
-      `SELECT question9_answer, question10_answer, question11_answer, question12_answer,
-              personality_traits
+      `SELECT question9_answer, question10_answer, personality_traits, trait_profile
        FROM personality_responses WHERE user_id = $1`,
       [user.userId]
     );
     expect(stored.rows[0].question9_answer).toBe('A');
-    expect(stored.rows[0].question12_answer).toBe('D');
+    expect(stored.rows[0].question10_answer).toBe('B');
 
     const traits: string[] = stored.rows[0].personality_traits;
-    // Q1=A is "Make them laugh" -> Playful; Q12=D is "We handle the boring days
-    // well" -> Steady. A flat A/B/C/D map could not produce both.
-    expect(traits).toEqual(expect.arrayContaining(['Playful', 'Steady']));
+    // Q1=A "Go somewhere new" -> Adventurous; Q10=B "truly understand each
+    // other" -> Focuses on understanding first. Same letters, different facets.
+    expect(traits).toEqual(expect.arrayContaining(['Adventurous', 'Focuses on understanding first']));
+
+    // And the grouped profile the paid filters read.
+    const profile = stored.rows[0].trait_profile;
+    expect(profile.personality).toContain('Adventurous');
+    expect(profile.conflict_style).toContain('Focuses on understanding first');
+    // Lifestyle comes from interests (the fixture picks travel / music / fitness).
+    expect(profile.lifestyle).toEqual(expect.arrayContaining(['Travel-loving', 'Creative']));
     expect(new Set(traits).size).toBe(traits.length);
   });
 
@@ -1310,8 +1365,10 @@ describe('GreenFlag backend core flow', () => {
     expect(stored.rows[0].question1_answer).toBe('AC');
     expect(stored.rows[0].question2_answer).toBe('BD');
 
-    // Q1 A -> Playful, Q1 C -> Calm: both present means both options counted.
-    expect(stored.rows[0].personality_traits).toEqual(expect.arrayContaining(['Playful', 'Calm']));
+    // Q1 A -> Adventurous, Q1 C -> Ambitious / driven: both options counted.
+    expect(stored.rows[0].personality_traits).toEqual(
+      expect.arrayContaining(['Adventurous', 'Ambitious / driven'])
+    );
   });
 
   it('caps a question at two answers rather than storing three', async () => {

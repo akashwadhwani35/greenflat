@@ -6,6 +6,10 @@ import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
 import { consumeCredits, getCreditBalance, ensureDailyAllowance } from '../services/credits.service';
 
+// AI Match is the curated set. Anything the scorer puts under this is not a
+// recommendation worth making; it stays available to search and off-grid.
+const ON_GRID_MIN_MATCH = 60;
+
 const haversineDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
   const toRad = (value: number) => (value * Math.PI) / 180;
   const R = 6371; // Earth radius in km
@@ -259,19 +263,20 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       if (Array.isArray(value)) return value.length > 0;
       return value !== undefined && value !== null;
     };
+    // Free per the board: gender, age, distance, relationship intention,
+    // religion, children, smoking, drinking, marijuana, drugs. Everything else
+    // needs a plan. Dating intentions moved to free at the board's request.
     const paidFilterKeys: Array<keyof SearchFilters> = [
       'ethnicity',
       'minHeight',
       'maxHeight',
-      'dating_intentions',
-      'have_kids',
-      'drugs',
-      'smoker',
-      'smoking_habit',
-      'marijuana',
-      'drinker',
       'politics',
       'education_level',
+      'personality_traits',
+      'communication_style',
+      'relationship_needs',
+      'conflict_style',
+      'lifestyle',
     ];
     const activePaidFilters = paidFilterKeys.filter((key) => hasFilterValue((filters as any)[key]));
     if (!hasPaidPlan && activePaidFilters.length > 0) {
@@ -336,12 +341,21 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         LEFT JOIN user_privacy_settings privacy ON privacy.user_id = u.id
         LEFT JOIN photos primary_photo ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
         LEFT JOIN likes existing_like ON existing_like.liker_id = $1 AND existing_like.liked_id = u.id
-        LEFT JOIN blocks blocked_rel
-          ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
-           OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
         WHERE u.id != $1
           AND existing_like.id IS NULL
-          AND blocked_rel.id IS NULL
+          -- A live block in EITHER direction hides the profile everywhere.
+          -- Written as NOT IN over subqueries that only reference $1 (never the
+          -- outer row): a LEFT JOIN with a block each way let a lifted block's
+          -- row pass while the other was still active, and duplicated the
+          -- candidate; a correlated NOT EXISTS is not supported by the in-memory
+          -- test database. Both id columns are NOT NULL, so NOT IN is safe.
+          AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $1 AND unblocked_at IS NULL)
+          AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = $1 AND unblocked_at IS NULL)
+          -- AI Match additionally never brings back someone who was blocked and
+          -- later unblocked: lifting a block should not turn into a
+          -- recommendation. Search and off-grid still can, deliberately.
+          ${is_on_grid === false ? '' : `AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $1)
+          AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = $1)`}
           -- Accounts exist before profiles do (Google sign-in and the staged
           -- signup funnel both create the user first), and an un-onboarded one
           -- still carries placeholder name/city/date-of-birth. Never show those.
@@ -414,10 +428,20 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       // Note: City filtering is now optional - profiles from all cities will show if no city filter is specified
 
       // Apply smoking habit filter
-      if (f.smoking_habit && f.smoking_habit.trim().length > 0) {
-        baseQuery += ` AND LOWER(p.smoking_habit) = LOWER($${paramIndex})`;
-        queryParams.push(f.smoking_habit);
+
+      // Free filters accept one value or several. A list means any-of.
+      const anyOf = (column: string, value: unknown) => {
+        const list = (Array.isArray(value) ? value : [value])
+          .map((v) => String(v ?? '').trim().toLowerCase())
+          .filter(Boolean);
+        if (list.length === 0) return;
+        baseQuery += ` AND LOWER(${column}) = ANY($${paramIndex}::text[])`;
+        queryParams.push(list);
         paramIndex++;
+      };
+
+      if (f.smoking_habit && (Array.isArray(f.smoking_habit) || String(f.smoking_habit).trim().length > 0)) {
+        anyOf('p.smoking_habit', f.smoking_habit);
       } else if (f.smoker !== undefined) {
         // Backwards-compatible boolean smoker filter.
         baseQuery += ` AND p.smoker = $${paramIndex}`;
@@ -427,9 +451,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
       // Apply drinker filter
       if (f.drinker) {
-        baseQuery += ` AND LOWER(p.drinker) = LOWER($${paramIndex})`;
-        queryParams.push(f.drinker);
-        paramIndex++;
+        anyOf('p.drinker', f.drinker);
       }
 
       const relationshipGoalFilter = f.relationship_goal || f.dating_intentions;
@@ -443,16 +465,12 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
       // Apply religion filter
       if (f.religion) {
-        baseQuery += ` AND LOWER(p.religion) = LOWER($${paramIndex})`;
-        queryParams.push(f.religion);
-        paramIndex++;
+        anyOf('p.religion', f.religion);
       }
 
       // Apply children filter
       if (f.have_kids) {
-        baseQuery += ` AND LOWER(p.have_kids) = LOWER($${paramIndex})`;
-        queryParams.push(f.have_kids);
-        paramIndex++;
+        anyOf('p.have_kids', f.have_kids);
       }
 
       // Apply politics filter
@@ -478,16 +496,12 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
       // Apply drugs filter
       if (f.drugs) {
-        baseQuery += ` AND LOWER(p.drugs) = LOWER($${paramIndex})`;
-        queryParams.push(f.drugs);
-        paramIndex++;
+        anyOf('p.drugs', f.drugs);
       }
 
       // Apply marijuana filter
       if (f.marijuana) {
-        baseQuery += ` AND LOWER(p.marijuana) = LOWER($${paramIndex})`;
-        queryParams.push(f.marijuana);
-        paramIndex++;
+        anyOf('p.marijuana', f.marijuana);
       }
 
       // Check cooldown status - exclude users in cooldown
@@ -539,8 +553,32 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       return res.json({ ...emptyBody, on_grid_matches: [], off_grid_matches: [] });
     }
 
+    // Trait facets from the quiz, applied here rather than in SQL. The whole
+    // candidate set is already in memory for scoring, labels are unique across
+    // facets so the flat array is enough, and this keeps the query portable.
+    // Any-of within a facet; all chosen facets must be satisfied.
+    const facetKeys = ['personality_traits', 'communication_style', 'relationship_needs', 'conflict_style', 'lifestyle'] as const;
+    const wantedByFacet = facetKeys
+      .map((key) => {
+        const raw = (enhancedFilters as any)[key];
+        const list = (Array.isArray(raw) ? raw : raw ? [raw] : [])
+          .map((v: unknown) => String(v).trim().toLowerCase())
+          .filter(Boolean);
+        return list;
+      })
+      .filter((list) => list.length > 0);
+    const facetFiltered = wantedByFacet.length === 0
+      ? candidates
+      : candidates.filter((candidate: any) => {
+          const have = new Set(
+            (Array.isArray(candidate.personality_traits) ? candidate.personality_traits : [])
+              .map((t: unknown) => String(t).trim().toLowerCase())
+          );
+          return wantedByFacet.every((wanted) => wanted.some((label) => have.has(label)));
+        });
+
     // Calculate match percentages for all candidates
-    const scoredCandidates = candidates
+    const scoredCandidates = facetFiltered
       .map((candidate: any) => {
         let distance_km: number | null = null;
         if (hasUserLocation) {
@@ -609,7 +647,9 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     if (is_on_grid === true) {
       // Only return on-grid matches
       const requestedLimit = limit || onGridCount;
-      onGridMatches = scoredCandidates.slice(0, requestedLimit);
+      onGridMatches = scoredCandidates
+        .filter((c: any) => c.match_percentage >= ON_GRID_MIN_MATCH)
+        .slice(0, requestedLimit);
       offGridMatches = [];
     } else if (is_on_grid === false) {
       // Off-grid remains exploratory, but boosted profiles stay prioritized.
@@ -619,7 +659,9 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       onGridMatches = [];
     } else {
       // Return both types (default behavior)
-      onGridMatches = scoredCandidates.slice(0, onGridCount);
+      onGridMatches = scoredCandidates
+        .filter((c: any) => c.match_percentage >= ON_GRID_MIN_MATCH)
+        .slice(0, onGridCount);
       const offGridCandidates = scoredCandidates.slice(onGridCount);
       const prioritizedOffGrid = prioritizeBoostedCandidates(offGridCandidates);
       offGridMatches = prioritizedOffGrid.slice(0, offGridCount);
@@ -890,6 +932,7 @@ export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
        LEFT JOIN blocks blocked_rel
          ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
           OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
+         AND blocked_rel.unblocked_at IS NULL
        WHERE u.id IN (${idPlaceholders})
          AND u.is_banned = FALSE
          AND u.onboarding_completed_at IS NOT NULL
@@ -921,8 +964,9 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
 
     const blockResult = await pool.query(
       `SELECT 1 FROM blocks
-       WHERE (blocker_id = $1 AND blocked_id = $2)
-          OR (blocker_id = $2 AND blocked_id = $1)
+       WHERE ((blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1))
+         AND unblocked_at IS NULL
        LIMIT 1`,
       [userId, targetUserId]
     );

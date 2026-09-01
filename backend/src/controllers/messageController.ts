@@ -120,8 +120,9 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     const blockResult = await client.query(
       `SELECT 1
        FROM blocks
-       WHERE (blocker_id = $1 AND blocked_id = $2)
-          OR (blocker_id = $2 AND blocked_id = $1)
+       WHERE ((blocker_id = $1 AND blocked_id = $2)
+          OR (blocker_id = $2 AND blocked_id = $1))
+         AND unblocked_at IS NULL
        LIMIT 1`,
       [userId, recipientId]
     );
@@ -131,11 +132,23 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     }
 
     // Insert the message
+    // Replying to a message. The target must be in this same conversation, or
+    // the id is dropped rather than trusted.
+    const requestedReply = Number((req.body as any)?.reply_to_message_id);
+    let replyToMessageId: number | null = null;
+    if (Number.isInteger(requestedReply) && requestedReply > 0) {
+      const target = await client.query(
+        'SELECT id FROM messages WHERE id = $1 AND match_id = $2 AND is_deleted = FALSE',
+        [requestedReply, match_id]
+      );
+      replyToMessageId = target.rows.length > 0 ? requestedReply : null;
+    }
+
     const messageResult = await client.query(
-      `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type, reply_to_message_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING *`,
-      [match_id, userId, recipientId, normalizedContent, message_type]
+      [match_id, userId, recipientId, normalizedContent, message_type, replyToMessageId]
     );
 
     const message = messageResult.rows[0];
@@ -303,6 +316,7 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
        LEFT JOIN blocks blocked_rel
          ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = other_user.id)
           OR (blocked_rel.blocker_id = other_user.id AND blocked_rel.blocked_id = $1))
+           AND blocked_rel.unblocked_at IS NULL
        WHERE (m.user1_id = $1 OR m.user2_id = $1)
          AND blocked_rel.id IS NULL
        ORDER BY COALESCE(m.last_message_at, m.matched_at) DESC`,

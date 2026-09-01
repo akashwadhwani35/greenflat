@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { ensureDailyAllowance } from '../services/credits.service';
-import { FREE_TOKEN_ALLOWANCE } from '../utils/constants';
+import { WEEKLY_FREE_TOKENS } from '../utils/constants';
 import {
   isPaymentsEnabled,
   validateReceipt,
@@ -56,7 +56,7 @@ export const getWalletSummary = async (req: AuthRequest, res: Response) => {
       transactions: txResult.rows,
       payments_enabled: isPaymentsEnabled(),
       // Lets the client explain where tokens come from while packs are unavailable.
-      free_allowance: FREE_TOKEN_ALLOWANCE,
+      free_allowance: WEEKLY_FREE_TOKENS,
       next_refill_at: allowance.next_refill_at,
     });
   } catch (error) {

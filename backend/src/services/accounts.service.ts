@@ -71,7 +71,7 @@ export const initializeUserDefaults = async (client: any, userId: number) => {
 
   await client.query(
     `INSERT INTO user_privacy_settings (user_id, hide_distance, hide_city, incognito_mode, show_online_status)
-     VALUES ($1, FALSE, FALSE, FALSE, TRUE)
+     VALUES ($1, FALSE, FALSE, FALSE, FALSE)
      ON CONFLICT (user_id) DO NOTHING`,
     [userId]
   );

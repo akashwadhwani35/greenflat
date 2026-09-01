@@ -8,7 +8,7 @@
  * ours to know, not something to hand a client that could then game its answers.
  */
 import { Request, Response } from 'express';
-import { publicQuestions, QUESTION_COUNT, MAX_ANSWERS_PER_QUESTION } from '../utils/personalityQuestions';
+import { publicQuestions, QUESTION_COUNT, MAX_ANSWERS_PER_QUESTION, TRAIT_VOCABULARY } from '../utils/personalityQuestions';
 
 export const getPersonalityQuestions = (_req: Request, res: Response) => {
   res.json({
@@ -16,5 +16,8 @@ export const getPersonalityQuestions = (_req: Request, res: Response) => {
     // The app lets a person pick up to this many options per question.
     max_answers_per_question: MAX_ANSWERS_PER_QUESTION,
     questions: publicQuestions(),
+    // The labels the paid filters offer, grouped by facet. Same source as the
+    // quiz mappings, so the filter chips can never name a trait nobody has.
+    trait_vocabulary: TRAIT_VOCABULARY,
   });
 };

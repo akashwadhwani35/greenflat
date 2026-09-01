@@ -50,11 +50,14 @@ export const authenticate = async (
       ? new Date(result.rows[0].last_active).getTime()
       : 0;
     if (Date.now() - lastActive > ACTIVITY_TOUCH_INTERVAL_MS) {
-      // Deliberately not awaited: activity tracking must never add latency to,
-      // or fail, the request it is observing.
-      pool
-        .query('UPDATE users SET last_active = NOW() WHERE id = $1', [decoded.userId])
-        .catch((error: any) => console.warn('last_active update failed:', error?.message));
+      // Awaited, but never allowed to fail the request. It is a single indexed
+      // UPDATE at most once per five minutes per user; letting it run detached
+      // raced later transactions on the same row.
+      try {
+        await pool.query('UPDATE users SET last_active = NOW() WHERE id = $1', [decoded.userId]);
+      } catch (error: any) {
+        console.warn('last_active update failed:', error?.message);
+      }
     }
 
     next();
