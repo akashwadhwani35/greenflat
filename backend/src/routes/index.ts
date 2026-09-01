@@ -1,7 +1,7 @@
 import express from 'express';
 import { signup, login, googleAuth, forgotPassword, resetPassword } from '../controllers/authController';
 import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount, getBioSuggestions } from '../controllers/profileController';
-import { searchMatches, refreshOffGrid, getUserDetails, unmatch } from '../controllers/matchController';
+import { searchMatches, refreshOffGrid, rewindOffGrid, getUserDetails, unmatch } from '../controllers/matchController';
 import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment } from '../controllers/likeController';
 import { authenticate } from '../middleware/auth';
 import {
@@ -38,6 +38,7 @@ import {
   completeRegistration,
 } from '../controllers/registrationController';
 import { getPersonalityQuestions } from '../controllers/personalityController';
+import { createBookmark, getBookmarks, deleteBookmark } from '../controllers/bookmarkController';
 import adminRouter from './admin';
 import {
   loginLimiter,
@@ -97,6 +98,7 @@ router.delete('/profile/me', authenticate, deleteAccount);
 // Match routes (protected)
 router.post('/matches/search', authenticate, searchMatches);
 router.post('/matches/refresh-off-grid', authenticate, refreshOffGrid);
+router.post('/matches/rewind-off-grid', authenticate, rewindOffGrid);
 router.get('/matches/user/:targetUserId', authenticate, getUserDetails);
 router.post('/matches/:matchId/unmatch', authenticate, unmatch);
 
@@ -110,6 +112,11 @@ router.get('/wallet/summary', authenticate, getWalletSummary);
 router.post('/wallet/purchase', authenticate, purchasePlan);
 router.post('/wallet/subscribe', authenticate, subscribe);
 router.post('/report', authenticate, createReport);
+
+// Bookmarks. Saving a profile you cannot like yet because they are in cooldown.
+router.get('/bookmarks', authenticate, getBookmarks);
+router.post('/bookmarks', authenticate, createBookmark);
+router.delete('/bookmarks/:targetUserId', authenticate, deleteBookmark);
 
 // Privacy and safety routes
 router.get('/privacy/settings', authenticate, getPrivacySettings);

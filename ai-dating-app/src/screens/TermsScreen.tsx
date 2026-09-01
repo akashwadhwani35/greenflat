@@ -76,7 +76,7 @@ export const TermsScreen: React.FC<Props> = ({ onBack }) => {
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="bodyStrong">9. Contact</Typography>
           <Typography variant="small" muted>
-            Questions about these terms? Email us at support@greenflag.app.
+            Questions about these terms? Email us at support@gflag.app.
           </Typography>
         </View>
 
@@ -117,7 +117,7 @@ export const TermsScreen: React.FC<Props> = ({ onBack }) => {
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="bodyStrong">5. Your Rights</Typography>
           <Typography variant="small" muted>
-            You can access, correct, or delete your personal data at any time through the app's Settings. You may also request a copy of your data or ask us to restrict processing by contacting support@greenflag.app.
+            You can access, correct, or delete your personal data at any time through the app's Settings. You may also request a copy of your data or ask us to restrict processing by contacting support@gflag.app.
           </Typography>
         </View>
 
@@ -138,7 +138,7 @@ export const TermsScreen: React.FC<Props> = ({ onBack }) => {
         <View style={[styles.card, { borderColor: theme.colors.border }]}>
           <Typography variant="bodyStrong">8. Contact</Typography>
           <Typography variant="small" muted>
-            Privacy questions? Email us at support@greenflag.app.
+            Privacy questions? Email us at support@gflag.app.
           </Typography>
         </View>
       </ScrollView>

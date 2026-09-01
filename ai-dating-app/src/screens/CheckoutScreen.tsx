@@ -27,6 +27,34 @@ export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onP
   const theme = useTheme();
   const [selectedPackId, setSelectedPackId] = useState<string>(packs[0].id);
   const [loading, setLoading] = useState(false);
+
+  /**
+   * Whether anything can actually be bought right now.
+   *
+   * Purchases are closed until a store receipt validator is registered, and the
+   * server answers 501 to every attempt. This screen is reachable from Settings,
+   * Profile, Wallet and the out-of-tokens prompt, so the check lives here rather
+   * than at each of those call sites.
+   */
+  const [paymentsEnabled, setPaymentsEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/wallet/summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!cancelled) setPaymentsEnabled(Boolean(data?.payments_enabled));
+      } catch {
+        if (!cancelled) setPaymentsEnabled(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, token]);
   const [balance, setBalance] = useState(0);
   const [fetching, setFetching] = useState(true);
   const [showTokenInfo, setShowTokenInfo] = useState(false);
@@ -206,16 +234,20 @@ export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onP
             styles.ctaButton,
             { backgroundColor: theme.colors.neonGreen },
             pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
-            loading && { opacity: 0.6 },
+            (loading || paymentsEnabled !== true) && { opacity: 0.6 },
           ]}
-          onPress={applyPurchase}
-          disabled={loading}
+          onPress={paymentsEnabled ? applyPurchase : undefined}
+          disabled={loading || paymentsEnabled !== true}
         >
           {loading ? (
             <ActivityIndicator color="#000" />
           ) : (
             <Typography variant="h2" style={{ color: '#000', fontFamily: 'RedHatDisplay_700Bold' }}>
-              Get {selectedPack.amount} GFT for {selectedPack.price}
+              {paymentsEnabled === true
+                ? `Get ${selectedPack.amount} GFT for ${selectedPack.price}`
+                : paymentsEnabled === null
+                  ? 'Checking...'
+                  : 'Not on sale yet'}
             </Typography>
           )}
         </Pressable>

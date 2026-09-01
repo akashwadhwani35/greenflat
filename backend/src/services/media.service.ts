@@ -52,15 +52,22 @@ export const isLocalUploadConfigured = () => {
   return config.localMediaEnabled;
 };
 
-export const getMediaUploadCapabilities = () => {
+export const getMediaUploadCapabilities = (gcsConfigured = false) => {
   const config = getMediaConfig();
   const cloudinaryConfigured = Boolean(
     config.cloudinaryCloudName &&
     config.cloudinaryApiKey &&
     config.cloudinaryApiSecret
   );
+  // GCS first. It is the only durable option in production: Cloud Run's disk is
+  // wiped on every deploy and restart, so the 'local' provider silently loses
+  // every photo anyone sends in a chat.
   return {
-    upload_provider: cloudinaryConfigured ? 'cloudinary' : (config.localMediaEnabled ? 'local' : 'none'),
+    upload_provider: gcsConfigured
+      ? 'gcs'
+      : cloudinaryConfigured
+        ? 'cloudinary'
+        : (config.localMediaEnabled ? 'local' : 'none'),
     cloud_name: cloudinaryConfigured ? config.cloudinaryCloudName : null,
     allowed_media_hosts: config.allowedMediaHosts,
     max_text_message_length: config.maxTextMessageLength,

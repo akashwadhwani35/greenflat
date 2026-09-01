@@ -89,14 +89,19 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
 
     const targetUser = targetUserResult.rows[0];
     if (targetUser.cooldown_until && new Date(targetUser.cooldown_until) > new Date()) {
-      if (!user.is_premium) {
-        await client.query('ROLLBACK');
-        return res.status(400).json({
-          error: 'This user is currently in cooldown',
-          can_bookmark: true,
-        });
-      }
-      // Premium users can bookmark
+      // Cooldown blocks likes from EVERYONE, paid or not.
+      //
+      // This previously let premium through and told only free users to
+      // bookmark, which inverted the mechanic: cooldown exists to stop someone
+      // who has hit their limit from being flooded, and a paid bypass is exactly
+      // the "buying reach at another user's expense" the spec rules out. Paying
+      // gets you a bookmark, so you are first in line when they return.
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        error: 'This user is currently in cooldown',
+        can_bookmark: true,
+        available_at: new Date(targetUser.cooldown_until).toISOString(),
+      });
     }
 
     const blockResult = await client.query(

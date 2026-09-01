@@ -21,9 +21,16 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
   'image/heic': 'heic',
+  'image/heif': 'heic',
   'audio/m4a': 'm4a',
   'audio/mp4': 'm4a',
   'audio/mpeg': 'mp3',
+  'audio/aac': 'aac',
+  'audio/webm': 'weba',
+  // expo-av records voice notes with a video/* container on both platforms.
+  'video/mp4': 'm4a',
+  'video/quicktime': 'mov',
+  'video/webm': 'webm',
 };
 
 const MAX_UPLOAD_BYTES = Number(process.env.MEDIA_MAX_UPLOAD_BYTES || 8 * 1024 * 1024);

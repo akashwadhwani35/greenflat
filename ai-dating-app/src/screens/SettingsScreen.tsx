@@ -18,6 +18,7 @@ type Props = {
   onOpenNotifications?: () => void;
   onOpenProfile?: () => void;
   onOpenLikesInbox?: () => void;
+  onOpenBookmarks?: () => void;
   onOpenMatches?: () => void;
   onOpenConversations?: () => void;
   onOpenAISearch?: () => void;
@@ -43,6 +44,7 @@ export const SettingsScreen: React.FC<Props> = ({
   onOpenNotifications,
   onOpenProfile,
   onOpenLikesInbox,
+  onOpenBookmarks,
   onOpenMatches,
   onOpenConversations,
   onOpenAISearch,
@@ -107,6 +109,7 @@ export const SettingsScreen: React.FC<Props> = ({
     { title: 'Privacy & safety', subtitle: 'Visibility, block/report, incognito', icon: 'eye', action: onOpenPrivacy },
     { title: 'Notifications', subtitle: 'Manage pushes and device settings', icon: 'bell', action: onOpenNotifications },
     { title: 'Support', subtitle: 'Send us your issue or feedback', icon: 'help-circle', action: onOpenHelp },
+    { title: 'Saved', subtitle: 'Profiles you saved to like later', icon: 'bookmark', action: onOpenBookmarks },
     { title: 'Tokens', subtitle: 'Buy tokens, boost your profile', icon: 'credit-card', action: onOpenCheckout },
   ];
 

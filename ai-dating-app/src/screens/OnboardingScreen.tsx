@@ -76,6 +76,15 @@ const interestedInOptions = ['Men', 'Women', 'Everyone'];
 const genderOptions = ['Woman', 'Man', 'Non-binary'];
 const pronounOptions = ['she/her', 'he/him', 'they/them', 'ze/zir', 'xe/xim', 'ey/em'];
 const drugsOptions = ['Never', 'Sometimes', 'Regularly'];
+// Board step 3 is "Location + distance". Values are km; the widest is a
+// practical stand-in for "anywhere" without needing a separate flag.
+const distanceOptions = [
+  { label: '10 km', value: 10 },
+  { label: '25 km', value: 25 },
+  { label: '50 km', value: 50 },
+  { label: '100 km', value: 100 },
+  { label: 'Anywhere', value: 20000 },
+];
 const interestOptions = ['Travel', 'Fitness', 'Music', 'Art', 'Cooking', 'Gaming', 'Reading', 'Sports', 'Movies', 'Technology', 'Photography', 'Dancing'];
 
 /**
@@ -122,6 +131,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     lat: null as number | null,
     lng: null as number | null,
     useCurrentCity: false,
+    distanceRadius: 50,
 
     // Physical
     height: '',
@@ -282,6 +292,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       interested_in: form.interestedIn,
       date_of_birth: form.dateOfBirth,
       city: form.city || 'Unknown',
+      distance_radius: form.distanceRadius,
       pronouns: form.pronouns,
 
       height: form.height || null,
@@ -848,6 +859,27 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                   </TouchableOpacity>
                 </>
               )}
+            </View>
+
+            <View style={[styles.card, { backgroundColor: '#101D13', marginTop: 16 }]}>
+              <Typography variant="small" style={{ color: theme.colors.muted }}>
+                How far are you willing to travel?
+              </Typography>
+              {renderChipRow(
+                distanceOptions.map((option) => option.label),
+                [
+                  (distanceOptions.find((option) => option.value === form.distanceRadius) ||
+                    distanceOptions[2]).label,
+                ],
+                (label) => {
+                  const picked = distanceOptions.find((option) => option.label === label);
+                  if (picked) setForm((prev) => ({ ...prev, distanceRadius: picked.value }));
+                },
+                false
+              )}
+              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 8 }}>
+                You can change this later in search filters.
+              </Typography>
             </View>
           </View>
         );

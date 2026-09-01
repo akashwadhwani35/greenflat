@@ -1040,6 +1040,216 @@ describe('GreenFlag backend core flow', () => {
     }
   });
 
+
+  it('resets a password by emailing the code, with no phone on the account', async () => {
+    const email = `reset_${Date.now()}@example.com`;
+    const user = await signupAndCompleteProfile({ email, name: 'Reset User' });
+    expect(user.token).toBeTruthy();
+
+    // No verified phone anywhere on this account. Password reset used to be
+    // phone-only, which meant it returned 503 to everyone whenever SMS was
+    // unconfigured, and worked for nobody who had skipped phone verification.
+    const request = await agent.post('/api/auth/forgot-password').send({ email });
+    expect(request.status).toBe(200);
+    expect(request.body.channel).toBe('email');
+
+    const code = await readOtpCode('email', email);
+
+    const reset = await agent
+      .post('/api/auth/reset-password')
+      .send({ email, code, new_password: 'BrandNew1!' });
+    expect(reset.status).toBe(200);
+
+    // Old password is dead, new one works.
+    const oldLogin = await agent.post('/api/auth/login').send({ email, password: 'Passw0rd!' });
+    expect(oldLogin.status).toBe(401);
+
+    const newLogin = await agent.post('/api/auth/login').send({ email, password: 'BrandNew1!' });
+    expect(newLogin.status).toBe(200);
+  });
+
+  it('does not reveal whether an address has an account', async () => {
+    const response = await agent
+      .post('/api/auth/forgot-password')
+      .send({ email: `nobody_${Date.now()}@example.com` });
+    expect(response.status).toBe(200);
+    expect(response.body.message).toMatch(/if that email is registered/i);
+  });
+
+
+  // --- Bookmarks and rewind -------------------------------------------------
+
+  const setPremium = async (userId: number, premium: boolean) => {
+    await pool.query(
+      'UPDATE users SET is_premium = $2, premium_expires_at = NULL WHERE id = $1',
+      [userId, premium]
+    );
+  };
+
+  const putInCooldown = async (userId: number) => {
+    await pool.query(
+      "UPDATE users SET cooldown_until = NOW() + INTERVAL '5 hours' WHERE id = $1",
+      [userId]
+    );
+  };
+
+  it('blocks likes during cooldown for paying users too, and offers a bookmark', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `cool_seeker_${Date.now()}@example.com`,
+      name: 'Cooldown Seeker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const target = await signupAndCompleteProfile({
+      email: `cool_target_${Date.now()}@example.com`,
+      name: 'Cooldown Target',
+      gender: 'female',
+      interested_in: 'male',
+    });
+
+    // Paying used to buy a way THROUGH someone's cooldown, which inverted the
+    // mechanic: cooldown exists to stop a person who hit their limit being
+    // flooded, so it has to hold against paid accounts as well.
+    await setPremium(seeker.userId, true);
+    await putInCooldown(target.userId);
+
+    const like = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${seeker.token}`)
+      .send({ target_user_id: target.userId, is_on_grid: true });
+
+    expect(like.status).toBe(400);
+    expect(like.body.error).toMatch(/cooldown/i);
+    expect(like.body.can_bookmark).toBe(true);
+  });
+
+  it('saves a bookmark and reports when it becomes actionable', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `bm_seeker_${Date.now()}@example.com`,
+      name: 'BM Seeker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const target = await signupAndCompleteProfile({
+      email: `bm_target_${Date.now()}@example.com`,
+      name: 'BM Target',
+      gender: 'female',
+      interested_in: 'male',
+    });
+
+    await setPremium(seeker.userId, true);
+    await putInCooldown(target.userId);
+
+    const saved = await agent
+      .post('/api/bookmarks')
+      .set('Authorization', `Bearer ${seeker.token}`)
+      .send({ target_user_id: target.userId });
+    expect(saved.status).toBe(201);
+
+    const whileCooling = await agent
+      .get('/api/bookmarks')
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(whileCooling.status).toBe(200);
+    expect(whileCooling.body.bookmarks).toHaveLength(1);
+    expect(whileCooling.body.bookmarks[0].in_cooldown).toBe(true);
+    expect(whileCooling.body.bookmarks[0].is_available).toBe(false);
+    expect(whileCooling.body.available_count).toBe(0);
+
+    // Cooldown lapses: the bookmark becomes something you can act on.
+    await pool.query('UPDATE users SET cooldown_until = NULL WHERE id = $1', [target.userId]);
+
+    const afterCooling = await agent
+      .get('/api/bookmarks')
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(afterCooling.body.bookmarks[0].is_available).toBe(true);
+    expect(afterCooling.body.available_count).toBe(1);
+
+    const removed = await agent
+      .delete(`/api/bookmarks/${target.userId}`)
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(removed.status).toBe(200);
+
+    const empty = await agent
+      .get('/api/bookmarks')
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(empty.body.bookmarks).toHaveLength(0);
+  });
+
+  it('refuses bookmarks to accounts that are not paying', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `bm_free_${Date.now()}@example.com`,
+      name: 'Free Seeker',
+    });
+    const target = await signupAndCompleteProfile({
+      email: `bm_free_target_${Date.now()}@example.com`,
+      name: 'Free Target',
+    });
+
+    const saved = await agent
+      .post('/api/bookmarks')
+      .set('Authorization', `Bearer ${seeker.token}`)
+      .send({ target_user_id: target.userId });
+    expect(saved.status).toBe(403);
+    expect(saved.body.upgrade_required).toBe(true);
+  });
+
+  it('rewinds to the previous off-grid set, and only for paying users', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `rw_${Date.now()}@example.com`,
+      name: 'Rewind User',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    // Two sets recorded: what is on screen now, and the one before it.
+    await pool.query('INSERT INTO off_grid_history (user_id, candidate_ids) VALUES ($1, $2)', [
+      seeker.userId,
+      JSON.stringify([1, 2]),
+    ]);
+    await pool.query('INSERT INTO off_grid_history (user_id, candidate_ids) VALUES ($1, $2)', [
+      seeker.userId,
+      JSON.stringify([3, 4]),
+    ]);
+
+    const denied = await agent
+      .post('/api/matches/rewind-off-grid')
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(denied.status).toBe(403);
+    expect(denied.body.upgrade_required).toBe(true);
+
+    await setPremium(seeker.userId, true);
+
+    const target = await signupAndCompleteProfile({
+      email: `rw_target_${Date.now()}@example.com`,
+      name: 'Rewind Target',
+      gender: 'female',
+      interested_in: 'male',
+    });
+
+    // Point the older set at a profile that really exists.
+    await pool.query('DELETE FROM off_grid_history WHERE user_id = $1', [seeker.userId]);
+    await pool.query('INSERT INTO off_grid_history (user_id, candidate_ids) VALUES ($1, $2)', [
+      seeker.userId,
+      JSON.stringify([target.userId]),
+    ]);
+    await pool.query('INSERT INTO off_grid_history (user_id, candidate_ids) VALUES ($1, $2)', [
+      seeker.userId,
+      JSON.stringify([999999]),
+    ]);
+
+    const rewound = await agent
+      .post('/api/matches/rewind-off-grid')
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(rewound.status).toBe(200);
+    expect(rewound.body.matches.map((m: any) => m.id)).toContain(target.userId);
+
+    // Nothing left behind it, so a second rewind has nowhere to go.
+    const again = await agent
+      .post('/api/matches/rewind-off-grid')
+      .set('Authorization', `Bearer ${seeker.token}`);
+    expect(again.status).toBe(404);
+  });
+
   // --- Quiz, pronouns, and discovery eligibility ----------------------------
 
   it('serves twelve situational questions with four options each', async () => {
@@ -1103,6 +1313,35 @@ describe('GreenFlag backend core flow', () => {
     );
     expect(stored.rows[0].question1_answer).toBe('A');
     expect(stored.rows[0].question9_answer).toBe('C');
+  });
+
+
+  it('saves how far the user will travel, which onboarding now asks for', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `radius_${Date.now()}@example.com`, name: 'Radius User' },
+      { distance_radius: 25 }
+    );
+
+    const stored = await pool.query('SELECT distance_radius FROM users WHERE id = $1', [
+      user.userId,
+    ]);
+    // Previously nothing ever wrote this, so every account silently kept the
+    // 50km column default while the match query treated it as a real choice.
+    expect(Number(stored.rows[0].distance_radius)).toBe(25);
+
+    const me = await agent.get('/api/profile/me').set('Authorization', `Bearer ${user.token}`);
+    expect(Number(me.body.user.distance_radius)).toBe(25);
+  });
+
+  it('ignores a nonsense travel distance rather than storing it', async () => {
+    const user = await signupAndCompleteProfile(
+      { email: `radius_bad_${Date.now()}@example.com`, name: 'Bad Radius' },
+      { distance_radius: -5 }
+    );
+    const stored = await pool.query('SELECT distance_radius FROM users WHERE id = $1', [
+      user.userId,
+    ]);
+    expect(Number(stored.rows[0].distance_radius)).toBe(50);
   });
 
   it('persists pronouns, which the app collected but previously discarded', async () => {

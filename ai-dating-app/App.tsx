@@ -22,6 +22,7 @@ import { SettingsScreen } from './src/screens/SettingsScreen';
 import { NotificationsScreen } from './src/screens/NotificationsScreen';
 import { WalletScreen } from './src/screens/WalletScreen';
 import { LikesInboxScreen } from './src/screens/LikesInboxScreen';
+import { BookmarksScreen } from './src/screens/BookmarksScreen';
 import { MatchesListScreen } from './src/screens/MatchesListScreen';
 import { ConversationsScreen } from './src/screens/ConversationsScreen';
 import { AdvancedSearchScreen, AdvancedFilters } from './src/screens/AdvancedSearchScreen';
@@ -50,6 +51,7 @@ type Overlay =
   | 'notifications'
   | 'wallet'
   | 'likes'
+  | 'bookmarks'
   | 'matches'
   | 'conversations'
   | 'advancedSearch'
@@ -270,6 +272,76 @@ const AppShell: React.FC = () => {
   const handleSwipeLeft = () => {
     console.log('Passed on:', selectedMatch?.name);
     handleCloseProfile();
+  };
+
+  /**
+   * Likes someone from a list rather than from the card stack.
+   *
+   * When the target is in cooldown the server refuses and answers can_bookmark,
+   * which is the cue to offer saving them instead. Cooldown blocks everyone,
+   * paid or not; a bookmark is what paying buys.
+   */
+  const likeFromList = async (targetUserId: number, isOnGrid = false) => {
+    if (!authToken) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/likes`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ target_user_id: targetUserId, is_on_grid: isOnGrid }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        if (data.can_bookmark) {
+          Alert.alert(
+            'Not available right now',
+            'They have hit their daily limit. Save them and you can like them as soon as they are back.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              {
+                text: 'Save',
+                onPress: () => {
+                  void fetch(`${API_BASE_URL}/bookmarks`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      Authorization: `Bearer ${authToken}`,
+                    },
+                    body: JSON.stringify({ target_user_id: targetUserId }),
+                  }).then(async (bookmarkResponse) => {
+                    const body = await bookmarkResponse.json().catch(() => ({}));
+                    if (bookmarkResponse.ok) {
+                      Alert.alert('Saved', 'You will find them under Saved.');
+                    } else if (body.upgrade_required) {
+                      Alert.alert('Paid feature', 'Saving profiles is available on paid plans.');
+                    } else {
+                      Alert.alert('Could not save', body.error || 'Please try again.');
+                    }
+                  });
+                },
+              },
+            ]
+          );
+          return;
+        }
+        throw new Error(data.error || 'Unable to like profile right now.');
+      }
+
+      if (data.is_match && data.match_id) {
+        setMatchedUser({
+          matchId: data.match_id,
+          userId: targetUserId,
+          name: data.matched_user?.name || 'your match',
+          photo: data.matched_user?.primary_photo,
+        });
+        setShowMatchModal(true);
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Please try again.');
+    }
   };
 
   const handleSwipeRight = async () => {
@@ -539,6 +611,7 @@ const AppShell: React.FC = () => {
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             onAccountDeleted={logout}
+                      onOpenBookmarks={() => setOverlay('bookmarks')}
           />
         );
       case 'notifications':
@@ -575,6 +648,17 @@ const AppShell: React.FC = () => {
               });
               setOverlay(null);
               setShowProfileModal(true);
+            }}
+          />
+        );
+      case 'bookmarks':
+        return (
+          <BookmarksScreen
+            {...overlayProps}
+            token={authToken!}
+            apiBaseUrl={API_BASE_URL}
+            onLike={async (targetUserId) => {
+              await likeFromList(targetUserId, false);
             }}
           />
         );
@@ -656,6 +740,7 @@ const AppShell: React.FC = () => {
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             onPurchased={() => { setWalletRefreshKey((k) => k + 1); setOverlay('wallet'); }}
+                      onOpenTerms={() => setOverlay('terms')}
           />
         );
       case 'profileOverview':

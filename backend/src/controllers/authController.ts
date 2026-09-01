@@ -5,6 +5,14 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/database';
 import { JWT_CONFIG, DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
+import { normalizeEmail } from '../services/email.service';
+import {
+  checkOtp,
+  issueOtp,
+  isChannelConfigured,
+  normalizeOtpCode,
+  type OtpTarget,
+} from '../services/otp.service';
 import {
   buildUserPayload,
   initializeUserDefaults,
@@ -201,7 +209,7 @@ export const login = async (req: Request, res: Response) => {
     const user = result.rows[0];
 
     if (user.is_banned) {
-      return res.status(403).json({ error: 'Your account has been suspended. Contact support@greenflag.app for assistance.' });
+      return res.status(403).json({ error: 'Your account has been suspended. Contact support@gflag.app for assistance.' });
     }
 
     // Verify password
@@ -283,7 +291,7 @@ export const googleAuth = async (req: Request, res: Response) => {
 
       if (user.is_banned) {
         await client.query('ROLLBACK');
-        return res.status(403).json({ error: 'Your account has been suspended. Contact support@greenflag.app for assistance.' });
+        return res.status(403).json({ error: 'Your account has been suspended. Contact support@gflag.app for assistance.' });
       }
 
       const existingGoogleSub = user.google_sub ? String(user.google_sub) : '';
@@ -374,125 +382,119 @@ export const googleAuth = async (req: Request, res: Response) => {
   }
 };
 
+/**
+ * Password reset.
+ *
+ * The code goes to the account's own email address, not to a verified phone.
+ * Phone was the only channel here, which made reset impossible for everyone:
+ * SMS is not configured, so this endpoint returned 503 to every request, and
+ * even with SMS live it only worked for users who had completed phone
+ * verification. Email is the address they just typed in and the one every
+ * account is guaranteed to have.
+ *
+ * Phone remains a fallback for accounts with a verified number when email
+ * delivery is unavailable, so nothing that worked before stops working.
+ */
 export const forgotPassword = async (req: Request, res: Response) => {
+  // Deliberately identical whether or not the address exists, so this cannot be
+  // used to find out who has an account.
+  const genericResponse = {
+    message: 'If that email is registered, a reset code has been sent to it.',
+    expires_in_seconds: OTP_TTL_SECONDS,
+  };
+
   try {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body?.email);
     if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
+      return res.status(400).json({ error: 'A valid email address is required' });
     }
 
-    const smsConfigured = isSmsConfigured();
-    const devBypass = canUseDevOtpBypass();
-    if (!smsConfigured && !devBypass) {
-      return res.status(503).json({ error: 'SMS provider is not configured' });
-    }
-
-    // Look up user
     const userResult = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (userResult.rows.length === 0) {
-      // Don't reveal whether email exists
-      return res.json({ message: 'If that email is registered and has a verified phone, an OTP has been sent.' });
+      return res.json(genericResponse);
     }
     const userId = userResult.rows[0].id;
 
-    // Find verified phone
-    const vsResult = await pool.query(
-      'SELECT phone FROM verification_status WHERE user_id = $1 AND otp_verified = TRUE',
-      [userId]
-    );
-    if (vsResult.rows.length === 0 || !vsResult.rows[0].phone) {
-      return res.json({
-        message: 'No verified phone on file. Please contact support@greenflag.app for account recovery.',
-      });
-    }
-    const phone = vsResult.rows[0].phone as string;
-
-    // Generate OTP
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
-
-    await pool.query(
-      `INSERT INTO otp_codes (phone, code, expires_at, verify_attempts)
-       VALUES ($1, $2, $3, 0)
-       ON CONFLICT (phone) DO UPDATE SET code = $2, expires_at = $3, verify_attempts = 0, created_at = NOW()`,
-      [phone, code, expiresAt]
-    );
-
-    await pool.query('INSERT INTO otp_request_audit (phone) VALUES ($1)', [phone]);
-
-    if (smsConfigured) {
-      await sendOtpSms(phone, code);
+    // Email first. Fall back to a verified phone only if email cannot be sent.
+    let target: OtpTarget = { channel: 'email', value: email };
+    if (!isChannelConfigured('email') && !canUseDevOtpBypass()) {
+      const phoneResult = await pool.query(
+        'SELECT phone FROM verification_status WHERE user_id = $1 AND otp_verified = TRUE',
+        [userId]
+      );
+      const phone = phoneResult.rows[0]?.phone;
+      if (!phone) {
+        return res.status(503).json({
+          error: 'Password reset is temporarily unavailable. Please contact support.',
+        });
+      }
+      target = { channel: 'phone', value: phone };
     }
 
-    const phoneHint = '***' + phone.slice(-4);
-
-    if (!smsConfigured) {
-      console.log(`[DEV] Password reset OTP for ${phoneHint}: ${code}`);
+    const outcome = await issueOtp(target);
+    if (!outcome.ok) {
+      // A rate limit is about this address, so it is safe to report honestly.
+      if (outcome.status === 429) {
+        return res.status(429).json({ error: outcome.error });
+      }
+      return res.status(outcome.status).json({ error: outcome.error });
     }
 
     return res.json({
-      message: 'OTP sent to your verified phone number.',
-      phone_hint: phoneHint,
-      expires_in_seconds: OTP_TTL_SECONDS,
+      ...genericResponse,
+      channel: target.channel,
+      destination_hint: outcome.destinationHint,
     });
   } catch (error) {
     console.error('Forgot password error:', error);
-    res.status(500).json({ error: 'Failed to process password reset request' });
+    return res.status(500).json({ error: 'Failed to start password reset' });
   }
 };
 
 export const resetPassword = async (req: Request, res: Response) => {
   try {
-    const { email, code, new_password } = req.body;
-    if (!email || !code || !new_password) {
+    const email = normalizeEmail(req.body?.email);
+    const code = normalizeOtpCode(req.body?.code);
+    const newPassword = typeof req.body?.new_password === 'string' ? req.body.new_password : '';
+
+    if (!email || !code || !newPassword) {
       return res.status(400).json({ error: 'Email, code, and new_password are required' });
     }
-    if (new_password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
-    // Look up user
     const userResult = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (userResult.rows.length === 0) {
       return res.status(400).json({ error: 'Invalid or expired code' });
     }
     const userId = userResult.rows[0].id;
 
-    // Find their verified phone
-    const vsResult = await pool.query(
-      'SELECT phone FROM verification_status WHERE user_id = $1 AND otp_verified = TRUE',
-      [userId]
-    );
-    if (vsResult.rows.length === 0 || !vsResult.rows[0].phone) {
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    }
-    const phone = vsResult.rows[0].phone as string;
+    // Try the email code first, then a phone code, matching whichever channel
+    // forgotPassword actually used for this account.
+    let outcome = await checkOtp({ channel: 'email', value: email }, code);
 
-    // Verify OTP
-    const otpResult = await pool.query('SELECT * FROM otp_codes WHERE phone = $1', [phone]);
-    if (otpResult.rows.length === 0) {
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    }
-    const record = otpResult.rows[0];
-
-    if (new Date(record.expires_at).getTime() < Date.now()) {
-      return res.status(400).json({ error: 'Invalid or expired code' });
-    }
-
-    if (record.code !== code) {
-      const nextAttempts = Number(record.verify_attempts || 0) + 1;
-      if (nextAttempts >= 5) {
-        await pool.query('DELETE FROM otp_codes WHERE phone = $1', [phone]);
-        return res.status(429).json({ error: 'Too many invalid attempts. Request a new OTP.' });
+    if (!outcome.ok) {
+      const phoneResult = await pool.query(
+        'SELECT phone FROM verification_status WHERE user_id = $1 AND otp_verified = TRUE',
+        [userId]
+      );
+      const phone = phoneResult.rows[0]?.phone;
+      if (phone) {
+        const phoneOutcome = await checkOtp({ channel: 'phone', value: phone }, code);
+        if (phoneOutcome.ok) outcome = phoneOutcome;
       }
-      await pool.query('UPDATE otp_codes SET verify_attempts = $2 WHERE phone = $1', [phone, nextAttempts]);
-      return res.status(400).json({ error: 'Invalid or expired code' });
     }
 
-    // OTP valid — update password
-    const passwordHash = await bcrypt.hash(new_password, 10);
-    await pool.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [passwordHash, userId]);
-    await pool.query('DELETE FROM otp_codes WHERE phone = $1', [phone]);
+    if (!outcome.ok) {
+      return res.status(outcome.status).json({ error: outcome.error });
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [
+      passwordHash,
+      userId,
+    ]);
 
     res.json({ message: 'Password has been reset successfully. You can now log in.' });
   } catch (error) {

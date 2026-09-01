@@ -264,19 +264,56 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     fetchWalletBalance();
   }, [fetchWalletBalance]);
 
-  const handleRewind = useCallback(() => {
+  /**
+   * Goes back to the previous off-grid set.
+   *
+   * The history lives on the server now. It used to be component state, so a
+   * backgrounded app silently threw away a paid feature. The local history is
+   * still used as an instant fallback when the request cannot be made.
+   */
+  const handleRewind = useCallback(async () => {
     if (!isPremium) {
       Alert.alert('Premium required', 'Rewind is available on paid plans only.');
       return;
     }
-    if (offGridHistory.length === 0) {
-      Alert.alert('Nothing to rewind', 'No previous off-grid set available.');
-      return;
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/matches/rewind-off-grid`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (response.ok && Array.isArray(data.matches) && data.matches.length > 0) {
+        setOffGridHistory((prev) => prev.slice(0, -1));
+        setMatches(data.matches);
+        return;
+      }
+
+      if (response.status === 404) {
+        Alert.alert('Nothing to rewind', 'No previous set to go back to.');
+        return;
+      }
+      if (response.status === 403) {
+        Alert.alert('Premium required', data.error || 'Rewind is available on paid plans only.');
+        return;
+      }
+      throw new Error(data.error || 'Rewind failed');
+    } catch {
+      // Offline or the server could not answer. Fall back to whatever this
+      // session still holds rather than doing nothing.
+      if (offGridHistory.length === 0) {
+        Alert.alert('Nothing to rewind', 'No previous off-grid set available.');
+        return;
+      }
+      const previous = offGridHistory[offGridHistory.length - 1];
+      setOffGridHistory((prev) => prev.slice(0, -1));
+      setMatches(previous);
     }
-    const previous = offGridHistory[offGridHistory.length - 1];
-    setOffGridHistory((prev) => prev.slice(0, -1));
-    setMatches(previous);
-  }, [isPremium, offGridHistory]);
+  }, [isPremium, offGridHistory, apiBaseUrl, token]);
 
   const getMatchColor = (percentage: number) => {
     if (percentage >= 90) return theme.colors.neonGreen;

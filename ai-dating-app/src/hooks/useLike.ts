@@ -56,8 +56,38 @@ export const useLike = ({ token, apiBaseUrl, onMatch, onLikeSuccess }: UseLikePr
         } else if (response.status === 400) {
           if (data.error?.includes('already liked')) {
             Alert.alert('Already Liked', 'You have already liked this profile.');
-          } else if (data.error?.includes('cooldown')) {
-            Alert.alert('User Unavailable', 'This user is currently in cooldown period.');
+          } else if (data.can_bookmark || data.error?.includes('cooldown')) {
+            // Cooldown blocks likes from everyone. Saving is the way through it,
+            // and the like still has to happen later on the normal quota.
+            Alert.alert(
+              'Not available right now',
+              'They have hit their daily limit. Save them and you can like them as soon as they are back.',
+              [
+                { text: 'Not now', style: 'cancel' },
+                {
+                  text: 'Save',
+                  onPress: () => {
+                    void fetch(`${apiBaseUrl}/bookmarks`, {
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                      },
+                      body: JSON.stringify({ target_user_id: targetUserId }),
+                    }).then(async (bookmarkResponse) => {
+                      const body = await bookmarkResponse.json().catch(() => ({}));
+                      if (bookmarkResponse.ok) {
+                        Alert.alert('Saved', 'You will find them under Saved in Settings.');
+                      } else if (body.upgrade_required) {
+                        Alert.alert('Paid feature', 'Saving profiles is available on paid plans.');
+                      } else {
+                        Alert.alert('Could not save', body.error || 'Please try again.');
+                      }
+                    });
+                  },
+                },
+              ]
+            );
           } else {
             Alert.alert('Error', data.error || 'Failed to like profile');
           }

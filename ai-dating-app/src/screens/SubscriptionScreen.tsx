@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, View, Linking } from 'react-native';
+import React, { useState, useEffect} from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PixelFlag } from '../components/PixelFlag';
@@ -52,6 +52,8 @@ type Props = {
   token: string;
   apiBaseUrl: string;
   onPurchased?: () => void;
+  /** Opens the in-app Terms screen. */
+  onOpenTerms?: () => void;
 };
 
 export const SubscriptionScreen: React.FC<Props> = ({
@@ -60,11 +62,40 @@ export const SubscriptionScreen: React.FC<Props> = ({
   token,
   apiBaseUrl,
   onPurchased,
+  onOpenTerms,
 }) => {
   const theme = useTheme();
   const [selectedTab, setSelectedTab] = useState<PlanTier>(initialTab);
   const [selectedDuration, setSelectedDuration] = useState<Duration>('1week');
   const [loading, setLoading] = useState(false);
+
+  /**
+   * Whether anything can actually be bought right now.
+   *
+   * Purchases are closed until a store receipt validator is registered, and the
+   * server answers 501 to every attempt. This screen is reachable from Settings,
+   * Profile, Wallet and the out-of-tokens prompt, so the check lives here rather
+   * than at each of those call sites.
+   */
+  const [paymentsEnabled, setPaymentsEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/wallet/summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!cancelled) setPaymentsEnabled(Boolean(data?.payments_enabled));
+      } catch {
+        if (!cancelled) setPaymentsEnabled(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiBaseUrl, token]);
 
   const pricing = selectedTab === 'pro' ? proPricing : premiumPricing;
   const benefits = selectedTab === 'pro' ? proBenefits : premiumBenefits;
@@ -241,7 +272,7 @@ export const SubscriptionScreen: React.FC<Props> = ({
           <Typography
             variant="small"
             style={{ textDecorationLine: 'underline' }}
-            onPress={() => Linking.openURL('https://gflag.app/terms')}
+            onPress={onOpenTerms}
           >
             Terms.
           </Typography>
@@ -253,13 +284,17 @@ export const SubscriptionScreen: React.FC<Props> = ({
             styles.ctaButton,
             { backgroundColor: theme.colors.neonGreen },
             pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
-            loading && { opacity: 0.6 },
+            (loading || paymentsEnabled !== true) && { opacity: 0.6 },
           ]}
-          onPress={handlePurchase}
-          disabled={loading}
+          onPress={paymentsEnabled ? handlePurchase : undefined}
+          disabled={loading || paymentsEnabled !== true}
         >
           <Typography variant="h2" style={{ color: '#000', fontFamily: 'RedHatDisplay_700Bold', textAlign: 'center' }}>
-            Get {selected.label} for {selected.price}
+            {paymentsEnabled === true
+              ? `Get ${selected.label} for ${selected.price}`
+              : paymentsEnabled === null
+                ? 'Checking...'
+                : 'Not on sale yet'}
           </Typography>
         </Pressable>
       </ScrollView>

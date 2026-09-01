@@ -279,7 +279,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
                   <Text style={styles.modalBodyText}>We use industry-standard measures including encrypted connections (TLS), hashed passwords, and access controls. No system is perfectly secure; we encourage you to use a strong, unique password.</Text>
 
                   <Text style={[styles.modalSectionTitle, { color: theme.colors.text }]}>5. Your Rights</Text>
-                  <Text style={styles.modalBodyText}>You can access, correct, or delete your personal data at any time through the app's Settings. You may also request a copy of your data or ask us to restrict processing by contacting support@greenflag.app.</Text>
+                  <Text style={styles.modalBodyText}>You can access, correct, or delete your personal data at any time through the app's Settings. You may also request a copy of your data or ask us to restrict processing by contacting support@gflag.app.</Text>
 
                   <Text style={[styles.modalSectionTitle, { color: theme.colors.text }]}>6. Children's Privacy</Text>
                   <Text style={styles.modalBodyText}>GreenFlag is not intended for anyone under 18. We do not knowingly collect information from minors. If we learn that a user is under 18, we will delete their account.</Text>
@@ -288,7 +288,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
                   <Text style={styles.modalBodyText}>We may update this policy from time to time. We will notify you of material changes via the app or email. Continued use after changes constitutes acceptance.</Text>
 
                   <Text style={[styles.modalSectionTitle, { color: theme.colors.text }]}>8. Contact</Text>
-                  <Text style={styles.modalBodyText}>Privacy questions? Email us at support@greenflag.app.</Text>
+                  <Text style={styles.modalBodyText}>Privacy questions? Email us at support@gflag.app.</Text>
                 </>
               ) : (
                 <>
@@ -317,7 +317,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
                   <Text style={styles.modalBodyText}>GreenFlag is provided "as is." We do not guarantee matches, relationship outcomes, or uninterrupted service. To the fullest extent permitted by law, our liability is limited to the amount you paid us in the 12 months preceding a claim.</Text>
 
                   <Text style={[styles.modalSectionTitle, { color: theme.colors.text }]}>9. Contact</Text>
-                  <Text style={styles.modalBodyText}>Questions about these terms? Email us at support@greenflag.app.</Text>
+                  <Text style={styles.modalBodyText}>Questions about these terms? Email us at support@gflag.app.</Text>
                 </>
               )}
             </ScrollView>

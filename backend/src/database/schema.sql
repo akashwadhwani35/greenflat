@@ -321,6 +321,17 @@ CREATE TABLE IF NOT EXISTS otp_request_audit (
 );
 
 -- Verification Status (phone/otp, face/age, location)
+-- Off-grid sets already shown, so Rewind survives closing the app.
+CREATE TABLE IF NOT EXISTS off_grid_history (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    candidate_ids JSONB NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_off_grid_history_user_created
+  ON off_grid_history(user_id, created_at DESC);
+
 -- Half-finished signups.
 --
 -- Signup is a funnel (phone -> OTP -> email -> OTP -> password), so the account

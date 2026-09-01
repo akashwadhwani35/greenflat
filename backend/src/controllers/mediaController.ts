@@ -7,11 +7,17 @@ import {
   isLocalUploadConfigured,
   storeLocalMediaFromDataUrl,
 } from '../services/media.service';
-import { isGcsConfigured, getMediaStream, getMediaMetadata } from '../services/storage.service';
+import {
+  isGcsConfigured,
+  getMediaStream,
+  getMediaMetadata,
+  storeDataUrl,
+  mediaUrlFor,
+} from '../services/storage.service';
 
 export const getMediaCapabilities = async (_req: AuthRequest, res: Response) => {
   try {
-    return res.json({ capabilities: getMediaUploadCapabilities() });
+    return res.json({ capabilities: getMediaUploadCapabilities(isGcsConfigured()) });
   } catch (error) {
     console.error('Get media capabilities error:', error);
     return res.status(500).json({ error: 'Failed to fetch media capabilities' });
@@ -30,12 +36,19 @@ export const getUploadSignature = async (_req: AuthRequest, res: Response) => {
   }
 };
 
+/**
+ * Chat media upload.
+ *
+ * Route name is historical: shipped app builds post here, so it stays. What
+ * changed is where the bytes land. GCS is used whenever a bucket is configured,
+ * which is the only durable option in production — Cloud Run gives every
+ * instance a fresh disk, so anything written locally disappears on the next
+ * deploy or restart and the photo someone sent in a chat 404s afterwards.
+ *
+ * The local-disk path survives only as a development convenience.
+ */
 export const uploadLocalMedia = async (req: AuthRequest, res: Response) => {
   try {
-    if (!isLocalUploadConfigured()) {
-      return res.status(503).json({ error: 'Local media upload is disabled' });
-    }
-
     const { data_url, media_type } = req.body as {
       data_url?: unknown;
       media_type?: 'image' | 'voice';
@@ -53,10 +66,19 @@ export const uploadLocalMedia = async (req: AuthRequest, res: Response) => {
     }
     const baseUrl = `${protocol}://${host}`;
 
+    if (isGcsConfigured()) {
+      const stored = await storeDataUrl(data_url);
+      return res.json({ url: mediaUrlFor(stored.objectName, baseUrl) });
+    }
+
+    if (!isLocalUploadConfigured()) {
+      return res.status(503).json({ error: 'Media upload is not configured' });
+    }
+
     const url = await storeLocalMediaFromDataUrl(data_url, media_type, baseUrl);
     return res.json({ url });
   } catch (error: any) {
-    console.error('Upload local media error:', error);
+    console.error('Upload media error:', error);
     return res.status(400).json({ error: error?.message || 'Failed to upload media' });
   }
 };

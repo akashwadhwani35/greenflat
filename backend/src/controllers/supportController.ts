@@ -2,8 +2,8 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 
-const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || 'support@greenflag.app').trim();
-const SUPPORT_FROM_EMAIL = (process.env.SUPPORT_FROM_EMAIL || 'GreenFlag <no-reply@greenflag.app>').trim();
+const SUPPORT_EMAIL = (process.env.SUPPORT_EMAIL || 'support@gflag.app').trim();
+const SUPPORT_FROM_EMAIL = (process.env.SUPPORT_FROM_EMAIL || 'GreenFlag <no-reply@gflag.app>').trim();
 const RESEND_API_KEY = (process.env.RESEND_API_KEY || '').trim();
 
 const MAX_MESSAGE_LENGTH = 2000;

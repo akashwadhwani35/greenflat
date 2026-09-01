@@ -714,6 +714,27 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       [userId, search_query || '', JSON.stringify(enhancedFilters)]
     );
 
+    // Record the off-grid set that is about to be shown, so Rewind can bring it
+    // back after the app has been closed. Only the last few are worth keeping.
+    if (is_on_grid === false && offGridMatches.length > 0) {
+      const shownIds = offGridMatches.map((candidate: any) => candidate.id);
+      await pool.query(
+        'INSERT INTO off_grid_history (user_id, candidate_ids) VALUES ($1, $2)',
+        [userId, JSON.stringify(shownIds)]
+      );
+      await pool.query(
+        `DELETE FROM off_grid_history
+          WHERE user_id = $1
+            AND id NOT IN (
+              SELECT id FROM off_grid_history
+               WHERE user_id = $1
+               ORDER BY id DESC
+               LIMIT 10
+            )`,
+        [userId]
+      );
+    }
+
     // Return response based on request type
     if (is_on_grid === true) {
       // Return only on-grid matches
@@ -790,6 +811,106 @@ export const refreshOffGrid = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Refresh off-grid error:', error);
     res.status(500).json({ error: 'Failed to refresh off-grid matches' });
+  }
+};
+
+/**
+ * Brings back the off-grid set shown before the current one.
+ *
+ * Premium only, per the spec: refreshing off-grid is free and unlimited, and
+ * paying is what buys back the people you scrolled past. The history lives in
+ * the database rather than in the app, so this still works after the app has
+ * been closed, which is what it was sold as.
+ */
+export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+
+    const userResult = await pool.query(
+      'SELECT is_premium, premium_expires_at FROM users WHERE id = $1',
+      [userId]
+    );
+    const user = userResult.rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const expiresAt = user.premium_expires_at ? new Date(user.premium_expires_at).getTime() : null;
+    const isPremium = Boolean(user.is_premium) && (expiresAt === null || expiresAt > Date.now());
+    if (!isPremium) {
+      return res.status(403).json({
+        error: 'Rewind is available on paid plans only',
+        upgrade_required: true,
+      });
+    }
+
+    // The newest row is what is on screen now, so the one before it is the
+    // "previous" set the user wants back.
+    const history = await pool.query(
+      // Ordered by id, not created_at: two sets recorded in the same instant
+      // would otherwise come back in an arbitrary order, and "previous" would be
+      // a coin flip.
+      'SELECT id, candidate_ids FROM off_grid_history WHERE user_id = $1 ORDER BY id DESC LIMIT 2',
+      [userId]
+    );
+
+    if (history.rows.length < 2) {
+      return res.status(404).json({ error: 'No previous off-grid set to go back to' });
+    }
+
+    const current = history.rows[0];
+    const previous = history.rows[1];
+
+    const rawIds = Array.isArray(previous.candidate_ids)
+      ? previous.candidate_ids
+      : JSON.parse(previous.candidate_ids || '[]');
+    const ids = rawIds
+      .map((value: unknown) => Number(value))
+      .filter((value: number) => Number.isInteger(value) && value > 0);
+
+    if (ids.length === 0) {
+      return res.status(404).json({ error: 'No previous off-grid set to go back to' });
+    }
+
+    // An IN list of placeholders rather than = ANY($n::int[]): the array form
+    // depends on a cast that not every driver/engine path handles identically.
+    const idPlaceholders = ids.map((_: number, index: number) => `$${index + 2}`).join(', ');
+
+    const profiles = await pool.query(
+      `SELECT
+         u.id, u.name, u.gender, u.pronouns, u.date_of_birth, u.city, u.is_verified,
+         p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
+         p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level,
+         p.relationship_goal,
+         pr.personality_traits, pr.top_traits,
+         primary_photo.photo_url AS primary_photo
+       FROM users u
+       LEFT JOIN user_profiles p ON p.user_id = u.id
+       LEFT JOIN personality_responses pr ON pr.user_id = u.id
+       LEFT JOIN photos primary_photo
+         ON primary_photo.user_id = u.id AND primary_photo.is_primary = TRUE
+       LEFT JOIN blocks blocked_rel
+         ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = u.id)
+          OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
+       WHERE u.id IN (${idPlaceholders})
+         AND u.is_banned = FALSE
+         AND u.onboarding_completed_at IS NOT NULL
+         AND blocked_rel.id IS NULL`,
+      [userId, ...ids]
+    );
+
+    // Stepping back consumes the current set, so pressing rewind repeatedly
+    // walks further back rather than toggling between two sets.
+    await pool.query('DELETE FROM off_grid_history WHERE id = $1', [current.id]);
+
+    const matches = profiles.rows.map((row: any) => ({
+      ...row,
+      age: calculateAge(row.date_of_birth),
+      is_on_grid: false,
+    }));
+
+    return res.json({ matches, rewound: true });
+  } catch (error) {
+    console.error('Rewind off-grid error:', error);
+    return res.status(500).json({ error: 'Failed to rewind' });
   }
 };
 

@@ -10,6 +10,7 @@ const tables = [
   'reports',
   'profile_views',
   'search_history',
+  'off_grid_history',
   'bookmarks',
   'messages',
   'matches',

@@ -15,7 +15,7 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ apiBaseUrl, onBack }) =>
   const theme = useTheme();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [email, setEmail] = useState('');
-  const [phoneHint, setPhoneHint] = useState('');
+  const [destinationHint, setDestinationHint] = useState('');
   const [code, setCode] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -33,12 +33,11 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ apiBaseUrl, onBack }) =>
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || 'Request failed');
 
-      if (data.phone_hint) {
-        setPhoneHint(data.phone_hint);
-        setStep(2);
-      } else {
-        Alert.alert('Info', data.message || 'Check your phone for a code.');
-      }
+      // The server always answers the same way whether or not the address is
+      // registered, so we always advance. Telling the user "no such account"
+      // here would turn this screen into a way to enumerate who has one.
+      setDestinationHint(data.destination_hint || email.trim());
+      setStep(2);
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Please try again.');
     } finally {
@@ -52,8 +51,8 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ apiBaseUrl, onBack }) =>
       Alert.alert('Mismatch', 'Passwords do not match.');
       return;
     }
-    if (newPassword.length < 6) {
-      Alert.alert('Too short', 'Password must be at least 6 characters.');
+    if (newPassword.length < 8) {
+      Alert.alert('Too short', 'Password must be at least 8 characters.');
       return;
     }
     setLoading(true);
@@ -95,7 +94,7 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ apiBaseUrl, onBack }) =>
           {step === 1 && (
             <View style={[styles.card, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
               <Typography variant="body" muted>
-                Enter your email and we'll send a verification code to your registered phone number.
+                Enter your email and we'll send a reset code to it.
               </Typography>
               <UnderlineInput
                 placeholder="Email"
@@ -111,7 +110,7 @@ export const ForgotPasswordScreen: React.FC<Props> = ({ apiBaseUrl, onBack }) =>
           {step === 2 && (
             <View style={[styles.card, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
               <Typography variant="body" muted>
-                A 6-digit code was sent to {phoneHint}. Enter it below.
+                A 6-digit code was sent to {destinationHint}. Enter it below.
               </Typography>
               <UnderlineInput
                 placeholder="6-digit code"

@@ -56,7 +56,9 @@ type ProfileDetailCandidate = MatchCandidate & {
   top_traits?: string[];
 };
 
-type MediaUploadProvider = 'cloudinary' | 'local' | 'none';
+// 'gcs' and 'local' both post a data URL to /media/upload-local; the server
+// decides where the bytes actually land. Only Cloudinary needs a different path.
+type MediaUploadProvider = 'gcs' | 'cloudinary' | 'local' | 'none';
 
 export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   matchId,
@@ -822,8 +824,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               const result = await ImagePicker.launchCameraAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Videos,
                 allowsEditing: false,
-                videoMaxDuration: mediaUploadProvider === 'local' ? 8 : 20,
-                quality: mediaUploadProvider === 'local' ? 0.3 : 0.4,
+                videoMaxDuration: mediaUploadProvider === 'cloudinary' ? 20 : 8,
+                quality: mediaUploadProvider === 'cloudinary' ? 0.4 : 0.3,
               });
               if (!result.canceled && result.assets[0]) {
                 try {

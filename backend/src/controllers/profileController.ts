@@ -30,6 +30,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       interested_in,
       date_of_birth,
       city,
+      distance_radius,
       pronouns,
       // Profile data
       height,
@@ -232,6 +233,15 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
     // Identity fields live on users, not user_profiles. The staged signup funnel
     // creates the account before asking for any of them, so this is where the
     // placeholders put in at signup get replaced with what the user actually said.
+    // How far the user will travel. Onboarding asks for this; without it every
+    // account silently kept the 50km column default, which the match query then
+    // enforced as though the user had chosen it.
+    const parsedRadius = Number(distance_radius);
+    const normalizedRadius =
+      Number.isFinite(parsedRadius) && parsedRadius >= 1 && parsedRadius <= 20000
+        ? Math.round(parsedRadius)
+        : null;
+
     const identityUpdate = await client.query(
       `UPDATE users
        SET name = COALESCE($2, name),
@@ -240,6 +250,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
            date_of_birth = COALESCE($5, date_of_birth),
            city = COALESCE($6, city),
            pronouns = COALESCE($7, pronouns),
+           distance_radius = COALESCE($8, distance_radius),
            cooldown_enabled = CASE WHEN $3::text = 'female' THEN TRUE ELSE cooldown_enabled END,
            updated_at = NOW()
        WHERE id = $1
@@ -254,6 +265,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         date_of_birth || null,
         typeof city === 'string' && city.trim() ? city.trim().slice(0, 100) : null,
         normalizedPronouns,
+        normalizedRadius,
       ]
     );
 
@@ -350,7 +362,7 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
 
     // Get user data
     const userResult = await pool.query(
-      `SELECT id, email, name, gender, interested_in, pronouns, date_of_birth, city,
+      `SELECT id, email, name, gender, interested_in, pronouns, date_of_birth, city, distance_radius,
               is_verified, is_premium, premium_expires_at, boost_expires_at, credit_balance, cooldown_enabled
        FROM users
        WHERE id = $1`,
