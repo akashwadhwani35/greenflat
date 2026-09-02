@@ -362,17 +362,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     }
   }, [isPremium, offGridHistory, apiBaseUrl, token]);
 
-  const getMatchColor = (percentage: number) => {
-    if (percentage >= 90) return theme.colors.neonGreen;
-    if (percentage >= 85) return '#8FD14F';
-    if (percentage >= 80) return '#A8E063';
-    return theme.colors.muted;
-  };
-
   const MatchCardItem: React.FC<{ match: MatchCandidate; index: number; cardHeight?: number }> = ({ match, index, cardHeight }) => {
     const fallback = fallbackPhotos[index % fallbackPhotos.length];
     const photoSource = match.primary_photo ? { uri: match.primary_photo } : fallback;
-    const matchColor = getMatchColor(match.match_percentage);
 
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
@@ -425,14 +417,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
           {/* Top badges row */}
           <View style={styles.topBadgesRow}>
-            {/* Show match percentage only on AI Match (on-grid) */}
-            {activeTab === 'onGrid' ? (
-              <View style={[styles.matchBadge, { backgroundColor: matchColor }]}>
-                <Typography variant="tiny" style={[styles.matchBadgeText, { color: theme.colors.deepBlack }]}>
-                  {match.match_percentage}%
-                </Typography>
-              </View>
-            ) : null}
+            {/* No compatibility percentage on the tiles: a typed search can be
+                about one specific thing, and a number reads as a verdict on
+                the whole person. The score still orders the results. */}
 
             {/* Verified badge */}
             {match.is_verified && (

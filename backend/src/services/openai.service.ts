@@ -346,12 +346,12 @@ Important:
 - Write in SECOND PERSON.
 - The summary MUST start with "You are".
 - Do NOT use third-person phrasing like "The individual is", "This person is", or "They are".
-- Draw top_traits from the traits listed in Input 1, favouring ones that recur.
+- Draw top_traits from the traits listed in Input 1, favouring ones that recur. Give five or six, not three.
 
 Return JSON with:
 {
   "summary": "A 2-3 sentence personality summary that starts with 'You are'",
-  "top_traits": ["trait1", "trait2", "trait3"],
+  "top_traits": ["trait1", "trait2", "trait3", "trait4", "trait5", "trait6"],
   "compatibility_tips": "One sentence in second person"
 }
 

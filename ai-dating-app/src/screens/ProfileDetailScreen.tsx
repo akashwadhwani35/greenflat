@@ -155,6 +155,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     is_verified?: boolean;
     personality_summary?: string;
     top_traits?: string[];
+    personality_traits?: string[];
     pronouns?: string[];
     height?: number | string;
     body_type?: string;
@@ -178,7 +179,11 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const interests = toTextArray(matchData.interests);
   const matchHighlights = toTextArray(matchData.match_highlights);
   const highlights = interests.length > 0 ? interests : matchHighlights;
-  const personalityTopTraits = toTextArray(matchData.top_traits);
+  // Top traits first, then everything else the ten answers resolved to.
+  // Three chips said very little about a person.
+  const personalityTopTraits = Array.from(
+    new Set([...toTextArray(matchData.top_traits), ...toTextArray(matchData.personality_traits)].map((t) => t.trim()).filter(Boolean))
+  ).slice(0, 8);
 
   const relationshipGoal = toText(matchData.relationship_goal);
   const lookingFor = relationshipGoal
@@ -458,7 +463,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
               </Typography>
             </View>
             <View style={styles.chipRow}>
-              {personalityTopTraits.slice(0, 10).map((trait) => {
+              {personalityTopTraits.map((trait) => {
                 const shared = sharesTrait(trait);
                 return (
                   <View key={`personality-trait-${trait}`} style={[styles.chip, bubbleStyle(shared)]}>

@@ -174,7 +174,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       .join('\n');
     let aiPersonalityInsights = {
       summary: 'You have a unique personality!',
-      top_traits: uniqueTraits.slice(0, 3),
+      top_traits: uniqueTraits.slice(0, 6),
       compatibility_tips: 'You would match well with someone who shares your values.',
     };
 
@@ -183,7 +183,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         const insights = await analyzePersonality(answerSummary, aboutYouText);
         aiPersonalityInsights = {
           summary: insights.summary,
-          top_traits: insights.top_traits && insights.top_traits.length > 0 ? insights.top_traits : uniqueTraits.slice(0, 3),
+          top_traits: insights.top_traits && insights.top_traits.length > 0 ? insights.top_traits : uniqueTraits.slice(0, 6),
           compatibility_tips: insights.compatibility_tips,
         };
       } catch (error) {

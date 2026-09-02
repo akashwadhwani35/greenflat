@@ -143,10 +143,11 @@ const EDUCATION_OPTIONS: Option[] = [
   { value: 'other', label: 'Other' },
 ];
 
-// Per the board. Free: gender, age, distance, relationship intention, religion,
-// children, smoking, drinking, marijuana, drugs. Dating intentions moved to
-// free (and is the same thing as relationship type, so it is not shown twice).
+// Per the board. Free: gender, age, distance, religion, children, smoking,
+// drinking, marijuana, drugs. Dating intention (what someone is looking for)
+// is an advanced filter, round-4 feedback.
 const PAID_FILTER_KEYS: Array<keyof AdvancedFilters> = [
+  'relationship_goal',
   'ethnicity',
   'minHeight',
   'maxHeight',
@@ -377,7 +378,6 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Max distance (km)</Typography>
           <Input placeholder="e.g. 25" keyboardType="numeric" leftIcon="navigation" value={filters.distance_km} onChangeText={(text) => update('distance_km', text)} />
 
-          {renderMulti('Relationship intention', 'relationship_goal', RELATIONSHIP_TYPE_OPTIONS)}
           {renderMulti('Religion', 'religion', RELIGION_OPTIONS)}
           {renderMulti('Children', 'have_kids', CHILDREN_OPTIONS)}
           {renderMulti('Smoking', 'smoking_habit', SMOKING_OPTIONS)}
@@ -396,10 +396,12 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
             <TouchableOpacity onPress={onPressPaidLocked} activeOpacity={0.85} style={[styles.lockCard, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
               <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Upgrade to unlock paid filters</Typography>
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 4 }}>
-                Height, ethnicity, education, politics, and how someone actually is: personality, communication, needs, conflict style, lifestyle.
+                Dating intention, height, ethnicity, education, politics, and how someone actually is: personality, communication, needs, conflict style, lifestyle.
               </Typography>
             </TouchableOpacity>
           ) : null}
+
+          {renderMulti('Dating intention', 'relationship_goal', RELATIONSHIP_TYPE_OPTIONS, true)}
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Height (cm)</Typography>
           <View style={styles.rangeRow}>
