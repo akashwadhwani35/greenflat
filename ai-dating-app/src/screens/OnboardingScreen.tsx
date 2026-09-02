@@ -55,7 +55,7 @@ type Slide = {
 };
 
 const allSlides: Slide[] = [
-  { key: 'basic', title: 'Me', subtitle: 'Name, birthday, and how you identify.' },
+  { key: 'basic', title: 'Tell about yourself', subtitle: 'Name, birthday, and how you identify.' },
   { key: 'intentions', title: "Who I'm looking for", subtitle: 'Who you want to meet, and what for.' },
   { key: 'location', title: 'Where', subtitle: 'Your city and how far you will travel.' },
   { key: 'understand', title: 'Understand me', subtitle: 'Ten situations. Pick what you would actually do.' },
@@ -113,7 +113,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   const [loading, setLoading] = useState(false);
   const [showIOSPicker, setShowIOSPicker] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
-  const [citySuggestions, setCitySuggestions] = useState<{ city: string; lat?: number; lng?: number }[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<{ city: string; label?: string; level?: 'city' | 'state'; lat?: number; lng?: number }[]>([]);
+  // Maps lookup answered with a server error: let a typed city through rather than block signup.
+  const [mapsUnavailable, setMapsUnavailable] = useState(false);
 
   const [form, setForm] = useState({
     // Basic
@@ -133,6 +135,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     lat: null as number | null,
     lng: null as number | null,
     useCurrentCity: false,
+    // True once the city came from GPS or was picked from the suggestions.
+    cityConfirmed: false,
     distanceRadius: 50,
 
     // Physical
@@ -140,8 +144,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     bodyType: '',
 
     // Lifestyle
-    smoker: 'Never' as 'Never' | 'Social' | 'Regular',
-    drinker: 'Social' as 'Never' | 'Social' | 'Regular',
+    // Nothing pre-selected: an unanswered question is not "Never".
+    smoker: '' as '' | 'Never' | 'Social' | 'Regular',
+    drinker: '' as '' | 'Never' | 'Social' | 'Regular',
     drugs: '',
     diet: '',
     fitnessLevel: '',
@@ -256,6 +261,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         break;
       case 'location':
         if (!form.city.trim()) nextErrors.city = 'Add your city.';
+        // A typed name is not enough: it has to be a real city or state from
+        // the list (or GPS), so a country name cannot be saved as a city.
+        else if (!form.cityConfirmed && !mapsUnavailable) nextErrors.city = 'Pick your city or state from the list.';
         break;
       case 'understand': {
         if (questions.length === 0) {
@@ -319,8 +327,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       prompt1: form.prompt1 || null,
       prompt2: form.prompt2 || null,
       prompt3: form.prompt3 || null,
-      smoker: form.smoker.toLowerCase(),
-      drinker: form.drinker.toLowerCase(),
+      smoker: form.smoker ? form.smoker.toLowerCase() : null,
+      drinker: form.drinker ? form.drinker.toLowerCase() : null,
       drugs: form.drugs ? form.drugs.toLowerCase() : null,
       diet: form.diet || null,
       fitness_level: form.fitnessLevel || null,
@@ -554,6 +562,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               ...prev,
               city: detectedCity,
               useCurrentCity: true,
+              cityConfirmed: true,
               lat: latitude,
               lng: longitude,
             }));
@@ -585,7 +594,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   };
 
   const handleCityChange = (text: string) => {
-    setForm((prev) => ({ ...prev, city: text, useCurrentCity: false }));
+    setForm((prev) => ({ ...prev, city: text, useCurrentCity: false, cityConfirmed: false, lat: null, lng: null }));
     setLocationError(null);
 
     // Clear previous timeout
@@ -628,13 +637,21 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       const data = await response.json();
 
       if (!response.ok) {
+        setCitySuggestions([]);
+        if (response.status === 404) {
+          // Google found the text but only as a country or similar.
+          setMapsUnavailable(false);
+          setLocationError(data.error || 'Enter a city or state, not a country.');
+          return;
+        }
         // A dead Maps key used to look exactly like "no matching city". Tell the
         // person what is going on so they type their city and carry on.
-        setCitySuggestions([]);
+        setMapsUnavailable(true);
         setLocationError(data.error || 'City search is unavailable right now. Type your city and continue.');
         if (!silent) throw new Error(data.error || 'Unable to verify city');
         return;
       }
+      setMapsUnavailable(false);
 
       // Only show suggestions, don't auto-fill the city
       if (data.suggestions && data.suggestions.length > 0) {
@@ -840,6 +857,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                                 lat: typeof s.lat === 'number' ? s.lat : prev.lat,
                                 lng: typeof s.lng === 'number' ? s.lng : prev.lng,
                                 useCurrentCity: false,
+                                cityConfirmed: true,
                               }));
                               setCitySuggestions([]);
                               setLocationError(null);
@@ -848,7 +866,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                           >
                             <Feather name="map-pin" size={14} color={theme.colors.neonGreen} />
                             <Typography variant="small" style={{ color: theme.colors.text, marginLeft: 10, flex: 1 }}>
-                              {s.city}
+                              {s.label || s.city}
                             </Typography>
                           </TouchableOpacity>
                         ))}
@@ -1054,13 +1072,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               , false)}
 
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Smoking</Typography>
-              {renderChipRow(smokerOptions, [form.smoker], (option) =>
-                setForm((prev) => ({ ...prev, smoker: option as 'Never' | 'Social' | 'Regular' }))
+              {renderChipRow(smokerOptions, form.smoker ? [form.smoker] : [], (option) =>
+                setForm((prev) => ({ ...prev, smoker: prev.smoker === option ? '' : (option as 'Never' | 'Social' | 'Regular') }))
               , false)}
 
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Drinking</Typography>
-              {renderChipRow(drinkerOptions, [form.drinker], (option) =>
-                setForm((prev) => ({ ...prev, drinker: option as 'Never' | 'Social' | 'Regular' }))
+              {renderChipRow(drinkerOptions, form.drinker ? [form.drinker] : [], (option) =>
+                setForm((prev) => ({ ...prev, drinker: prev.drinker === option ? '' : (option as 'Never' | 'Social' | 'Regular') }))
               , false)}
 
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 16 }}>Drugs</Typography>

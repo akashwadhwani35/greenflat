@@ -141,7 +141,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         } catch (error: any) {
           await client.query('ROLLBACK');
           if (error.message === 'INSUFFICIENT_CREDITS') {
-            return res.status(402).json({ error: 'Not enough tokens. Super Likes cost 4 tokens.' });
+            return res.status(402).json({ error: 'Not enough tokens. Green Flags cost 4 tokens.' });
           }
           throw error;
         }
@@ -156,7 +156,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
 
         await client.query('COMMIT');
         return res.json({
-          message: 'Superlike sent!',
+          message: 'Green Flag sent!',
           is_match: false,
           match_id: null,
           is_superlike: true,
@@ -168,7 +168,12 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       }
 
       await client.query('ROLLBACK');
-      return res.status(400).json({ error: 'You have already liked this user' });
+      return res.status(400).json({
+        error: alreadySuperliked
+          ? 'You have already sent this person a Green Flag'
+          : 'You have already liked this user',
+        already_liked: true,
+      });
     }
 
     // Check if user has exceeded limits (only for new likes, not upgrades).
@@ -205,7 +210,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       } catch (error: any) {
         await client.query('ROLLBACK');
         if (error.message === 'INSUFFICIENT_CREDITS') {
-          return res.status(402).json({ error: 'Not enough tokens. Super Likes cost 4 tokens.' });
+          return res.status(402).json({ error: 'Not enough tokens. Green Flags cost 4 tokens.' });
         }
         throw error;
       }
@@ -292,7 +297,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     await client.query('COMMIT');
 
     res.json({
-      message: is_superlike ? 'Superlike sent!' : 'Profile liked successfully',
+      message: is_superlike ? 'Green Flag sent!' : 'Profile liked successfully',
       is_match: isMatch,
       match_id: matchId,
       is_superlike: Boolean(is_superlike),
@@ -435,6 +440,20 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Target user not found' });
     }
 
+    // One compliment per person. Checked before the tokens are taken so a
+    // second tap costs nothing and says why.
+    const existingLike = await client.query(
+      'SELECT id, is_compliment FROM likes WHERE liker_id = $1 AND liked_id = $2',
+      [userId, target_user_id]
+    );
+    if (existingLike.rows.length > 0 && existingLike.rows[0].is_compliment) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        error: 'You have already sent this person a compliment',
+        already_complimented: true,
+      });
+    }
+
     let remainingCredits = 0;
     try {
       remainingCredits = await consumeCredits(
@@ -451,11 +470,6 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
       }
       throw error;
     }
-
-    const existingLike = await client.query(
-      'SELECT id FROM likes WHERE liker_id = $1 AND liked_id = $2',
-      [userId, target_user_id]
-    );
 
     if (existingLike.rows.length > 0) {
       await client.query(

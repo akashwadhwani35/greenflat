@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { Alert, View, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, Dimensions, RefreshControl, Animated } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,6 +11,12 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_PADDING = 20; // padding on left and right
 const CARD_GAP = 16; // gap between cards
 const CARD_WIDTH = (SCREEN_WIDTH - (CARD_PADDING * 2) - CARD_GAP) / 2;
+// Explore layout: the Drop more button plus its top margin, and the gap
+// between the two rows of tiles.
+const OFFGRID_BUTTON_BLOCK = 58 + 12;
+const OFFGRID_ROW_GAP = 12;
+// Space the floating bottom nav takes at the foot of the screen.
+const NAV_RESERVE = Platform.OS === 'ios' ? 94 : 74;
 
 export type MatchCandidate = {
   id: number;
@@ -41,6 +47,8 @@ type DiscoverScreenProps = {
   pendingAISearchCharge?: boolean;
   onConsumeAISearchCharge?: () => void;
   likedIds?: Set<number>;
+  /** Rejected from the profile screen: gone from the grid straight away. */
+  passedIds?: Set<number>;
 };
 
 const fallbackPhotos = [
@@ -99,6 +107,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   pendingAISearchCharge = false,
   onConsumeAISearchCharge,
   likedIds,
+  passedIds,
 }) => {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState<'onGrid' | 'offGrid'>('onGrid');
@@ -109,6 +118,22 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   const [viewedProfileIds, setViewedProfileIds] = useState<number[]>([]); // Track viewed profiles
   const [offGridHistory, setOffGridHistory] = useState<MatchCandidate[][]>([]);
   const [isPremium, setIsPremium] = useState(false);
+  // Height the Explore grid has to fit in (measured), so it never scrolls.
+  const [offGridAreaHeight, setOffGridAreaHeight] = useState(0);
+
+  const visibleMatches = useMemo(
+    () => (passedIds && passedIds.size > 0 ? matches.filter((m) => !passedIds.has(m.id)) : matches),
+    [matches, passedIds]
+  );
+
+  // Explore shows 4 tiles and the button, all on one screen. When the phone
+  // is short the tiles shrink rather than the page scrolling.
+  const offGridCardHeight = useMemo(() => {
+    const natural = CARD_WIDTH * 1.5;
+    if (!offGridAreaHeight) return natural;
+    const available = offGridAreaHeight - OFFGRID_BUTTON_BLOCK - OFFGRID_ROW_GAP;
+    return Math.max(150, Math.min(natural, Math.floor(available / 2)));
+  }, [offGridAreaHeight]);
 
   // What is on the Explore tab right now. Switching to AI Match and back used
   // to refetch, which excluded everything already seen, so the tab showed
@@ -344,7 +369,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     return theme.colors.muted;
   };
 
-  const MatchCardItem: React.FC<{ match: MatchCandidate; index: number }> = ({ match, index }) => {
+  const MatchCardItem: React.FC<{ match: MatchCandidate; index: number; cardHeight?: number }> = ({ match, index, cardHeight }) => {
     const fallback = fallbackPhotos[index % fallbackPhotos.length];
     const photoSource = match.primary_photo ? { uri: match.primary_photo } : fallback;
     const matchColor = getMatchColor(match.match_percentage);
@@ -379,7 +404,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         }}
       >
         <TouchableOpacity
-          style={styles.card}
+          style={[styles.card, cardHeight ? { height: cardHeight, marginBottom: OFFGRID_ROW_GAP } : null]}
           onPress={() => onCardPress?.(match)}
           activeOpacity={0.9}
         >
@@ -559,7 +584,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
             ))}
           </View>
         </ScrollView>
-      ) : matches.length === 0 ? (
+      ) : visibleMatches.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(188, 246, 65, 0.1)' }]}>
             <Feather name="search" size={40} color={theme.colors.neonGreen} />
@@ -574,13 +599,13 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           </Typography>
         </View>
       ) : activeTab === 'offGrid' ? (
-        <ScrollView
-          contentContainerStyle={styles.offGridContainer}
-          showsVerticalScrollIndicator={false}
+        <View
+          style={styles.offGridContainer}
+          onLayout={(e) => setOffGridAreaHeight(e.nativeEvent.layout.height)}
         >
           <View style={[styles.grid, styles.offGridGrid]}>
-            {matches.slice(0, 4).map((match, index) => (
-              <MatchCardItem key={`${match.id}-${index}`} match={match} index={index} />
+            {visibleMatches.slice(0, 4).map((match, index) => (
+              <MatchCardItem key={`${match.id}-${index}`} match={match} index={index} cardHeight={offGridCardHeight} />
             ))}
           </View>
           <TouchableOpacity
@@ -592,7 +617,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
               Drop more
             </Typography>
           </TouchableOpacity>
-        </ScrollView>
+        </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -607,7 +632,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           }
         >
           <View style={styles.grid}>
-            {matches.map((match, index) => (
+            {visibleMatches.map((match, index) => (
               <MatchCardItem key={`${match.id}-${index}`} match={match} index={index} />
             ))}
           </View>
@@ -859,21 +884,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // Scrolls, with the button directly under the tiles. It used to be pinned to
-  // the bottom of a flex container, which put it behind the nav bar.
+  // Fixed, not scrolling: four tiles and the button share whatever height is
+  // left above the nav. The tiles shrink on short screens.
   offGridContainer: {
+    flex: 1,
     paddingHorizontal: 20,
-    paddingBottom: Platform.OS === 'ios' ? 170 : 150,
+    paddingBottom: NAV_RESERVE,
   },
   offGridGrid: {
     paddingBottom: 0,
   },
   dropMoreButton: {
     alignSelf: 'center',
+    height: 58,
     paddingHorizontal: 40,
-    paddingVertical: 16,
     borderRadius: 999,
-    marginTop: 20,
+    marginTop: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   loadingContainer: {
     flex: 1,

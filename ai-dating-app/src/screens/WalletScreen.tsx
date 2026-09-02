@@ -22,7 +22,7 @@ const REASON_LABELS: Record<string, string> = {
   weekly_allowance: 'Weekly free tokens',
   daily_allowance: 'Free tokens',
   ai_search: 'AI Search',
-  superlike: 'Super like',
+  superlike: 'Green Flag',
   compliment: 'Compliment',
   compliment_send: 'Compliment',
   boost: 'Boost',
@@ -295,20 +295,27 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
               Nothing yet. Tokens you earn and spend show up here.
             </Typography>
           ) : (
-            transactions.map((tx) => {
-              const credit = tx.direction === 'credit';
-              return (
-                <View key={tx.id} style={[styles.historyRow, { borderTopColor: theme.colors.border }]}>
-                  <View style={{ flex: 1 }}>
-                    <Typography variant="small" style={{ color: theme.colors.text }}>{reasonLabel(tx.reason)}</Typography>
-                    <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 2 }}>{historyDate(tx.created_at)}</Typography>
+            <ScrollView
+              style={styles.historyList}
+              nestedScrollEnabled
+              showsVerticalScrollIndicator
+              persistentScrollbar
+            >
+              {transactions.map((tx) => {
+                const credit = tx.direction === 'credit';
+                return (
+                  <View key={tx.id} style={[styles.historyRow, { borderTopColor: theme.colors.border }]}>
+                    <View style={{ flex: 1 }}>
+                      <Typography variant="small" style={{ color: theme.colors.text }}>{reasonLabel(tx.reason)}</Typography>
+                      <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 2 }}>{historyDate(tx.created_at)}</Typography>
+                    </View>
+                    <Typography variant="bodyStrong" style={{ color: credit ? theme.colors.neonGreen : theme.colors.text }}>
+                      {credit ? '+' : '-'}{Math.abs(Number(tx.amount) || 0)}
+                    </Typography>
                   </View>
-                  <Typography variant="bodyStrong" style={{ color: credit ? theme.colors.neonGreen : theme.colors.text }}>
-                    {credit ? '+' : '-'}{Math.abs(Number(tx.amount) || 0)}
-                  </Typography>
-                </View>
-              );
-            })
+                );
+              })}
+            </ScrollView>
           )}
         </View>
 
@@ -371,11 +378,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  // Same size whether there are 5 transactions or 500: the rows scroll
+  // inside the box instead of the box growing down the page.
   historyCard: {
     borderRadius: 16,
     borderWidth: 1,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    height: 300,
+  },
+  historyList: {
+    flex: 1,
+    marginTop: 4,
   },
   historyRow: {
     flexDirection: 'row',

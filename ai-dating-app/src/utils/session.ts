@@ -12,6 +12,7 @@ export type SavedSession = {
 const SESSION_KEY = 'greenflag.session.v1';
 const FIRST_SEARCH_DONE_PREFIX = 'greenflag.firstSearchDone.v1.';
 const WELCOME_SHOWN_PREFIX = 'greenflag.welcomeShown.v1.';
+const PASSED_IDS_PREFIX = 'greenflag.passedIds.v1.';
 
 export const loadSession = async (): Promise<SavedSession | null> => {
   try {
@@ -57,4 +58,26 @@ export const hasWelcomeBeenShown = async (userId: number): Promise<boolean> => {
 
 export const markWelcomeShown = async (userId: number): Promise<void> => {
   await AsyncStorage.setItem(`${WELCOME_SHOWN_PREFIX}${userId}`, '1');
+};
+
+/**
+ * Profiles this account rejected. Keyed by user id so one account's passes
+ * never leak into another on the same phone; capped so the key stays small.
+ */
+export const loadPassedIds = async (userId: number): Promise<number[]> => {
+  try {
+    const raw = await AsyncStorage.getItem(`${PASSED_IDS_PREFIX}${userId}`);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((n) => typeof n === 'number') : [];
+  } catch {
+    return [];
+  }
+};
+
+export const savePassedIds = async (userId: number, ids: number[]): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(`${PASSED_IDS_PREFIX}${userId}`, JSON.stringify(ids.slice(-500)));
+  } catch {
+    // Best-effort; the in-memory set still applies for this session.
+  }
 };

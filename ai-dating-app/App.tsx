@@ -40,7 +40,7 @@ import { AISearchScreen } from './src/screens/AISearchScreen';
 import { DeleteAccountScreen } from './src/screens/DeleteAccountScreen';
 import { SubscriptionScreen } from './src/screens/SubscriptionScreen';
 import { PausedBanner } from './src/components/PausedBanner';
-import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown } from './src/utils/session';
+import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown, loadPassedIds, savePassedIds } from './src/utils/session';
 import { configurePurchases, logOutPurchases } from './src/services/purchases';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
@@ -117,18 +117,35 @@ const AppShell: React.FC = () => {
   const [aiSearchKey, setAiSearchKey] = useState(0);
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
   const [likedProfileIds, setLikedProfileIds] = useState<Set<number>>(new Set());
+  // Rejected profiles disappear from the feed for this account (persisted per user id).
+  const [passedProfileIds, setPassedProfileIds] = useState<Set<number>>(new Set());
+  const [complimentedProfileIds, setComplimentedProfileIds] = useState<Set<number>>(new Set());
+  // One like / Green Flag / compliment request at a time, whatever gets tapped.
+  const actionInFlightRef = useRef(false);
   const [isProfilePaused, setIsProfilePaused] = useState(false);
 
-  const applyEntryPointForUser = async (id: number) => {
-    const firstSearchDone = await loadFirstSearchDone(id);
-    setHasCompletedFirstSearch(firstSearchDone);
+  // Everything remembered about the previous account goes when the account
+  // changes. Liked hearts from one login used to show up on the next.
+  const resetPerAccountState = async (id: number | null) => {
+    setLikedProfileIds(new Set());
+    setComplimentedProfileIds(new Set());
+    setPassedProfileIds(new Set(id ? await loadPassedIds(id) : []));
+  };
 
-    // Show one-time welcome popup for new users
+  // The welcome popup is shown once, after the intro slides that follow
+  // onboarding, not on top of the first onboarding step.
+  const maybeShowWelcome = async (id: number) => {
     const welcomeShown = await hasWelcomeBeenShown(id);
     if (!welcomeShown) {
       setShowWelcomePopup(true);
       void markWelcomeShown(id);
     }
+  };
+
+  const applyEntryPointForUser = async (id: number) => {
+    const firstSearchDone = await loadFirstSearchDone(id);
+    setHasCompletedFirstSearch(firstSearchDone);
+    await resetPerAccountState(id);
 
     if (firstSearchDone) {
       setOverlay(null);
@@ -204,6 +221,7 @@ const AppShell: React.FC = () => {
             // RevenueCat is keyed by our user id so the backend can verify purchases.
             await configurePurchases(session.user.id);
             await applyEntryPointForUser(session.user.id);
+            void maybeShowWelcome(session.user.id);
           }
           setStage('matchboard');
         }
@@ -251,6 +269,7 @@ const AppShell: React.FC = () => {
     }
     await logOutPurchases();
     await clearSession();
+    await resetPerAccountState(null);
     setAuthToken(null);
     setUserId(null);
     setUserName('');
@@ -293,6 +312,7 @@ const AppShell: React.FC = () => {
 
   const handlePostOnboardingComplete = () => {
     setStage('matchboard');
+    if (userId) void maybeShowWelcome(userId);
   };
 
   const handleCardPress = (match: MatchCandidate) => {
@@ -308,7 +328,14 @@ const AppShell: React.FC = () => {
   };
 
   const handleSwipeLeft = () => {
-    console.log('Passed on:', selectedMatch?.name);
+    if (selectedMatch) {
+      const id = selectedMatch.id;
+      setPassedProfileIds((prev) => {
+        const next = new Set(prev).add(id);
+        if (userId) void savePassedIds(userId, Array.from(next));
+        return next;
+      });
+    }
     handleCloseProfile();
   };
 
@@ -389,6 +416,8 @@ const AppShell: React.FC = () => {
       setStage('welcome');
       return;
     }
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
 
     handleCloseProfile(true);
 
@@ -425,6 +454,8 @@ const AppShell: React.FC = () => {
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Unable to process like.');
       setTimeout(() => setSelectedMatch(null), 300);
+    } finally {
+      actionInFlightRef.current = false;
     }
   };
 
@@ -435,6 +466,8 @@ const AppShell: React.FC = () => {
       setStage('welcome');
       return;
     }
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
 
     handleCloseProfile(true);
 
@@ -454,7 +487,8 @@ const AppShell: React.FC = () => {
 
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({}));
-        throw new Error(errorBody.error || 'Unable to superlike right now.');
+        if (errorBody.already_liked) setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
+        throw new Error(errorBody.error || 'Unable to send a Green Flag right now.');
       }
 
       const data = await response.json();
@@ -468,20 +502,24 @@ const AppShell: React.FC = () => {
         });
         setShowMatchModal(true);
       } else {
-        Alert.alert('Superliked! ⭐', `${selectedMatch.name} will see your superlike at the top of their inbox! (4 tokens used)`);
+        Alert.alert('Green Flag sent', `${selectedMatch.name} will see your Green Flag at the top of their inbox. 4 tokens used.`);
         setTimeout(() => setSelectedMatch(null), 300);
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to process superlike.');
+      Alert.alert('Error', error.message || 'Unable to send a Green Flag.');
       setTimeout(() => setSelectedMatch(null), 300);
+    } finally {
+      actionInFlightRef.current = false;
     }
   };
 
-  const handleSendCompliment = async (targetUserId: number, content: string) => {
+  const handleSendCompliment = async (targetUserId: number, content: string): Promise<boolean> => {
     if (!authToken) {
       Alert.alert('Sign in required', 'Please restart onboarding to continue.');
-      return;
+      return false;
     }
+    if (actionInFlightRef.current) return false;
+    actionInFlightRef.current = true;
 
     try {
       const response = await fetch(`${API_BASE_URL}/likes/compliment`, {
@@ -498,12 +536,18 @@ const AppShell: React.FC = () => {
 
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
+        if (body.already_complimented) setComplimentedProfileIds((prev) => new Set(prev).add(targetUserId));
         throw new Error(body.error || 'Unable to send compliment.');
       }
 
+      setComplimentedProfileIds((prev) => new Set(prev).add(targetUserId));
       Alert.alert('Compliment sent', 'Delivered to their Likes inbox. 6 tokens used.');
+      return true;
     } catch (error: any) {
       Alert.alert('Could not send compliment', error.message || 'Please try again.');
+      return false;
+    } finally {
+      actionInFlightRef.current = false;
     }
   };
 
@@ -830,7 +874,9 @@ const AppShell: React.FC = () => {
             onGoogleAuth={async ({ token, user, isNewUser }) => {
               if (user.is_admin) setIsAdmin(true);
               await persistAuth(token, user);
-              setStage(needsOnboarding(user, isNewUser) ? 'onboarding' : 'matchboard');
+              const toOnboarding = needsOnboarding(user, isNewUser);
+              setStage(toOnboarding ? 'onboarding' : 'matchboard');
+              if (!toOnboarding) void maybeShowWelcome(user.id);
             }}
           />
         );
@@ -857,7 +903,9 @@ const AppShell: React.FC = () => {
             onSuccess={async ({ token, user, isNewUser }) => {
               if (user.is_admin) setIsAdmin(true);
               await persistAuth(token, user);
-              setStage(needsOnboarding(user, isNewUser) ? 'onboarding' : 'matchboard');
+              const toOnboarding = needsOnboarding(user, isNewUser);
+              setStage(toOnboarding ? 'onboarding' : 'matchboard');
+              if (!toOnboarding) void maybeShowWelcome(user.id);
             }}
           />
         );
@@ -900,6 +948,7 @@ const AppShell: React.FC = () => {
                 pendingAISearchCharge={pendingAISearchCharge}
                 onConsumeAISearchCharge={() => setPendingAISearchCharge(false)}
                 likedIds={likedProfileIds}
+                passedIds={passedProfileIds}
               />
             )}
             <ProfileDetailScreen
@@ -913,6 +962,8 @@ const AppShell: React.FC = () => {
               onBlock={handleBlockFromProfile}
               onReport={handleReportFromProfile}
               viewer={viewerProfile}
+              alreadyLiked={selectedMatch ? likedProfileIds.has(selectedMatch.id) : false}
+              alreadyComplimented={selectedMatch ? complimentedProfileIds.has(selectedMatch.id) : false}
             />
 
             {/* Match Modal */}

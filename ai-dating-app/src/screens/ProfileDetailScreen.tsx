@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -14,7 +14,7 @@ type ProfileDetailScreenProps = {
   onSwipeLeft: () => void;
   onSwipeRight: () => void;
   onSuperlike?: () => void;
-  onSendCompliment?: (targetUserId: number, content: string) => Promise<void> | void;
+  onSendCompliment?: (targetUserId: number, content: string) => Promise<boolean | void> | boolean | void;
   onBlock?: (targetUserId: number, name: string) => void;
   onReport?: (targetUserId: number, name: string) => void;
   onHeaderRightPress?: () => void;
@@ -22,6 +22,10 @@ type ProfileDetailScreenProps = {
   headerRightAccessibilityLabel?: string;
   embedded?: boolean;
   hideActionButtons?: boolean;
+  /** Like / Green Flag already sent from this account: those buttons go quiet. */
+  alreadyLiked?: boolean;
+  /** One compliment per person; the composer stays closed after it. */
+  alreadyComplimented?: boolean;
   /**
    * The signed-in user's own answers. When supplied, any detail the two people
    * share is rendered in green. Omitted when someone is previewing their own
@@ -121,11 +125,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   headerRightAccessibilityLabel,
   embedded = false,
   hideActionButtons = false,
+  alreadyLiked = false,
+  alreadyComplimented = false,
   viewer = null,
 }) => {
   const theme = useTheme();
   const { height: windowHeight } = useWindowDimensions();
-  const [sendingComplimentKey, setSendingComplimentKey] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [composerText, setComposerText] = useState('');
+  const [sendingCompliment, setSendingCompliment] = useState(false);
+  const [sentThisSession, setSentThisSession] = useState(false);
+  const complimentDone = alreadyComplimented || sentThisSession;
 
   if (!match) {
     if (embedded) return null;
@@ -239,24 +249,42 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const bubbleTextColor = (shared: boolean) =>
     shared ? theme.colors.neonGreen : theme.colors.textDark;
 
-  const handleCompliment = async (prompt: string, answer: string) => {
-    if (!onSendCompliment) return;
-    const key = `${prompt}-${answer}`;
-    if (sendingComplimentKey) return;
-    setSendingComplimentKey(key);
-    try {
-      const preview = answer.trim().replace(/\s+/g, ' ').slice(0, 110);
-      const compliment = `Loved your "${prompt}" answer${preview ? `: ${preview}` : ''}`;
-      await onSendCompliment(match.id, compliment);
-    } finally {
-      setSendingComplimentKey(null);
+  // Nothing is sent until the person has written something. The compliment
+  // button used to fire a canned line straight away.
+  const openComposer = (seed = '') => {
+    if (!onSendCompliment || sendingCompliment) return;
+    if (complimentDone) {
+      Alert.alert('Already sent', `You have already sent ${name} a compliment.`);
+      return;
     }
+    setComposerText(seed);
+    setComposerOpen(true);
   };
 
-  const handleQuickMessage = () => {
-    if (!onSendCompliment || sendingComplimentKey || promptCards.length === 0) return;
-    const firstCard = promptCards[0];
-    void handleCompliment(firstCard.prompt, firstCard.answer);
+  const handleCompliment = (prompt: string) => {
+    openComposer(`Loved your "${prompt}" answer. `);
+  };
+
+  const handleQuickMessage = () => openComposer('');
+
+  const submitCompliment = async () => {
+    const text = composerText.trim().replace(/\s+/g, ' ');
+    if (!onSendCompliment || sendingCompliment || complimentDone) return;
+    if (text.length < 2) {
+      Alert.alert('Write something first', 'A compliment needs a few words.');
+      return;
+    }
+    setSendingCompliment(true);
+    try {
+      const result = await onSendCompliment(match.id, text.slice(0, 300));
+      if (result !== false) {
+        setSentThisSession(true);
+        setComposerOpen(false);
+        setComposerText('');
+      }
+    } finally {
+      setSendingCompliment(false);
+    }
   };
 
   const handleSafetyMenu = () => {
@@ -476,12 +504,12 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             <TouchableOpacity
               style={[styles.complimentRow, { borderTopColor: theme.colors.border }]}
               activeOpacity={0.8}
-              disabled={!onSendCompliment || sendingComplimentKey === `${card.prompt}-${card.answer}`}
-              onPress={() => { void handleCompliment(card.prompt, card.answer); }}
+              disabled={!onSendCompliment || complimentDone}
+              onPress={() => handleCompliment(card.prompt)}
             >
-              <Feather name="message-circle" size={14} color={theme.colors.muted} />
-              <Typography variant="small" style={[styles.complimentText, { color: theme.colors.muted }]}>
-                {sendingComplimentKey === `${card.prompt}-${card.answer}` ? 'Sending...' : 'Compliment'}
+              <Feather name="message-circle" size={14} color={complimentDone ? theme.colors.neonGreen : theme.colors.muted} />
+              <Typography variant="small" style={[styles.complimentText, { color: complimentDone ? theme.colors.neonGreen : theme.colors.muted }]}>
+                {complimentDone ? 'Compliment sent' : 'Compliment'}
               </Typography>
             </TouchableOpacity>
           </View>
@@ -501,39 +529,110 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
 
       </ScrollView>
         {!hideActionButtons ? (
-          <View style={[styles.actionsFixed, { backgroundColor: theme.colors.background }]}>
+          <View style={styles.actionsFixed} pointerEvents="box-none">
             <View style={styles.actionButtons}>
               <TouchableOpacity
                 onPress={onSwipeLeft}
-                style={[styles.circleActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+                style={[styles.circleActionButton, { backgroundColor: 'rgba(16, 29, 19, 0.92)', borderColor: theme.colors.secondaryHairline }]}
                 activeOpacity={0.8}
+                accessibilityLabel="Pass"
               >
-                <Feather name="x" size={36} color={theme.colors.text} />
+                <Feather name="x" size={24} color={theme.colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.circleActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+                style={[
+                  styles.circleActionButton,
+                  { backgroundColor: 'rgba(16, 29, 19, 0.92)', borderColor: complimentDone ? theme.colors.neonGreen : theme.colors.secondaryHairline },
+                ]}
                 activeOpacity={0.8}
                 onPress={handleQuickMessage}
-                disabled={!onSendCompliment || Boolean(sendingComplimentKey)}
+                disabled={!onSendCompliment || sendingCompliment}
+                accessibilityLabel="Compliment"
               >
-                <Feather name="message-circle" size={30} color={theme.colors.text} />
+                <Feather name="message-circle" size={22} color={complimentDone ? theme.colors.neonGreen : theme.colors.text} />
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.centerFlagButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
+                style={[
+                  styles.centerFlagButton,
+                  { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen },
+                  alreadyLiked ? styles.actionUsed : null,
+                ]}
                 activeOpacity={0.8}
                 onPress={onSuperlike}
+                disabled={alreadyLiked}
+                accessibilityLabel="Green Flag"
               >
-                <PixelFlag size={52} color={theme.colors.deepBlack} />
+                <PixelFlag size={34} color={theme.colors.deepBlack} />
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={onSwipeRight}
-                style={[styles.circleActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+                style={[
+                  styles.circleActionButton,
+                  { backgroundColor: 'rgba(16, 29, 19, 0.92)', borderColor: alreadyLiked ? theme.colors.neonGreen : theme.colors.secondaryHairline },
+                  alreadyLiked ? styles.actionUsed : null,
+                ]}
                 activeOpacity={0.8}
+                disabled={alreadyLiked}
+                accessibilityLabel="Like"
               >
-                <Feather name="heart" size={34} color={theme.colors.neonGreen} />
+                <Feather name="heart" size={24} color={theme.colors.neonGreen} />
               </TouchableOpacity>
             </View>
           </View>
+        ) : null}
+
+        {composerOpen ? (
+          <KeyboardAvoidingView
+            style={styles.composerBackdrop}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <Pressable style={StyleSheet.absoluteFill} onPress={() => !sendingCompliment && setComposerOpen(false)} />
+            <View style={[styles.composerCard, { backgroundColor: theme.colors.surface }]}>
+              <Pressable style={styles.composerClose} onPress={() => !sendingCompliment && setComposerOpen(false)} hitSlop={8}>
+                <Feather name="x" size={22} color={theme.colors.muted} />
+              </Pressable>
+              <View style={[styles.composerIcon, { backgroundColor: theme.colors.neonGreen }]}>
+                <Feather name="message-circle" size={26} color={theme.colors.deepBlack} />
+              </View>
+              <Typography variant="h2" style={[styles.composerTitle, { color: theme.colors.text }]}>
+                Compliment {name}
+              </Typography>
+              <Typography variant="small" style={[styles.composerBody, { color: theme.colors.muted }]}>
+                Say what stood out. It lands at the top of their Likes. 6 tokens, once per person.
+              </Typography>
+              <TextInput
+                style={[
+                  styles.composerInput,
+                  { color: theme.colors.text, borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.background },
+                ]}
+                value={composerText}
+                onChangeText={(t) => setComposerText(t.slice(0, 300))}
+                placeholder={`Something you liked about ${name}...`}
+                placeholderTextColor={theme.colors.muted}
+                multiline
+                maxLength={300}
+                autoFocus
+                textAlignVertical="top"
+                editable={!sendingCompliment}
+              />
+              <Typography variant="tiny" style={{ color: theme.colors.muted, alignSelf: 'flex-end', marginTop: 6 }}>
+                {composerText.length}/300
+              </Typography>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.composerButton,
+                  { backgroundColor: theme.colors.neonGreen },
+                  (pressed || sendingCompliment || composerText.trim().length < 2) && { opacity: 0.6 },
+                ]}
+                onPress={() => { void submitCompliment(); }}
+                disabled={sendingCompliment || composerText.trim().length < 2}
+              >
+                <Typography variant="bodyStrong" style={{ color: '#000', fontSize: 17 }}>
+                  {sendingCompliment ? 'Sending...' : 'Send compliment'}
+                </Typography>
+              </Pressable>
+            </View>
+          </KeyboardAvoidingView>
         ) : null}
     </View>
   );
@@ -587,7 +686,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 8,
-    paddingBottom: Platform.OS === 'ios' ? 150 : 126,
+    paddingBottom: Platform.OS === 'ios' ? 120 : 104,
     paddingTop: 8,
     flexGrow: 1,
     gap: 8,
@@ -664,16 +763,18 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   locationText: {},
-  // Pinned to the bottom of the screen so the like / superlike / pass buttons
-  // are reachable without scrolling to the end of a long profile.
+  // Pinned to the bottom of the screen so the like / Green Flag / pass buttons
+  // are reachable without scrolling to the end of a long profile. No bar
+  // behind them: the buttons float over the profile.
   actionsFixed: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
     alignItems: 'center',
-    paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 18,
+    paddingTop: 8,
+    paddingBottom: Platform.OS === 'ios' ? 26 : 16,
+    backgroundColor: 'transparent',
   },
   actionButtons: {
     flexDirection: 'row',
@@ -682,19 +783,92 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   circleActionButton: {
-    width: 84,
-    height: 84,
-    borderRadius: 42,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
   },
   centerFlagButton: {
-    width: 116,
-    height: 116,
-    borderRadius: 58,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  actionUsed: {
+    opacity: 0.4,
+  },
+  // Compliment composer: same shape as the welcome popup.
+  // Sits near the top so the keyboard, which the Modal does not resize for
+  // on Android, never covers the Send button.
+  composerBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    justifyContent: 'flex-start',
+    paddingTop: Platform.OS === 'ios' ? 90 : 64,
+    paddingHorizontal: 24,
+    zIndex: 50,
+  },
+  composerCard: {
+    borderRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 24,
+    alignItems: 'center',
+  },
+  composerClose: {
+    alignSelf: 'flex-end',
+    padding: 4,
+  },
+  composerIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 0,
+    marginBottom: 12,
+  },
+  composerTitle: {
+    textAlign: 'center',
+    marginBottom: 6,
+  },
+  composerBody: {
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: 4,
+    marginBottom: 16,
+  },
+  composerInput: {
+    width: '100%',
+    minHeight: 96,
+    maxHeight: 150,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: 'RedHatDisplay_400Regular',
+  },
+  composerButton: {
+    marginTop: 14,
+    borderRadius: 999,
+    paddingVertical: 15,
+    width: '100%',
+    alignItems: 'center',
   },
 });

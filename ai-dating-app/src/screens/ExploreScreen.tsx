@@ -20,6 +20,7 @@ type ExploreScreenProps = {
   pendingAISearchCharge?: boolean;
   onConsumeAISearchCharge?: () => void;
   likedIds?: Set<number>;
+  passedIds?: Set<number>;
 };
 
 export const ExploreScreen: React.FC<ExploreScreenProps> = ({
@@ -33,6 +34,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
   pendingAISearchCharge,
   onConsumeAISearchCharge,
   likedIds,
+  passedIds,
 }) => {
   return (
     <View style={styles.container}>
@@ -47,6 +49,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
         pendingAISearchCharge={pendingAISearchCharge}
         onConsumeAISearchCharge={onConsumeAISearchCharge}
         likedIds={likedIds}
+        passedIds={passedIds}
       />
     </View>
   );

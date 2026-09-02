@@ -304,16 +304,62 @@ export const publicGeocode = async (req: Request, res: Response) => {
       return res.status(502).json({ error: 'Location lookup is unavailable right now' });
     }
 
-    const suggestions = (geoJson?.results || []).slice(0, 5).map((r: any) => ({
-      city:
-        r.address_components?.find((c: any) => c.types?.includes('locality'))?.long_name ||
-        r.formatted_address ||
-        query,
-      lat: r.geometry?.location?.lat,
-      lng: r.geometry?.location?.lng,
-    }));
+    // Only places someone can live in: a city (or town / neighbourhood) or a
+    // state. Typing a country used to be accepted as a "city" and put the
+    // person nowhere in particular. Cities are listed first.
+    const CITY_TYPES = ['locality', 'postal_town', 'sublocality', 'sublocality_level_1', 'administrative_area_level_3'];
+    const STATE_TYPES = ['administrative_area_level_1', 'administrative_area_level_2'];
+    const placeLevel = (r: any): 'city' | 'state' | null => {
+      const types: string[] = Array.isArray(r?.types) ? r.types : [];
+      if (types.includes('country')) return null;
+      if (types.some((t) => CITY_TYPES.includes(t))) return 'city';
+      if (types.some((t) => STATE_TYPES.includes(t))) return 'state';
+      // A street address or landmark still tells us the city it sits in.
+      const hasLocality = r?.address_components?.some((c: any) => c.types?.includes('locality'));
+      return hasLocality ? 'city' : null;
+    };
+    const component = (r: any, type: string) =>
+      r?.address_components?.find((c: any) => c.types?.includes(type))?.long_name as string | undefined;
 
-    res.json({ city: city || null, lat: coords.lat, lng: coords.lng, suggestions });
+    const ranked = (geoJson?.results || [])
+      .map((r: any) => ({ r, level: placeLevel(r) }))
+      .filter((x: any) => x.level !== null)
+      .sort((a: any, b: any) => (a.level === b.level ? 0 : a.level === 'city' ? -1 : 1));
+
+    const seen = new Set<string>();
+    const suggestions = ranked
+      .map(({ r, level }: any) => {
+        const cityName =
+          level === 'city'
+            ? component(r, 'locality') || component(r, 'postal_town') || component(r, 'sublocality') || component(r, 'administrative_area_level_3')
+            : component(r, 'administrative_area_level_1') || component(r, 'administrative_area_level_2');
+        const state = component(r, 'administrative_area_level_1');
+        const country = component(r, 'country');
+        const name = cityName || r.formatted_address || query;
+        const label = [name, level === 'city' && state && state !== name ? state : null, country]
+          .filter(Boolean)
+          .join(', ');
+        return { city: name, label, level, lat: r.geometry?.location?.lat, lng: r.geometry?.location?.lng };
+      })
+      .filter((sug: any) => {
+        const key = `${sug.city}|${sug.lat}|${sug.lng}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, 5);
+
+    if (hasQuery && !hasCoords && suggestions.length === 0 && (geoJson?.results || []).length > 0) {
+      return res.status(404).json({ error: 'Enter a city or state, not a country', suggestions: [] });
+    }
+
+    const best = suggestions[0];
+    res.json({
+      city: hasCoords ? city || null : best?.city || null,
+      lat: hasCoords ? coords.lat : best?.lat,
+      lng: hasCoords ? coords.lng : best?.lng,
+      suggestions,
+    });
   } catch (error) {
     console.error('Public geocode error', error);
     res.status(500).json({ error: 'Failed to geocode location' });
