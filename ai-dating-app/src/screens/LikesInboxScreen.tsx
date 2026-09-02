@@ -5,6 +5,7 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { Button } from '../components/Button';
 import { PageHeader } from '../components/PageHeader';
+import { PixelFlag } from '../components/PixelFlag';
 import * as Notifications from 'expo-notifications';
 
 type Props = {
@@ -27,6 +28,8 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
+  const greenFlags = likes.filter((item) => Boolean(item?.is_superlike));
+  const regularLikes = likes.filter((item) => !item?.is_superlike);
 
   useEffect(() => {
     const fetchLikes = async () => {
@@ -77,10 +80,6 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
       <PageHeader title="Likes inbox" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Typography variant="body" muted>
-          People who liked you. Unlock more with premium.
-        </Typography>
-
         {loading ? (
           <ActivityIndicator color={theme.colors.brand} />
         ) : null}
@@ -90,31 +89,93 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
           </Typography>
         ) : null}
 
-        {likes.map((item, index) => (
-          <View
-            key={item?.id ?? `like-${index}`}
-            style={[styles.card, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
-          >
-            <Image source={item.user.primary_photo ? { uri: item.user.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />
-            <View style={{ flex: 1, gap: 4 }}>
-              <Typography variant="bodyStrong">{item.user.name}</Typography>
-              <Typography variant="small" muted>
-                {item.user.city}
+        {!loading && !error && likes.length === 0 ? (
+          <Typography variant="body" muted>
+            Nobody yet. Likes and Green Flags you receive show up here.
+          </Typography>
+        ) : null}
+
+        {/* Green Flags: their own section, and a different object from a like. */}
+        {greenFlags.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIcon, { backgroundColor: theme.colors.neonGreen }]}>
+                <PixelFlag size={14} color={theme.colors.deepBlack} />
+              </View>
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Green Flags</Typography>
+              <Typography variant="small" muted style={{ marginLeft: 'auto' }}>
+                {greenFlags.length}
               </Typography>
-              {item.is_compliment && item.compliment_message ? (
-                <Typography variant="tiny" style={{ color: theme.colors.textDark }}>
-                  "{item.compliment_message}"
-                </Typography>
-              ) : null}
             </View>
-            <Button
-              label="View"
-              onPress={() => {
-                onViewProfile?.(item.user);
-              }}
-            />
+            <Typography variant="small" muted style={{ marginBottom: 4 }}>
+              They spent a Green Flag on you. That is not a casual like.
+            </Typography>
+            {greenFlags.map((item, index) => (
+              <View
+                key={item?.id ?? `flag-${index}`}
+                style={[styles.card, styles.flagCard, { backgroundColor: '#15301B', borderColor: theme.colors.neonGreen }]}
+              >
+                <View style={[styles.flagPhotoRing, { borderColor: theme.colors.neonGreen }]}>
+                  <Image source={item.user.primary_photo ? { uri: item.user.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />
+                </View>
+                <View style={{ flex: 1, gap: 4 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>{item.user.name}</Typography>
+                    <View style={[styles.flagChip, { backgroundColor: theme.colors.neonGreen }]}>
+                      <PixelFlag size={10} color={theme.colors.deepBlack} />
+                      <Typography variant="tiny" style={{ color: theme.colors.deepBlack, fontSize: 10, fontFamily: theme.fonts.bodyStrong.family }}>
+                        GREEN FLAG
+                      </Typography>
+                    </View>
+                  </View>
+                  <Typography variant="small" style={{ color: theme.colors.neonGreen }}>
+                    {item.user.city}
+                  </Typography>
+                </View>
+                <Button
+                  label="View"
+                  onPress={() => {
+                    onViewProfile?.(item.user);
+                  }}
+                />
+              </View>
+            ))}
           </View>
-        ))}
+        ) : null}
+
+        {regularLikes.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIcon, { backgroundColor: theme.colors.secondaryHighlight, borderWidth: 1, borderColor: theme.colors.secondaryHairline }]}>
+                <Feather name="heart" size={13} color={theme.colors.neonGreen} />
+              </View>
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Likes</Typography>
+              <Typography variant="small" muted style={{ marginLeft: 'auto' }}>
+                {regularLikes.length}
+              </Typography>
+            </View>
+            {regularLikes.map((item, index) => (
+              <View
+                key={item?.id ?? `like-${index}`}
+                style={[styles.card, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+              >
+                <Image source={item.user.primary_photo ? { uri: item.user.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Typography variant="bodyStrong">{item.user.name}</Typography>
+                  <Typography variant="small" muted>
+                    {item.user.city}
+                  </Typography>
+                </View>
+                <Button
+                  label="View"
+                  onPress={() => {
+                    onViewProfile?.(item.user);
+                  }}
+                />
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {notificationsEnabled === false ? (
           <View style={[styles.pill, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
@@ -176,11 +237,43 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: '#E8E8E8',
   },
-  badge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 10,
+  section: {
+    gap: 10,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  sectionIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // The glow is the point: a Green Flag should never be mistaken for a like.
+  flagCard: {
+    borderWidth: 1.5,
+    shadowColor: '#ADFF1A',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.55,
+    shadowRadius: 14,
+    elevation: 10,
+  },
+  flagPhotoRing: {
+    borderWidth: 2,
+    borderRadius: 18,
+    padding: 2,
+  },
+  flagChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
   pill: {
     padding: 12,

@@ -656,7 +656,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Interests Modal
   const renderInterestsModal = () => (
-    <Modal visible={activeModal === 'interests'} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={activeModal === 'interests'} animationType="none" presentationStyle="pageSheet">
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -728,7 +728,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Languages Modal
   const renderLanguagesModal = () => (
-    <Modal visible={activeModal === 'languages'} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={activeModal === 'languages'} animationType="none" presentationStyle="pageSheet">
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -795,7 +795,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Pronouns Modal
   const renderPronounsModal = () => (
-    <Modal visible={activeModal === 'pronouns'} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={activeModal === 'pronouns'} animationType="none" presentationStyle="pageSheet">
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -866,7 +866,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Communities Modal
   const renderCommunitiesModal = () => (
-    <Modal visible={activeModal === 'communities'} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={activeModal === 'communities'} animationType="none" presentationStyle="pageSheet">
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -928,7 +928,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Bio Modal
   const renderBioModal = () => (
-    <Modal visible={activeModal === 'bio'} animationType="slide" presentationStyle="pageSheet">
+    <Modal visible={activeModal === 'bio'} animationType="none" presentationStyle="pageSheet">
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -1012,7 +1012,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const moreRows: MoreAboutField[] = ['height', 'exercise', 'educationLevel', 'drinking', 'smoking', 'lookingFor', 'kids', 'haveKids', 'starSign', 'politics', 'religion'];
 
     return (
-      <Modal visible={activeModal === 'moreAbout'} animationType="slide" presentationStyle="pageSheet">
+      <Modal visible={activeModal === 'moreAbout'} animationType="none" presentationStyle="pageSheet">
         <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
           <PageHeader title="More about you" onBack={() => setActiveModal(null)} />
 
@@ -1087,7 +1087,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const value = getFieldValue(field) === 'Add' ? '' : getFieldValue(field).replace(' cm', '');
 
     return (
-      <Modal visible animationType="slide" presentationStyle="pageSheet">
+      <Modal visible animationType="none" presentationStyle="pageSheet">
         <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
           <PageHeader title={title} onBack={() => setActiveModal('moreAbout')} />
 

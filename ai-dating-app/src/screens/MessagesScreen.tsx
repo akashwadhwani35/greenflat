@@ -22,6 +22,7 @@ import { Audio } from 'expo-av';
 import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
+import { NoticeModal, type Notice } from '../components/NoticeModal';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
 import { useViewerProfile } from '../hooks/useViewerProfile';
 import { MatchCandidate } from './MatchboardScreen';
@@ -47,6 +48,10 @@ type MessagesScreenProps = {
   apiBaseUrl: string;
   socket: Socket | null;
   onBack: () => void;
+  /** A compliment request: read-only until the receiver accepts. */
+  status?: 'active' | 'pending';
+  requestedBy?: number | null;
+  onRequestResolved?: (matchId: number, outcome: 'accepted' | 'declined') => void;
 };
 
 type ProfileDetailCandidate = MatchCandidate & {
@@ -71,7 +76,37 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   apiBaseUrl,
   socket,
   onBack,
+  status = 'active',
+  requestedBy = null,
+  onRequestResolved,
 }) => {
+  // Compliment request state, kept locally so Accept flips the screen at once.
+  const [requestStatus, setRequestStatus] = useState<'active' | 'pending'>(status);
+  const [resolvingRequest, setResolvingRequest] = useState(false);
+  const [requestNotice, setRequestNotice] = useState<Notice | null>(null);
+  useEffect(() => { setRequestStatus(status); }, [status]);
+  const awaitingMyAnswer = requestStatus === 'pending' && requestedBy !== currentUserId;
+  const awaitingTheirAnswer = requestStatus === 'pending' && requestedBy === currentUserId;
+
+  const resolveRequest = async (outcome: 'accepted' | 'declined') => {
+    if (resolvingRequest) return;
+    setResolvingRequest(true);
+    try {
+      const response = await fetch(`${apiBaseUrl}/matches/${matchId}/${outcome === 'accepted' ? 'accept' : 'decline'}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Please try again.');
+      if (outcome === 'accepted') setRequestStatus('active');
+      onRequestResolved?.(matchId, outcome);
+    } catch (error: any) {
+      setRequestNotice({ title: outcome === 'accepted' ? "Couldn't accept" : "Couldn't do that", message: error.message, tone: 'error' });
+    } finally {
+      setResolvingRequest(false);
+    }
+  };
+
   const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -898,7 +933,46 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         </View>
       )}
 
+      {/* Compliment request: answer it before anything else */}
+      {awaitingMyAnswer ? (
+        <View style={[styles.requestPanel, { backgroundColor: theme.colors.charcoal, borderTopColor: theme.colors.border }]}>
+          <Typography variant="bodyStrong" style={{ color: theme.colors.text, textAlign: 'center' }}>
+            Would you want to accept this?
+          </Typography>
+          <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'center', marginTop: 4 }}>
+            {matchName} sent you a compliment. Accept to start chatting.
+          </Typography>
+          <View style={styles.requestButtons}>
+            <TouchableOpacity
+              style={[styles.requestButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+              onPress={() => { void resolveRequest('declined'); }}
+              disabled={resolvingRequest}
+              activeOpacity={0.8}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Not my type</Typography>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.requestButton, styles.requestButtonPrimary, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
+              onPress={() => { void resolveRequest('accepted'); }}
+              disabled={resolvingRequest}
+              activeOpacity={0.8}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>{resolvingRequest ? 'Please wait' : 'Accept'}</Typography>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
+      {awaitingTheirAnswer ? (
+        <View style={[styles.requestPanel, { backgroundColor: theme.colors.charcoal, borderTopColor: theme.colors.border }]}>
+          <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'center' }}>
+            Waiting for {matchName} to accept your compliment. You can chat once they do.
+          </Typography>
+        </View>
+      ) : null}
+      <NoticeModal notice={requestNotice} onClose={() => setRequestNotice(null)} />
+
       {/* Input Area */}
+      {requestStatus === 'pending' ? null : (
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
@@ -1002,11 +1076,34 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
+      )}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  requestPanel: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 28 : 18,
+    borderTopWidth: 1,
+  },
+  requestButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 14,
+  },
+  requestButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  requestButtonPrimary: {
+    flex: 1.4,
+  },
   container: {
     flex: 1,
   },

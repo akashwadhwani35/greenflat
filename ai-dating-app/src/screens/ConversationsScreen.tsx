@@ -17,11 +17,16 @@ type Conversation = {
   last_message_sender_id: number | null;
   unread_count: number;
   matched_at: string;
+  /** 'pending' while a compliment waits for the receiver's answer. */
+  status?: 'active' | 'pending';
+  requested_by?: number | null;
 };
+
+export type ConversationMeta = { status: 'active' | 'pending'; requestedBy: number | null };
 
 type Props = {
   onBack: () => void;
-  onOpenConversation: (matchId: number, matchName: string, targetUserId: number) => void;
+  onOpenConversation: (matchId: number, matchName: string, targetUserId: number, meta?: ConversationMeta) => void;
   token: string;
   apiBaseUrl: string;
   currentUserId: number;
@@ -74,8 +79,9 @@ export const ConversationsScreen: React.FC<Props> = ({
 
     const handleConversationUpdated = (data: {
       matchId: number;
-      lastMessage: string;
-      lastMessageTime: string;
+      lastMessage?: string;
+      lastMessageTime?: string;
+      status?: 'active' | 'pending';
     }) => {
       setConversations((prev) => {
         const idx = prev.findIndex((c) => c.match_id === data.matchId);
@@ -87,9 +93,11 @@ export const ConversationsScreen: React.FC<Props> = ({
         const updated = [...prev];
         updated[idx] = {
           ...updated[idx],
-          last_message: data.lastMessage,
-          last_message_time: data.lastMessageTime,
-          unread_count: updated[idx].unread_count + 1,
+          last_message: data.lastMessage ?? updated[idx].last_message,
+          last_message_time: data.lastMessageTime ?? updated[idx].last_message_time,
+          unread_count: data.lastMessage ? updated[idx].unread_count + 1 : updated[idx].unread_count,
+          status: data.status ?? updated[idx].status,
+          requested_by: data.status === 'active' ? null : updated[idx].requested_by,
         };
         // Re-sort: most recent first
         updated.sort((a, b) => {
@@ -112,12 +120,19 @@ export const ConversationsScreen: React.FC<Props> = ({
       }
     };
 
+    // "Not my type" on either side: the request disappears from the list.
+    const handleConversationRemoved = (data: { matchId: number }) => {
+      setConversations((prev) => prev.filter((c) => c.match_id !== data.matchId));
+    };
+
     socket.on('conversation:updated', handleConversationUpdated);
     socket.on('messages:read', handleMessagesRead);
+    socket.on('conversation:removed', handleConversationRemoved);
 
     return () => {
       socket.off('conversation:updated', handleConversationUpdated);
       socket.off('messages:read', handleMessagesRead);
+      socket.off('conversation:removed', handleConversationRemoved);
     };
   }, [socket, currentUserId]);
 
@@ -210,15 +225,22 @@ export const ConversationsScreen: React.FC<Props> = ({
           {filteredConversations.map((item) => {
             const isUnread = item.unread_count > 0;
             const isLastMessageFromMe = item.last_message_sender_id === currentUserId;
+            const isPending = item.status === 'pending';
+            const awaitingMe = isPending && item.requested_by !== currentUserId;
 
             return (
               <TouchableOpacity
                 key={item.match_id}
                 style={[styles.row, {
-                  borderColor: isUnread ? theme.colors.secondaryHairline : theme.colors.border,
+                  borderColor: awaitingMe ? theme.colors.neonGreen : isUnread ? theme.colors.secondaryHairline : theme.colors.border,
                   backgroundColor: isUnread ? theme.colors.secondaryHighlight : theme.colors.surface,
                 }]}
-                onPress={() => onOpenConversation(item.match_id, item.name, item.user_id)}
+                onPress={() =>
+                  onOpenConversation(item.match_id, item.name, item.user_id, {
+                    status: item.status === 'pending' ? 'pending' : 'active',
+                    requestedBy: item.requested_by ?? null,
+                  })
+                }
                 activeOpacity={0.7}
               >
                 <View style={styles.photoContainer}>
@@ -247,6 +269,13 @@ export const ConversationsScreen: React.FC<Props> = ({
                     >
                       {item.name}
                     </Typography>
+                    {isPending ? (
+                      <View style={[styles.requestChip, { backgroundColor: awaitingMe ? theme.colors.neonGreen : theme.colors.secondaryHighlight, borderColor: awaitingMe ? theme.colors.neonGreen : theme.colors.secondaryHairline }]}>
+                        <Typography variant="tiny" style={{ color: awaitingMe ? theme.colors.deepBlack : theme.colors.muted, fontFamily: theme.fonts.bodyStrong.family, fontSize: 10 }}>
+                          {awaitingMe ? 'Compliment' : 'Waiting'}
+                        </Typography>
+                      </View>
+                    ) : null}
                     {item.last_message_time && (
                       <Typography
                         variant="tiny"
@@ -267,8 +296,9 @@ export const ConversationsScreen: React.FC<Props> = ({
                       }}
                       numberOfLines={1}
                     >
-                      {isLastMessageFromMe ? 'You: ' : ''}
-                      {item.last_message || 'Start the conversation'}
+                      {isPending && !awaitingMe
+                        ? 'Waiting for them to accept'
+                        : `${isLastMessageFromMe ? 'You: ' : ''}${item.last_message || 'Start the conversation'}`}
                     </Typography>
 
                     {isUnread && item.unread_count > 0 && (
@@ -293,6 +323,13 @@ export const ConversationsScreen: React.FC<Props> = ({
 };
 
 const styles = StyleSheet.create({
+  requestChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    borderWidth: 1,
+    marginLeft: 8,
+  },
   container: { flex: 1 },
   loadingContainer: {
     flex: 1,

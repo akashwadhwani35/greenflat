@@ -15,6 +15,7 @@ type ExploreScreenProps = {
   onOpenMatches?: () => void;
   onOpenConversations?: () => void;
   onOpenAdvancedSearch?: () => void;
+  onOpenAISearch?: () => void;
   filters?: AdvancedFilters;
   preferredTab?: 'onGrid' | 'offGrid';
   pendingAISearchCharge?: boolean;
@@ -28,6 +29,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
   apiBaseUrl,
   onCardPress,
   onOpenAdvancedSearch,
+  onOpenAISearch,
   onOpenWallet,
   filters,
   preferredTab,
@@ -44,6 +46,7 @@ export const ExploreScreen: React.FC<ExploreScreenProps> = ({
         onCardPress={onCardPress}
         onOpenFilters={onOpenAdvancedSearch}
         onOpenWallet={onOpenWallet}
+        onOpenAISearch={onOpenAISearch}
         filters={filters}
         preferredTab={preferredTab}
         pendingAISearchCharge={pendingAISearchCharge}

@@ -42,6 +42,8 @@ type DiscoverScreenProps = {
   onCardPress?: (match: MatchCandidate) => void;
   onOpenFilters?: () => void;
   onOpenWallet?: () => void;
+  /** Opens the AI search: the only way anyone lands on AI Match. */
+  onOpenAISearch?: () => void;
   filters?: AdvancedFilters;
   preferredTab?: 'onGrid' | 'offGrid';
   pendingAISearchCharge?: boolean;
@@ -102,6 +104,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   onCardPress,
   onOpenFilters,
   onOpenWallet,
+  onOpenAISearch,
   filters,
   preferredTab,
   pendingAISearchCharge = false,
@@ -222,7 +225,17 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
     return parsed;
   }, [filters]);
 
+  // Nothing typed yet: AI Match stays empty. Explore is the browsing tab;
+  // AI Match only ever shows what a search asked for.
+  const hasSearchQuery = Boolean(filters?.keywords?.trim());
+
   const fetchOnGridMatches = useCallback(async () => {
+    if (!filters?.keywords?.trim()) {
+      setMatches([]);
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     setLoading(true);
     setRefreshing(true);
     let reachedServer = false;
@@ -577,13 +590,26 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
             <Feather name="search" size={40} color={theme.colors.neonGreen} />
           </View>
           <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 24, marginBottom: 12 }}>
-            No matches yet
+            {activeTab === 'onGrid' && !hasSearchQuery ? 'Tell the AI who you want' : 'No matches yet'}
           </Typography>
           <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', paddingHorizontal: 40 }}>
             {activeTab === 'onGrid'
-              ? 'No AI matches near you yet. Check Explore in the meantime.'
+              ? hasSearchQuery
+                ? 'Nobody fits that yet. Try broader words, or browse Explore.'
+                : 'Your AI matches show up here after a search. Explore is open in the meantime.'
               : 'Try adjusting your filters to find more profiles'}
           </Typography>
+          {activeTab === 'onGrid' && onOpenAISearch ? (
+            <TouchableOpacity
+              style={[styles.emptyCta, { backgroundColor: theme.colors.neonGreen }]}
+              onPress={onOpenAISearch}
+              activeOpacity={0.85}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+                {hasSearchQuery ? 'Search again' : 'Start a search'}
+              </Typography>
+            </TouchableOpacity>
+          ) : null}
         </View>
       ) : activeTab === 'offGrid' ? (
         <View
@@ -907,6 +933,12 @@ const styles = StyleSheet.create({
     borderRadius: 50,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  emptyCta: {
+    marginTop: 24,
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: 32,
   },
   skeletonShimmer: {
     ...StyleSheet.absoluteFillObject,

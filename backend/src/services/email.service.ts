@@ -81,17 +81,17 @@ export const renderOtpEmail = (code: string): RenderedEmail => {
 </head>
 <body style="margin:0;padding:0;background:#0B140D;">
 <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">Your GreenFlag code is ${safeCode}. It expires in 5 minutes.&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0B140D;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="background:#0B140D;">
   <tr>
-    <td align="center" style="padding:40px 16px 48px;">
-      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;">
+    <td align="center" bgcolor="#0B140D" style="padding:40px 16px 48px;background:#0B140D;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="max-width:480px;background:#0B140D;">
 
         <tr>
-          <td align="left" class="font" style="padding:0 4px 20px;">
-            <table role="presentation" cellpadding="0" cellspacing="0">
+          <td align="left" class="font" bgcolor="#0B140D" style="padding:0 4px 20px;background:#0B140D;">
+            <table role="presentation" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="background:#0B140D;">
               <tr>
-                <td style="vertical-align:middle;padding-right:12px;">
-                  <img src="${logoUrl}" width="40" height="40" alt="GreenFlag" style="display:block;width:40px;height:40px;border-radius:10px;border:0;">
+                <td bgcolor="#0B140D" style="vertical-align:middle;padding-right:12px;background:#0B140D;">
+                  <img src="${logoUrl}" width="40" height="40" alt="GreenFlag" style="display:block;width:40px;height:40px;border-radius:10px;border:0;background:#101D13;">
                 </td>
                 <td class="font" style="vertical-align:middle;font-size:20px;font-weight:800;color:#F6F6F6;letter-spacing:-0.3px;">
                   GreenFlag

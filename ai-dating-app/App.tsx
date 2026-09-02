@@ -18,6 +18,7 @@ import { ProfileDetailScreen } from './src/screens/ProfileDetailScreen';
 import { MessagesScreen } from './src/screens/MessagesScreen';
 import { Typography } from './src/components/Typography';
 import { BottomNav, TabId } from './src/components/BottomNav';
+import { NoticeModal, type Notice } from './src/components/NoticeModal';
 import { MatchModal } from './src/components/MatchModal';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { NotificationsScreen } from './src/screens/NotificationsScreen';
@@ -102,7 +103,9 @@ const AppShell: React.FC = () => {
   const [selectedMatch, setSelectedMatch] = useState<MatchCandidate | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showMessages, setShowMessages] = useState(false);
-  const [currentConversation, setCurrentConversation] = useState<{ matchId: number; matchName: string; matchPhoto?: string; targetUserId?: number } | null>(null);
+  const [currentConversation, setCurrentConversation] = useState<{ matchId: number; matchName: string; matchPhoto?: string; targetUserId?: number; status?: 'active' | 'pending'; requestedBy?: number | null } | null>(null);
+  // Numbers on the Likes and Chat tabs.
+  const [badgeCounts, setBadgeCounts] = useState<{ likes: number; messages: number }>({ likes: 0, messages: 0 });
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [matchedUser, setMatchedUser] = useState<{ matchId: number; userId: number; name: string; photo?: string } | null>(null);
   const [overlay, setOverlay] = useState<Overlay>(null);
@@ -116,6 +119,8 @@ const AppShell: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [aiSearchKey, setAiSearchKey] = useState(0);
   const [showWelcomePopup, setShowWelcomePopup] = useState(false);
+  // Confirmation popup in the app's own style, replacing the OS alert for actions.
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [likedProfileIds, setLikedProfileIds] = useState<Set<number>>(new Set());
   // Rejected profiles disappear from the feed for this account (persisted per user id).
   const [passedProfileIds, setPassedProfileIds] = useState<Set<number>>(new Set());
@@ -168,6 +173,33 @@ const AppShell: React.FC = () => {
 
   // Socket.io connection for real-time messaging
   const { socket } = useSocket({ token: authToken, apiBaseUrl: API_BASE_URL });
+
+  // Badge counts: fetched on login, whenever a screen changes, and whenever
+  // the server says something arrived or was read.
+  const fetchBadgeCounts = async () => {
+    if (!authToken) return;
+    try {
+      const response = await fetch(`${API_BASE_URL}/notifications/counts`, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setBadgeCounts({ likes: Number(data.likes || 0), messages: Number(data.messages || 0) });
+    } catch {
+      // Keep the last numbers.
+    }
+  };
+  useEffect(() => {
+    if (!authToken) { setBadgeCounts({ likes: 0, messages: 0 }); return; }
+    void fetchBadgeCounts();
+  }, [authToken, overlay, showMessages]);
+  useEffect(() => {
+    if (!socket) return;
+    const refresh = () => { void fetchBadgeCounts(); };
+    const events = ['counts:changed', 'message:new', 'conversation:updated', 'messages:read', 'conversation:removed'];
+    events.forEach((e) => socket.on(e, refresh));
+    return () => { events.forEach((e) => socket.off(e, refresh)); };
+  }, [socket, authToken]);
   // Drives the green "you both said this" highlighting on profile cards.
   const viewerProfile = useViewerProfile(authToken, API_BASE_URL);
 
@@ -448,11 +480,11 @@ const AppShell: React.FC = () => {
         });
         setShowMatchModal(true);
       } else {
-        Alert.alert('Liked! 💚', `${selectedMatch.name} will be notified. We'll let you know if it's a match!`);
+        setNotice({ title: 'Liked', message: `${selectedMatch.name} will be notified. We'll let you know if it's a match.`, icon: 'heart' });
         setTimeout(() => setSelectedMatch(null), 300);
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to process like.');
+      setNotice({ title: "Couldn't like", message: error.message || 'Please try again.', tone: 'error' });
       setTimeout(() => setSelectedMatch(null), 300);
     } finally {
       actionInFlightRef.current = false;
@@ -502,11 +534,11 @@ const AppShell: React.FC = () => {
         });
         setShowMatchModal(true);
       } else {
-        Alert.alert('Green Flag sent', `${selectedMatch.name} will see your Green Flag at the top of their inbox. 4 tokens used.`);
+        setNotice({ title: 'Green Flag sent', message: `${selectedMatch.name} will see it at the top of their inbox.`, icon: 'flag' });
         setTimeout(() => setSelectedMatch(null), 300);
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Unable to send a Green Flag.');
+      setNotice({ title: "Couldn't send Green Flag", message: error.message || 'Please try again.', tone: 'error' });
       setTimeout(() => setSelectedMatch(null), 300);
     } finally {
       actionInFlightRef.current = false;
@@ -541,10 +573,13 @@ const AppShell: React.FC = () => {
       }
 
       setComplimentedProfileIds((prev) => new Set(prev).add(targetUserId));
-      Alert.alert('Compliment sent', 'Delivered to their Likes inbox. 6 tokens used.');
+      // A compliment is a like too: the tile dims and the buttons go quiet,
+      // the same as after Like or Green Flag.
+      setLikedProfileIds((prev) => new Set(prev).add(targetUserId));
+      setNotice({ title: 'Compliment sent', message: 'They will find it in their messages.', icon: 'message-circle' });
       return true;
     } catch (error: any) {
-      Alert.alert('Could not send compliment', error.message || 'Please try again.');
+      setNotice({ title: "Couldn't send compliment", message: error.message || 'Please try again.', tone: 'error' });
       return false;
     } finally {
       actionInFlightRef.current = false;
@@ -765,8 +800,8 @@ const AppShell: React.FC = () => {
             apiBaseUrl={API_BASE_URL}
             currentUserId={userId!}
             socket={socket}
-            onOpenConversation={(matchId, matchName, targetUserId) => {
-              setCurrentConversation({ matchId, matchName, targetUserId });
+            onOpenConversation={(matchId, matchName, targetUserId, meta) => {
+              setCurrentConversation({ matchId, matchName, targetUserId, status: meta?.status, requestedBy: meta?.requestedBy });
               setShowMessages(true);
               setOverlay(null);
             }}
@@ -943,6 +978,11 @@ const AppShell: React.FC = () => {
                 onOpenMatches={() => setOverlay('matches')}
                 onOpenConversations={() => setOverlay('conversations')}
                 onOpenAdvancedSearch={() => setOverlay('advancedSearch')}
+                onOpenAISearch={() => {
+                  setAiSearchKey((k) => k + 1);
+                  setOverlay('aiSearch');
+                  setActiveTab('ai');
+                }}
                 filters={advancedFilters}
                 preferredTab={preferredDiscoverTab}
                 pendingAISearchCharge={pendingAISearchCharge}
@@ -1052,6 +1092,19 @@ const AppShell: React.FC = () => {
                   token={authToken}
                   apiBaseUrl={API_BASE_URL}
                   socket={socket}
+                  status={currentConversation.status}
+                  requestedBy={currentConversation.requestedBy}
+                  onRequestResolved={(matchId, outcome) => {
+                    void fetchBadgeCounts();
+                    if (outcome === 'declined') {
+                      setShowMessages(false);
+                      setCurrentConversation(null);
+                      setOverlay('conversations');
+                      setActiveTab('messages');
+                      return;
+                    }
+                    setCurrentConversation((prev) => (prev && prev.matchId === matchId ? { ...prev, status: 'active', requestedBy: null } : prev));
+                  }}
                   onBack={() => {
                     // Back means the conversation list, one screen up. It used
                     // to drop the user on Home.
@@ -1068,8 +1121,8 @@ const AppShell: React.FC = () => {
                 <BottomNav
                   activeTab={activeTab}
                   onTabChange={handleTabChange}
-                  likesCount={0}
-                  messagesCount={0}
+                  likesCount={badgeCounts.likes}
+                  messagesCount={badgeCounts.messages}
                 />
               </View>
             )}
@@ -1083,6 +1136,7 @@ const AppShell: React.FC = () => {
   return (
     <View style={styles.container}>
       {renderStage()}
+      <NoticeModal notice={notice} onClose={() => setNotice(null)} />
       <Modal visible={showWelcomePopup} transparent animationType="fade" onRequestClose={() => setShowWelcomePopup(false)}>
         <View style={styles.welcomeBackdrop}>
           <View style={[styles.welcomeCard, { backgroundColor: theme.colors.surface }]}>

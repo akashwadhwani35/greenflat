@@ -117,6 +117,15 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     const recipientId = match.user1_id === userId ? match.user2_id : match.user1_id;
     const senderName = match.user1_id === userId ? match.user1_name : match.user2_name;
 
+    // A compliment request is read-only until the receiver accepts it.
+    if (match.status === 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        error: match.requested_by === userId ? 'Waiting for them to accept your compliment' : 'Accept the request to start chatting',
+        pending: true,
+      });
+    }
+
     const blockResult = await client.query(
       `SELECT 1
        FROM blocks
@@ -298,6 +307,8 @@ export const getConversations = async (req: AuthRequest, res: Response) => {
         m.id as match_id,
         m.matched_at,
         m.last_message_at,
+        m.status,
+        m.requested_by,
         other_user.id as user_id,
         other_user.name,
         other_user.is_verified,

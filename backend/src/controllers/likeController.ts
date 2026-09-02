@@ -2,8 +2,16 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
-import { notifyLikeReceived, notifyMatch } from '../services/push.service';
+import { notifyLikeReceived, notifyMatch, notifyNewMessage } from '../services/push.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
+import { getIO } from '../socket';
+
+// Badge counts on the tabs: tell the phone something changed so it refetches.
+const pokeCounts = (...userIds: number[]) => {
+  const io = getIO();
+  if (!io) return;
+  for (const id of userIds) io.to(`user:${id}`).emit('counts:changed', {});
+};
 
 // Helper to reset activity limits if needed
 const checkAndResetLimits = async (userId: number, client: any) => {
@@ -253,9 +261,11 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     if (mutualLikeResult.rows.length > 0) {
       // Create a match
       const matchResult = await client.query(
-        `INSERT INTO matches (user1_id, user2_id)
-         VALUES (LEAST($1::int, $2::int), GREATEST($1::int, $2::int))
-         ON CONFLICT (user1_id, user2_id) DO NOTHING
+        `INSERT INTO matches (user1_id, user2_id, status, requested_by)
+         VALUES (LEAST($1::int, $2::int), GREATEST($1::int, $2::int), 'active', NULL)
+         ON CONFLICT (user1_id, user2_id)
+         DO UPDATE SET status = 'active', requested_by = NULL
+         WHERE matches.status <> 'active'
          RETURNING id`,
         [userId, target_user_id]
       );
@@ -272,6 +282,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       // Not a match yet - notify the target user they received a like
       notifyLikeReceived(target_user_id, likerName).catch(err => console.error('Failed to send like notification:', err));
     }
+    pokeCounts(target_user_id, userId);
 
     // Check if current user should enter cooldown
     const updatedLimits = await client.query(
@@ -379,8 +390,15 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
           OR (blocked_rel.blocker_id = liker.id AND blocked_rel.blocked_id = $1))
        WHERE l.liked_id = $1
          AND blocked_rel.id IS NULL
+         AND COALESCE(l.is_compliment, FALSE) = FALSE
        ORDER BY COALESCE(l.is_superlike, FALSE) DESC, l.created_at DESC
        LIMIT 50`,
+      [userId]
+    );
+
+    // Opening the inbox clears the Likes badge.
+    await pool.query(
+      'UPDATE likes SET seen_at = NOW() WHERE liked_id = $1 AND seen_at IS NULL',
       [userId]
     );
 
@@ -486,11 +504,69 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
       );
     }
 
+    // The compliment goes to their Messages, not a likes list. If they had
+    // already liked the sender it is simply a match; otherwise the chat opens
+    // in a pending state and they choose Accept or Not my type.
+    const mutual = await client.query(
+      'SELECT 1 FROM likes WHERE liker_id = $1 AND liked_id = $2',
+      [target_user_id, userId]
+    );
+    const isMutual = mutual.rows.length > 0;
+    const matchRow = await client.query(
+      `INSERT INTO matches (user1_id, user2_id, status, requested_by)
+       VALUES (LEAST($1::int, $2::int), GREATEST($1::int, $2::int), $3, $4)
+       ON CONFLICT (user1_id, user2_id)
+       DO UPDATE SET
+         status = CASE WHEN matches.status = 'active' OR EXCLUDED.status = 'active' THEN 'active' ELSE matches.status END,
+         requested_by = CASE WHEN matches.status = 'active' OR EXCLUDED.status = 'active' THEN NULL ELSE matches.requested_by END
+       RETURNING id, status`,
+      [userId, target_user_id, isMutual ? 'active' : 'pending', isMutual ? null : userId]
+    );
+    const matchId: number = matchRow.rows[0].id;
+    const matchStatus: string = matchRow.rows[0].status;
+
+    const senderRow = await client.query('SELECT name FROM users WHERE id = $1', [userId]);
+    const senderName: string = senderRow.rows[0]?.name || 'Someone';
+    const targetName: string = targetUserResult.rows[0]?.name || 'Someone';
+
+    const inserted: any[] = [];
+    for (const text of ['Hey 👋', complimentText]) {
+      const row = await client.query(
+        `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type)
+         VALUES ($1, $2, $3, $4, 'text')
+         RETURNING *`,
+        [matchId, userId, target_user_id, text]
+      );
+      inserted.push(row.rows[0]);
+    }
+    await client.query('UPDATE matches SET last_message_at = NOW() WHERE id = $1', [matchId]);
+
     await client.query('COMMIT');
+
+    const io = getIO();
+    if (io) {
+      for (const message of inserted) {
+        io.to(`user:${target_user_id}`).emit('message:new', { message, matchId });
+        io.to(`user:${userId}`).emit('message:new', { message, matchId });
+      }
+      const payload = { matchId, lastMessage: complimentText, lastMessageTime: inserted[1]?.created_at, status: matchStatus };
+      io.to(`user:${target_user_id}`).emit('conversation:updated', payload);
+      io.to(`user:${userId}`).emit('conversation:updated', payload);
+    }
+    pokeCounts(target_user_id, userId);
+    notifyNewMessage(target_user_id, senderName, complimentText).catch((err) =>
+      console.error('Failed to send compliment notification:', err)
+    );
+    if (isMutual) {
+      notifyMatch(userId, targetName).catch(() => {});
+      notifyMatch(target_user_id, senderName).catch(() => {});
+    }
 
     res.json({
       message: 'Compliment sent successfully',
       credit_balance: remainingCredits,
+      match_id: matchId,
+      match_status: matchStatus,
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -526,6 +602,7 @@ export const getMatches = async (req: AuthRequest, res: Response) => {
          OR (blocked_rel.blocker_id = u.id AND blocked_rel.blocked_id = $1))
           AND blocked_rel.unblocked_at IS NULL
       WHERE (m.user1_id = $1 OR m.user2_id = $1)
+        AND m.status = 'active'
         AND blocked_rel.id IS NULL
       ORDER BY m.matched_at DESC`,
       [userId]
@@ -537,5 +614,160 @@ export const getMatches = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Get matches error:', error);
     res.status(500).json({ error: 'Failed to fetch matches' });
+  }
+};
+
+
+/**
+ * Accept a compliment request: the pending conversation becomes a match and
+ * both people can message. Only the person who received it can accept.
+ */
+export const acceptMatchRequest = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.userId!;
+    const matchId = Number(req.params.matchId);
+    if (!Number.isFinite(matchId)) return res.status(400).json({ error: 'Invalid match id' });
+
+    await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT id, user1_id, user2_id, status, requested_by FROM matches WHERE id = $1 FOR UPDATE',
+      [matchId]
+    );
+    const match = found.rows[0];
+    if (!match || (match.user1_id !== userId && match.user2_id !== userId)) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (match.status === 'active') {
+      await client.query('ROLLBACK');
+      return res.json({ match_id: matchId, status: 'active' });
+    }
+    if (match.requested_by === userId) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({ error: 'Waiting for them to accept' });
+    }
+    const otherId = match.user1_id === userId ? match.user2_id : match.user1_id;
+
+    await client.query(
+      "UPDATE matches SET status = 'active', requested_by = NULL, matched_at = NOW() WHERE id = $1",
+      [matchId]
+    );
+    // Accepting is a like back, so the likes table tells the same story.
+    await client.query(
+      `INSERT INTO likes (liker_id, liked_id, is_on_grid, is_superlike, is_compliment)
+       VALUES ($1, $2, TRUE, FALSE, FALSE)
+       ON CONFLICT (liker_id, liked_id) DO NOTHING`,
+      [userId, otherId]
+    );
+    const names = await client.query('SELECT id, name FROM users WHERE id = ANY($1::int[])', [[userId, otherId]]);
+    await client.query('COMMIT');
+
+    const nameOf = (id: number) => names.rows.find((r: any) => r.id === id)?.name || 'Someone';
+    notifyMatch(otherId, nameOf(userId)).catch(() => {});
+    const io = getIO();
+    if (io) {
+      const payload = { matchId, status: 'active' };
+      io.to(`user:${otherId}`).emit('conversation:updated', payload);
+      io.to(`user:${userId}`).emit('conversation:updated', payload);
+    }
+    pokeCounts(otherId, userId);
+
+    res.json({ match_id: matchId, status: 'active' });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Accept request error:', error);
+    res.status(500).json({ error: 'Failed to accept request' });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * "Not my type": the request and its messages go away for both people, and
+ * the sender's like is removed so it does not resurface anywhere.
+ */
+export const declineMatchRequest = async (req: AuthRequest, res: Response) => {
+  const client = await pool.connect();
+  try {
+    const userId = req.userId!;
+    const matchId = Number(req.params.matchId);
+    if (!Number.isFinite(matchId)) return res.status(400).json({ error: 'Invalid match id' });
+
+    await client.query('BEGIN');
+    const found = await client.query(
+      'SELECT id, user1_id, user2_id, status, requested_by FROM matches WHERE id = $1 FOR UPDATE',
+      [matchId]
+    );
+    const match = found.rows[0];
+    if (!match || (match.user1_id !== userId && match.user2_id !== userId)) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Request not found' });
+    }
+    if (match.status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'This conversation is already open. Unmatch instead.' });
+    }
+    const otherId = match.user1_id === userId ? match.user2_id : match.user1_id;
+
+    await client.query('DELETE FROM messages WHERE match_id = $1', [matchId]);
+    await client.query('DELETE FROM matches WHERE id = $1', [matchId]);
+    await client.query('DELETE FROM likes WHERE liker_id = $1 AND liked_id = $2', [otherId, userId]);
+    await client.query('COMMIT');
+
+    const io = getIO();
+    if (io) {
+      io.to(`user:${otherId}`).emit('conversation:removed', { matchId });
+      io.to(`user:${userId}`).emit('conversation:removed', { matchId });
+    }
+    pokeCounts(otherId, userId);
+
+    res.json({ ok: true });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Decline request error:', error);
+    res.status(500).json({ error: 'Failed to decline request' });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Numbers for the badges on the Likes and Chat tabs.
+ */
+export const getBadgeCounts = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const [messages, likes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS n
+         FROM messages msg
+         JOIN matches m ON m.id = msg.match_id
+         WHERE msg.recipient_id = $1 AND msg.is_read = FALSE AND msg.is_deleted = FALSE
+           AND NOT EXISTS (
+             SELECT 1 FROM blocks b
+             WHERE ((b.blocker_id = $1 AND b.blocked_id = msg.sender_id)
+                 OR (b.blocker_id = msg.sender_id AND b.blocked_id = $1))
+               AND b.unblocked_at IS NULL
+           )`,
+        [userId]
+      ),
+      pool.query(
+        `SELECT COUNT(*)::int AS n
+         FROM likes l
+         WHERE l.liked_id = $1 AND l.seen_at IS NULL AND COALESCE(l.is_compliment, FALSE) = FALSE
+           AND NOT EXISTS (
+             SELECT 1 FROM blocks b
+             WHERE ((b.blocker_id = $1 AND b.blocked_id = l.liker_id)
+                 OR (b.blocker_id = l.liker_id AND b.blocked_id = $1))
+               AND b.unblocked_at IS NULL
+           )`,
+        [userId]
+      ),
+    ]);
+    res.json({ messages: messages.rows[0].n, likes: likes.rows[0].n });
+  } catch (error) {
+    console.error('Badge counts error:', error);
+    res.status(500).json({ error: 'Failed to fetch counts' });
   }
 };

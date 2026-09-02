@@ -2,7 +2,7 @@ import express from 'express';
 import { signup, login, googleAuth, forgotPassword, resetPassword } from '../controllers/authController';
 import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount, getBioSuggestions } from '../controllers/profileController';
 import { searchMatches, refreshOffGrid, rewindOffGrid, getUserDetails, unmatch } from '../controllers/matchController';
-import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment } from '../controllers/likeController';
+import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment, acceptMatchRequest, declineMatchRequest, getBadgeCounts } from '../controllers/likeController';
 import { authenticate } from '../middleware/auth';
 import {
   requestOtp,
@@ -101,6 +101,10 @@ router.post('/matches/refresh-off-grid', authenticate, refreshOffGrid);
 router.post('/matches/rewind-off-grid', authenticate, rewindOffGrid);
 router.get('/matches/user/:targetUserId', authenticate, getUserDetails);
 router.post('/matches/:matchId/unmatch', authenticate, unmatch);
+// Compliment requests: the receiver opens the chat or sends it away.
+router.post('/matches/:matchId/accept', authenticate, acceptMatchRequest);
+router.post('/matches/:matchId/decline', authenticate, declineMatchRequest);
+router.get('/notifications/counts', authenticate, getBadgeCounts);
 
 // Like routes (protected)
 router.post('/likes', authenticate, likeProfile);

@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Image, Keyboard, Modal, Platform, Pressable, ScrollView, StatusBar, StyleSheet, TextInput, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { MatchCandidate } from './MatchboardScreen';
 import { PixelFlag } from '../components/PixelFlag';
 import type { ViewerProfile } from '../hooks/useViewerProfile';
+import { NoticeModal, type Notice } from '../components/NoticeModal';
 
 type ProfileDetailScreenProps = {
   match: MatchCandidate | null;
@@ -135,6 +136,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const [composerText, setComposerText] = useState('');
   const [sendingCompliment, setSendingCompliment] = useState(false);
   const [sentThisSession, setSentThisSession] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  // The Modal does not resize for the keyboard on Android, so the composer
+  // shifts itself up by the keyboard's height and stays centred otherwise.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const s1 = Keyboard.addListener(showEvt, (e) => setKeyboardHeight(e.endCoordinates?.height || 0));
+    const s2 = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
+    return () => { s1.remove(); s2.remove(); };
+  }, []);
   const complimentDone = alreadyComplimented || sentThisSession;
 
   if (!match) {
@@ -259,7 +271,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const openComposer = (seed = '') => {
     if (!onSendCompliment || sendingCompliment) return;
     if (complimentDone) {
-      Alert.alert('Already sent', `You have already sent ${name} a compliment.`);
+      setNotice({ title: 'Already sent', message: `You have already sent ${name} a compliment.`, icon: 'message-circle' });
       return;
     }
     setComposerText(seed);
@@ -276,7 +288,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     const text = composerText.trim().replace(/\s+/g, ' ');
     if (!onSendCompliment || sendingCompliment || complimentDone) return;
     if (text.length < 2) {
-      Alert.alert('Write something first', 'A compliment needs a few words.');
+      setNotice({ title: 'Write something first', message: 'A compliment needs a few words.', tone: 'error', icon: 'edit-3' });
       return;
     }
     setSendingCompliment(true);
@@ -587,10 +599,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
         ) : null}
 
         {composerOpen ? (
-          <KeyboardAvoidingView
-            style={styles.composerBackdrop}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
+          <View style={[styles.composerBackdrop, { paddingBottom: keyboardHeight }]}>
             <Pressable style={StyleSheet.absoluteFill} onPress={() => !sendingCompliment && setComposerOpen(false)} />
             <View style={[styles.composerCard, { backgroundColor: theme.colors.surface }]}>
               <Pressable style={styles.composerClose} onPress={() => !sendingCompliment && setComposerOpen(false)} hitSlop={8}>
@@ -603,7 +612,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 Compliment {name}
               </Typography>
               <Typography variant="small" style={[styles.composerBody, { color: theme.colors.muted }]}>
-                Say what stood out. It lands at the top of their Likes. 6 tokens, once per person.
+                Tell them what caught your attention.
               </Typography>
               <TextInput
                 style={[
@@ -637,8 +646,9 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 </Typography>
               </Pressable>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         ) : null}
+        <NoticeModal notice={notice} onClose={() => setNotice(null)} />
     </View>
   );
 
@@ -820,13 +830,13 @@ const styles = StyleSheet.create({
     opacity: 0.4,
   },
   // Compliment composer: same shape as the welcome popup.
-  // Sits near the top so the keyboard, which the Modal does not resize for
-  // on Android, never covers the Send button.
+  // Centred in whatever space the keyboard leaves (paddingBottom is set to
+  // the keyboard height at runtime), a little below the middle when closed.
   composerBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    justifyContent: 'flex-start',
-    paddingTop: Platform.OS === 'ios' ? 90 : 64,
+    justifyContent: 'center',
+    paddingTop: 48,
     paddingHorizontal: 24,
     zIndex: 50,
   },

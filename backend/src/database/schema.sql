@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS likes (
     is_compliment BOOLEAN DEFAULT FALSE,
     compliment_message TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    seen_at TIMESTAMP, -- cleared badge: NULL until the receiver opens Likes
     UNIQUE(liker_id, liked_id)
 );
 
@@ -132,6 +133,10 @@ CREATE TABLE IF NOT EXISTS matches (
     user2_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     matched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_message_at TIMESTAMP,
+    -- 'active' for a real match; 'pending' while a compliment request waits
+    -- for the receiver to accept (requested_by is the sender).
+    status VARCHAR(16) NOT NULL DEFAULT 'active',
+    requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     UNIQUE(user1_id, user2_id),
     CHECK (user1_id < user2_id) -- Ensure consistent ordering
 );

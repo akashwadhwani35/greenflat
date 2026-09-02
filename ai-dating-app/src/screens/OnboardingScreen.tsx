@@ -294,7 +294,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     return Object.keys(nextErrors).length === 0;
   };
 
-  const submitToBackend = async () => {
+  const submitToBackend = async (options: { skipFaceCheck?: boolean } = {}) => {
     // Onboarding always runs signed in: the account was created either by the
     // signup funnel or by Google before we ever got here.
     const token = existingToken;
@@ -381,7 +381,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
     // Face check, if they took one. Failure here must not fail onboarding: the
     // step is optional by design and can be redone from Verification.
-    if (form.faceCheckPhoto) {
+    if (form.faceCheckPhoto && !options.skipFaceCheck) {
       try {
         const faceRes = await fetch(`${apiBaseUrl}/verification/selfie`, {
           method: 'POST',
@@ -439,6 +439,23 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     }
 
     setStep((prev) => Math.min(prev + 1, slides.length - 1));
+  };
+
+  // "Skip for now" used to only set a flag and leave the person on the
+  // screen. It is the last step, so skipping means finishing: no camera, no
+  // permission prompt, straight on to the intro slides.
+  const skipFaceCheck = async () => {
+    Keyboard.dismiss();
+    setForm((prev) => ({ ...prev, faceCheckPhoto: '', faceCheckSkipped: true }));
+    setLoading(true);
+    try {
+      const result = await submitToBackend({ skipFaceCheck: true });
+      onComplete({ token: result.token, name: form.name.trim(), userId: result.userId });
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Something went wrong finishing setup.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleBack = () => {
@@ -1192,9 +1209,10 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
               )}
 
               <TouchableOpacity
-                onPress={() => setForm((prev) => ({ ...prev, faceCheckSkipped: true }))}
+                onPress={skipFaceCheck}
                 style={{ marginTop: 20, alignSelf: 'flex-start' }}
                 accessibilityRole="button"
+                disabled={loading}
               >
                 <Typography variant="small" style={{ color: theme.colors.muted, textDecorationLine: 'underline' }}>
                   Skip for now
