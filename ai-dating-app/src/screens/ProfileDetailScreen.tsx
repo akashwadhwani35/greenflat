@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Alert, Image, Modal, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -124,12 +124,13 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   viewer = null,
 }) => {
   const theme = useTheme();
+  const { height: windowHeight } = useWindowDimensions();
   const [sendingComplimentKey, setSendingComplimentKey] = useState<string | null>(null);
 
   if (!match) {
     if (embedded) return null;
     return (
-      <Modal visible={visible} animationType="slide" presentationStyle="fullScreen" onRequestClose={onClose}>
+      <Modal visible={visible} animationType="none" statusBarTranslucent onRequestClose={onClose}>
         <View style={[styles.container, { backgroundColor: '#101D13' }]} />
       </Modal>
     );
@@ -285,7 +286,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const showCustomRightButton = Boolean(onHeaderRightPress && headerRightIcon);
 
   const content = (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }, embedded ? null : { height: windowHeight }]}>
       <StatusBar barStyle="light-content" />
 
       <View style={[styles.header, { backgroundColor: theme.colors.deepBlack, borderBottomColor: theme.colors.border }]}>
@@ -326,6 +327,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         contentInsetAdjustmentBehavior="automatic"
+        nestedScrollEnabled
         bounces
       >
         <View style={[styles.photoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
@@ -540,11 +542,15 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     return content;
   }
 
+  // No dialog animation: on Android the animated Modal left the profile unable
+  // to fling-scroll afterwards (slow drags worked, flicks did nothing). Checked
+  // on a Pixel 9 emulator on 2026-09-02: "slide" and "fade" both misbehaved,
+  // "none" flings normally.
   return (
     <Modal
       visible={visible}
-      animationType="slide"
-      presentationStyle="fullScreen"
+      animationType="none"
+      statusBarTranslucent
       onRequestClose={onClose}
     >
       {content}

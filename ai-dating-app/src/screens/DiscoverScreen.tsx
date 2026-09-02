@@ -569,12 +569,15 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           </Typography>
           <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', paddingHorizontal: 40 }}>
             {activeTab === 'onGrid'
-              ? 'AI Match only shows people who score 60% or more with you. Nobody nearby clears that yet, so check Explore in the meantime.'
+              ? 'No AI matches near you yet. Check Explore in the meantime.'
               : 'Try adjusting your filters to find more profiles'}
           </Typography>
         </View>
       ) : activeTab === 'offGrid' ? (
-        <View style={styles.offGridContainer}>
+        <ScrollView
+          contentContainerStyle={styles.offGridContainer}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={[styles.grid, styles.offGridGrid]}>
             {matches.slice(0, 4).map((match, index) => (
               <MatchCardItem key={`${match.id}-${index}`} match={match} index={index} />
@@ -589,7 +592,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
               Drop more
             </Typography>
           </TouchableOpacity>
-        </View>
+        </ScrollView>
       ) : (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
@@ -856,10 +859,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Scrolls, with the button directly under the tiles. It used to be pinned to
+  // the bottom of a flex container, which put it behind the nav bar.
   offGridContainer: {
-    flex: 1,
     paddingHorizontal: 20,
-    justifyContent: 'space-between',
+    paddingBottom: Platform.OS === 'ios' ? 170 : 150,
   },
   offGridGrid: {
     paddingBottom: 0,
@@ -869,8 +873,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 40,
     paddingVertical: 16,
     borderRadius: 999,
-    marginTop: 16,
-    marginBottom: 8,
+    marginTop: 20,
   },
   loadingContainer: {
     flex: 1,

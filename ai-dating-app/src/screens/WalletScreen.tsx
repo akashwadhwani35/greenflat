@@ -8,6 +8,39 @@ import { Feather } from '@expo/vector-icons';
 
 type PlanTier = 'pro' | 'premium';
 
+type Transaction = {
+  id: number;
+  amount: number | string;
+  direction: 'credit' | 'debit' | string;
+  reason: string;
+  created_at: string;
+};
+
+// Server reasons are snake_case identifiers; these are the words a person sees.
+const REASON_LABELS: Record<string, string> = {
+  signup_bonus: 'Welcome tokens',
+  weekly_allowance: 'Weekly free tokens',
+  daily_allowance: 'Free tokens',
+  ai_search: 'AI Search',
+  superlike: 'Super like',
+  compliment: 'Compliment',
+  compliment_send: 'Compliment',
+  boost: 'Boost',
+  boost_activation: 'Boost',
+  purchase: 'Token pack',
+  admin_grant: 'Added by GreenFlag',
+  admin_remove: 'Adjusted by GreenFlag',
+};
+
+const reasonLabel = (reason: string) =>
+  REASON_LABELS[reason] || reason.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+
+const historyDate = (iso: string) => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+};
+
 type Props = {
   onBack: () => void;
   onOpenCheckout?: () => void;
@@ -28,6 +61,7 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [freeAllowance, setFreeAllowance] = useState<number | null>(null);
   const [nextRefillAt, setNextRefillAt] = useState<string | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   useEffect(() => {
     const fetchWallet = async () => {
@@ -44,6 +78,7 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
         setPaymentsEnabled(Boolean(data.payments_enabled));
         setFreeAllowance(data.free_allowance ?? null);
         setNextRefillAt(data.next_refill_at ?? null);
+        setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
       } finally {
         setLoading(false);
       }
@@ -128,18 +163,16 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
             <Typography variant="small" style={{ color: theme.colors.muted }}>GF Tokens</Typography>
             <Typography variant="h1" style={{ color: theme.colors.neonGreen }}>{balance}</Typography>
           </View>
-          {paymentsEnabled ? (
-            <Pressable
-              onPress={onOpenCheckout}
-              style={[styles.addTokens, { backgroundColor: theme.colors.neonGreen }]}
-              accessibilityRole="button"
-            >
-              <Feather name="plus" size={18} color="#000" />
-              <Typography variant="small" style={{ color: '#000', fontFamily: 'RedHatDisplay_600SemiBold' }}>
-                Get tokens
-              </Typography>
-            </Pressable>
-          ) : null}
+          <Pressable
+            onPress={onOpenCheckout}
+            style={[styles.addTokens, { backgroundColor: theme.colors.neonGreen }]}
+            accessibilityRole="button"
+          >
+            <Feather name="plus" size={18} color="#000" />
+            <Typography variant="small" style={{ color: '#000', fontFamily: 'RedHatDisplay_600SemiBold' }}>
+              Get tokens
+            </Typography>
+          </Pressable>
         </View>
 
         {/* Where tokens come from while packs are not on sale. */}
@@ -254,6 +287,31 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
           </>
         ) : null}
 
+        {/* History */}
+        <View style={[styles.historyCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+          <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>History</Typography>
+          {transactions.length === 0 ? (
+            <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 8 }}>
+              Nothing yet. Tokens you earn and spend show up here.
+            </Typography>
+          ) : (
+            transactions.map((tx) => {
+              const credit = tx.direction === 'credit';
+              return (
+                <View key={tx.id} style={[styles.historyRow, { borderTopColor: theme.colors.border }]}>
+                  <View style={{ flex: 1 }}>
+                    <Typography variant="small" style={{ color: theme.colors.text }}>{reasonLabel(tx.reason)}</Typography>
+                    <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 2 }}>{historyDate(tx.created_at)}</Typography>
+                  </View>
+                  <Typography variant="bodyStrong" style={{ color: credit ? theme.colors.neonGreen : theme.colors.text }}>
+                    {credit ? '+' : '-'}{Math.abs(Number(tx.amount) || 0)}
+                  </Typography>
+                </View>
+              );
+            })
+          )}
+        </View>
+
         {/* Boost button */}
         <Pressable
           onPress={handleBoost}
@@ -312,6 +370,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  historyCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  historyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    marginTop: 6,
   },
   refillNote: {
     flexDirection: 'row',

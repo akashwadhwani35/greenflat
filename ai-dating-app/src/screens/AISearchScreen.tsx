@@ -338,7 +338,7 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
       {
         id: `${Date.now()}-none`,
         type: 'ai',
-        text: "Couldn't find anyone for that yet. Try searching in broader terms, like \"someone who loves travel\".",
+        text: "Couldn't find anyone for that yet. Try searching in broader terms.",
         timestamp: new Date(),
       },
     ]);

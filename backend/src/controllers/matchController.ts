@@ -644,11 +644,18 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     let onGridMatches: any[];
     let offGridMatches: any[];
 
+    // The compatibility floor is for the unprompted AI Match feed. When someone
+    // types a search ("funny"), they asked for people who fit the words, ranked
+    // by fit; hiding every result under 60% made the same search succeed on one
+    // account and fail on another for reasons the user could not see.
+    const clearsFloor = (c: any) =>
+      normalizedSearchQuery.length > 0 || c.match_percentage >= ON_GRID_MIN_MATCH;
+
     if (is_on_grid === true) {
       // Only return on-grid matches
       const requestedLimit = limit || onGridCount;
       onGridMatches = scoredCandidates
-        .filter((c: any) => c.match_percentage >= ON_GRID_MIN_MATCH)
+        .filter(clearsFloor)
         .slice(0, requestedLimit);
       offGridMatches = [];
     } else if (is_on_grid === false) {
@@ -660,7 +667,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     } else {
       // Return both types (default behavior)
       onGridMatches = scoredCandidates
-        .filter((c: any) => c.match_percentage >= ON_GRID_MIN_MATCH)
+        .filter(clearsFloor)
         .slice(0, onGridCount);
       const offGridCandidates = scoredCandidates.slice(onGridCount);
       const prioritizedOffGrid = prioritizeBoostedCandidates(offGridCandidates);

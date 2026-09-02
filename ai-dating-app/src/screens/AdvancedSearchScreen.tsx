@@ -121,6 +121,20 @@ const POLITICS_OPTIONS: Option[] = [
   { value: 'apolitical', label: 'Apolitical' },
 ];
 
+const ETHNICITY_OPTIONS: Option[] = [
+  { value: 'south asian', label: 'South Asian' },
+  { value: 'east asian', label: 'East Asian' },
+  { value: 'southeast asian', label: 'Southeast Asian' },
+  { value: 'middle eastern', label: 'Middle Eastern' },
+  { value: 'black', label: 'Black / African' },
+  { value: 'white', label: 'White / Caucasian' },
+  { value: 'hispanic', label: 'Hispanic / Latino' },
+  { value: 'native american', label: 'Native American' },
+  { value: 'pacific islander', label: 'Pacific Islander' },
+  { value: 'mixed', label: 'Mixed' },
+  { value: 'other', label: 'Other' },
+];
+
 const EDUCATION_OPTIONS: Option[] = [
   { value: 'high school', label: 'High school' },
   { value: 'undergraduate', label: 'Undergraduate' },
@@ -399,7 +413,12 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
           </View>
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Ethnicity</Typography>
-          <Input placeholder="e.g. South Asian" value={filters.ethnicity} disabled={!hasPaidPlan} onLockedPress={onPressPaidLocked} onChangeText={(text) => update('ethnicity', text, true)} />
+          <View style={styles.chipGrid}>
+            {ETHNICITY_OPTIONS.map((option) => (
+              <ChipToggle key={option.value} label={option.label} active={filters.ethnicity === option.value} disabled={!hasPaidPlan}
+                onPress={() => update('ethnicity', filters.ethnicity === option.value ? '' : option.value, true)} />
+            ))}
+          </View>
 
           <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Education</Typography>
           <View style={styles.chipGrid}>
