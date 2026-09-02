@@ -689,12 +689,14 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  // Narrower cards with more air around them: the board asked for a more
+  // minimal look than edge-to-edge boxes.
   scrollContent: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 18,
     paddingBottom: Platform.OS === 'ios' ? 120 : 104,
     paddingTop: 8,
     flexGrow: 1,
-    gap: 8,
+    gap: 10,
   },
   photoCard: {
     borderRadius: 12,
@@ -703,18 +705,19 @@ const styles = StyleSheet.create({
   },
   heroPhoto: {
     width: '100%',
-    height: 500,
+    height: 440,
   },
   identityBlock: {
-    paddingHorizontal: 8,
+    paddingHorizontal: 4,
   },
   nameText: {
     lineHeight: 32,
   },
   sectionCard: {
-    borderRadius: 12,
+    borderRadius: 14,
     borderWidth: 1,
-    padding: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     gap: 8,
   },
   sectionTitle: {},
@@ -732,7 +735,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 999,
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
   },
   chipText: {},
   promptCard: {
