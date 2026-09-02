@@ -37,11 +37,6 @@ type ProfileDetailScreenProps = {
 
 const fallbackPhoto = require('../../assets/icon.png');
 
-type PromptCard = {
-  prompt: string;
-  answer: string;
-};
-
 const normalizeLabel = (value: string) =>
   value
     .replace(/[_-]/g, ' ')
@@ -90,26 +85,6 @@ const toTextArray = (value: unknown): string[] => {
   return [];
 };
 
-const buildPromptCards = (name: string, about: string, highlights: string[]): PromptCard[] => {
-  const first = highlights[0] || 'slow evenings';
-  const second = highlights[1] || 'coffee chats';
-  const third = highlights[2] || 'weekend plans';
-
-  return [
-    {
-      prompt: "I'm happiest when",
-      answer: about || `${name.split(' ')[0]} enjoys meaningful conversations and calm moments.`,
-    },
-    {
-      prompt: 'My perfect Sunday includes',
-      answer: `A mix of ${first}, ${second}, and unhurried time together.`,
-    },
-    {
-      prompt: 'My real-life superpower is',
-      answer: `Showing up with empathy, curiosity, and a good plan for ${third}.`,
-    },
-  ];
-};
 
 export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   match,
@@ -137,6 +112,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const [sendingCompliment, setSendingCompliment] = useState(false);
   const [sentThisSession, setSentThisSession] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
+  // Which of their photos the hero shows; a tap moves to the next one.
+  const [photoIndex, setPhotoIndex] = useState(0);
   // The Modal does not resize for the keyboard on Android, so the composer
   // shifts itself up by the keyboard's height and stays centred otherwise.
   const [keyboardHeight, setKeyboardHeight] = useState(0);
@@ -201,7 +178,6 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const lookingFor = relationshipGoal
     ? [normalizeLabel(relationshipGoal)]
     : ['Long-term relationship', 'Fun, casual dates'];
-  const promptCards = buildPromptCards(name, aboutText, highlights);
 
   const pronouns = toTextArray(matchData.pronouns);
 
@@ -375,15 +351,47 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
         nestedScrollEnabled
         bounces
       >
-        <View style={[styles.photoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-          <Image source={primaryPhoto} style={styles.heroPhoto} />
-        </View>
+        {/* Every photo lives here. Tap anywhere on it for the next one. */}
+        <Pressable
+          style={[styles.photoCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}
+          onPress={() => setPhotoIndex((i) => (cardPhotos.length ? (i + 1) % cardPhotos.length : 0))}
+          accessibilityRole="imagebutton"
+          accessibilityLabel={`Photo ${photoIndex + 1} of ${cardPhotos.length}, tap for next`}
+        >
+          <Image source={cardPhotos[photoIndex % Math.max(1, cardPhotos.length)] || primaryPhoto} style={styles.heroPhoto} />
+          {cardPhotos.length > 1 ? (
+            <View style={styles.photoDots} pointerEvents="none">
+              {cardPhotos.map((_, i) => (
+                <View
+                  key={`dot-${i}`}
+                  style={[
+                    styles.photoDot,
+                    { backgroundColor: i === photoIndex % cardPhotos.length ? theme.colors.neonGreen : 'rgba(255,255,255,0.45)' },
+                    i === photoIndex % cardPhotos.length ? styles.photoDotActive : null,
+                  ]}
+                />
+              ))}
+            </View>
+          ) : null}
+        </Pressable>
 
         <View style={styles.identityBlock}>
-          <Typography variant="h2" style={[styles.nameText, { color: theme.colors.text }]}>
-            {age ? `${name}, ${age}` : name}
+          <Typography variant="h1" style={[styles.nameText, { color: theme.colors.text }]}>
+            {name}
+            {age ? <Typography variant="h2" style={{ color: theme.colors.muted }}>{`, ${age}`}</Typography> : null}
           </Typography>
         </View>
+
+        {aboutText ? (
+          <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+            <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
+              About {name}
+            </Typography>
+            <Typography variant="body" style={{ color: theme.colors.textDark, lineHeight: 22 }}>
+              {aboutText}
+            </Typography>
+          </View>
+        ) : null}
 
         {pronouns.length > 0 ? (
           <View style={styles.chipRow}>
@@ -507,30 +515,6 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </View>
         ) : null}
 
-        {promptCards.map((card, index) => (
-          <View key={`${card.prompt}-${index}`} style={[styles.promptCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-            <Image source={cardPhotos[index % cardPhotos.length]} style={styles.promptImage} />
-            <View style={styles.promptTextBlock}>
-              <Typography variant="bodyStrong" style={[styles.promptTitle, { color: theme.colors.text }]}>
-                {card.prompt}
-              </Typography>
-              <Typography variant="body" style={[styles.promptAnswer, { color: theme.colors.textDark }]}>
-                {card.answer}
-              </Typography>
-            </View>
-            <TouchableOpacity
-              style={[styles.complimentRow, { borderTopColor: theme.colors.border }]}
-              activeOpacity={0.8}
-              disabled={!onSendCompliment || complimentDone}
-              onPress={() => handleCompliment(card.prompt)}
-            >
-              <Feather name="message-circle" size={14} color={complimentDone ? theme.colors.neonGreen : theme.colors.muted} />
-              <Typography variant="small" style={[styles.complimentText, { color: complimentDone ? theme.colors.neonGreen : theme.colors.muted }]}>
-                {complimentDone ? 'Compliment sent' : 'Compliment'}
-              </Typography>
-            </TouchableOpacity>
-          </View>
-        ))}
 
         <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
           <Typography variant="bodyStrong" style={[styles.sectionTitle, { color: theme.colors.text }]}>
@@ -721,7 +705,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   nameText: {
-    lineHeight: 32,
+    lineHeight: 38,
+    fontFamily: 'RedHatDisplay_700Bold',
+  },
+  photoDots: {
+    position: 'absolute',
+    top: 10,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  photoDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  photoDotActive: {
+    width: 18,
   },
   sectionCard: {
     borderRadius: 14,

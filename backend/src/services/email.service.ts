@@ -91,7 +91,7 @@ export const renderOtpEmail = (code: string): RenderedEmail => {
             <table role="presentation" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="background:#0B140D;">
               <tr>
                 <td bgcolor="#0B140D" style="vertical-align:middle;padding-right:12px;background:#0B140D;">
-                  <img src="${logoUrl}" width="40" height="40" alt="GreenFlag" style="display:block;width:40px;height:40px;border-radius:10px;border:0;background:#101D13;">
+                  <img src="${logoUrl}" width="40" height="40" alt="GreenFlag" style="display:block;width:40px;height:40px;border:0;">
                 </td>
                 <td class="font" style="vertical-align:middle;font-size:20px;font-weight:800;color:#F6F6F6;letter-spacing:-0.3px;">
                   GreenFlag
