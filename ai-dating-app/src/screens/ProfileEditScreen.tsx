@@ -10,12 +10,14 @@ import {
   Platform,
   StatusBar,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
+import { NoticeModal, type Notice } from '../components/NoticeModal';
 
 type Props = {
   onBack: () => void;
@@ -311,6 +313,11 @@ const titleForField = (field: MoreAboutField) => {
 
 export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token, apiBaseUrl }) => {
   const theme = useTheme();
+  // Android's Modal does not hand its content a definite height, so a flex:1
+  // ScrollView grows to its content and never scrolls. Same fix as the
+  // profile screen: pin the modal root to the window height.
+  const { height: windowHeight } = useWindowDimensions();
+  const [limitNotice, setLimitNotice] = useState<Notice | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
@@ -436,7 +443,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
         }
 
         if (maxItems && prev.interests.length >= maxItems) {
-          Alert.alert('Limit reached', `You can select up to ${maxItems} options.`);
+          setLimitNotice({ title: 'Limit reached', message: `You can select up to ${maxItems} options.`, tone: 'error', icon: 'list' });
           return prev;
         }
 
@@ -448,7 +455,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
         return { ...prev, [key]: currentArray.filter((i) => i !== item) };
       }
       if (maxItems && currentArray.length >= maxItems) {
-        Alert.alert('Limit reached', `You can select up to ${maxItems} options.`);
+        setLimitNotice({ title: 'Limit reached', message: `You can select up to ${maxItems} options.`, tone: 'error', icon: 'list' });
         return prev;
       }
       return { ...prev, [key]: [...currentArray, item] };
@@ -656,8 +663,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Interests Modal
   const renderInterestsModal = () => (
-    <Modal visible={activeModal === 'interests'} animationType="none" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+    <Modal visible={activeModal === 'interests'} animationType="none">
+      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
             <Feather name="x" size={24} color={theme.colors.text} />
@@ -686,8 +693,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           style={styles.modalScroll}
           contentContainerStyle={[styles.modalScrollContent, styles.interestsModalScrollContent]}
           showsVerticalScrollIndicator={false}
-          keyboardDismissMode="on-drag"
-          keyboardShouldPersistTaps="always"
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
         >
           {INTEREST_CATEGORIES.map((category) => (
             <View key={category.name} style={styles.categorySection}>
@@ -728,8 +735,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Languages Modal
   const renderLanguagesModal = () => (
-    <Modal visible={activeModal === 'languages'} animationType="none" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+    <Modal visible={activeModal === 'languages'} animationType="none">
+      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
             <Feather name="x" size={24} color={theme.colors.text} />
@@ -795,8 +802,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Pronouns Modal
   const renderPronounsModal = () => (
-    <Modal visible={activeModal === 'pronouns'} animationType="none" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+    <Modal visible={activeModal === 'pronouns'} animationType="none">
+      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
             <Feather name="x" size={24} color={theme.colors.text} />
@@ -866,8 +873,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Communities Modal
   const renderCommunitiesModal = () => (
-    <Modal visible={activeModal === 'communities'} animationType="none" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+    <Modal visible={activeModal === 'communities'} animationType="none">
+      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
             <Feather name="x" size={24} color={theme.colors.text} />
@@ -928,8 +935,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Bio Modal
   const renderBioModal = () => (
-    <Modal visible={activeModal === 'bio'} animationType="none" presentationStyle="pageSheet">
-      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+    <Modal visible={activeModal === 'bio'} animationType="none">
+      <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
             <Feather name="x" size={24} color={theme.colors.text} />
@@ -1012,8 +1019,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const moreRows: MoreAboutField[] = ['height', 'exercise', 'educationLevel', 'drinking', 'smoking', 'lookingFor', 'kids', 'haveKids', 'starSign', 'politics', 'religion'];
 
     return (
-      <Modal visible={activeModal === 'moreAbout'} animationType="none" presentationStyle="pageSheet">
-        <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+      <Modal visible={activeModal === 'moreAbout'} animationType="none">
+        <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
           <PageHeader title="More about you" onBack={() => setActiveModal(null)} />
 
           <ScrollView
@@ -1021,8 +1028,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             contentContainerStyle={styles.moreAboutContent}
             showsVerticalScrollIndicator={false}
             contentInsetAdjustmentBehavior="automatic"
-            keyboardDismissMode="on-drag"
-            keyboardShouldPersistTaps="always"
+            keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
           >
             <Typography variant="h2" style={{ color: theme.colors.text, marginBottom: 6 }}>
               About you
@@ -1087,8 +1094,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const value = getFieldValue(field) === 'Add' ? '' : getFieldValue(field).replace(' cm', '');
 
     return (
-      <Modal visible animationType="none" presentationStyle="pageSheet">
-        <View style={[styles.modalContainer, { backgroundColor: theme.colors.background }]}> 
+      <Modal visible animationType="none">
+        <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
           <PageHeader title={title} onBack={() => setActiveModal('moreAbout')} />
 
           {options ? (
@@ -1097,8 +1104,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
               contentContainerStyle={styles.moreFieldContent}
               showsVerticalScrollIndicator={false}
               contentInsetAdjustmentBehavior="automatic"
-              keyboardDismissMode="on-drag"
-              keyboardShouldPersistTaps="always"
+                            keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
             >
               {options.map((option) => {
                 const selected = value.toLowerCase() === option.toLowerCase();
@@ -1334,6 +1341,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
       {renderBioModal()}
       {renderMoreAboutModal()}
       {renderMoreFieldModal()}
+      <NoticeModal notice={limitNotice} onClose={() => setLimitNotice(null)} />
     </View>
   );
 };

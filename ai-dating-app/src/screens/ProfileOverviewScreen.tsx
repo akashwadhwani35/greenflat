@@ -22,6 +22,7 @@ type ProfileDetailCandidate = MatchCandidate & {
   photos?: string[];
   personality_summary?: string;
   top_traits?: string[];
+  personality_traits?: string[];
 };
 
 const calculateAge = (dateOfBirth?: string): number | undefined => {
@@ -67,6 +68,7 @@ const parseProfileData = (data: any): ProfileDetailCandidate => {
       ? personality.personality_summary
       : '',
     top_traits: topTraits,
+    personality_traits: Array.isArray(personality?.personality_traits) ? personality.personality_traits : [],
     photos: photos
       .map((photo: any) => photo?.photo_url)
       .filter((value: unknown): value is string => typeof value === 'string' && value.length > 0),
