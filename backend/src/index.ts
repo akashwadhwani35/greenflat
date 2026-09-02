@@ -61,6 +61,9 @@ app.use(express.urlencoded({ extended: true, limit: '12mb' }));
 // Local media files (dev/local fallback when Cloudinary is not configured)
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
+// Static brand assets referenced from transactional emails (logo etc.)
+app.use('/public', express.static(path.join(process.cwd(), 'public'), { maxAge: '1d', immutable: false }));
+
 // Routes
 app.use('/api', routes);
 

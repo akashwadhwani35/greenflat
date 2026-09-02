@@ -32,6 +32,9 @@ COPY --from=builder /app/dist ./dist
 # Copy database schema for migrations
 COPY src/database ./src/database
 
+# Static assets served at /public (email logo)
+COPY public ./public
+
 # Expose port
 EXPOSE 8080
 
