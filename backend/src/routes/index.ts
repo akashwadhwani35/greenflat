@@ -1,8 +1,8 @@
 import express from 'express';
 import { signup, login, googleAuth, forgotPassword, resetPassword } from '../controllers/authController';
 import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount, getBioSuggestions } from '../controllers/profileController';
-import { searchMatches, refreshOffGrid, rewindOffGrid, getUserDetails, unmatch } from '../controllers/matchController';
-import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment, acceptMatchRequest, declineMatchRequest, getBadgeCounts } from '../controllers/likeController';
+import { searchMatches, refreshOffGrid, rewindOffGrid, getUserDetails, unmatch, getMatchBriefing } from '../controllers/matchController';
+import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment, acceptMatchRequest, declineMatchRequest, getBadgeCounts, dismissIncomingLike, getAcceptedLikes } from '../controllers/likeController';
 import { authenticate } from '../middleware/auth';
 import {
   requestOtp,
@@ -105,6 +105,9 @@ router.post('/matches/:matchId/unmatch', authenticate, unmatch);
 router.post('/matches/:matchId/accept', authenticate, acceptMatchRequest);
 router.post('/matches/:matchId/decline', authenticate, declineMatchRequest);
 router.get('/notifications/counts', authenticate, getBadgeCounts);
+router.post('/likes/incoming/:likerId/dismiss', authenticate, dismissIncomingLike);
+router.get('/likes/accepted', authenticate, getAcceptedLikes);
+router.get('/matches/:targetUserId/briefing', authenticate, getMatchBriefing);
 
 // Like routes (protected)
 router.post('/likes', authenticate, likeProfile);

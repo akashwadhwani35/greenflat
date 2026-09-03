@@ -17,7 +17,7 @@ type Conversation = {
   last_message_sender_id: number | null;
   unread_count: number;
   matched_at: string;
-  /** 'pending' while a compliment waits for the receiver's answer. */
+  /** 'pending' while a First Move waits for the receiver's answer. */
   status?: 'active' | 'pending';
   requested_by?: number | null;
 };
@@ -272,7 +272,7 @@ export const ConversationsScreen: React.FC<Props> = ({
                     {isPending ? (
                       <View style={[styles.requestChip, { backgroundColor: awaitingMe ? theme.colors.neonGreen : theme.colors.secondaryHighlight, borderColor: awaitingMe ? theme.colors.neonGreen : theme.colors.secondaryHairline }]}>
                         <Typography variant="tiny" style={{ color: awaitingMe ? theme.colors.deepBlack : theme.colors.muted, fontFamily: theme.fonts.bodyStrong.family, fontSize: 10 }}>
-                          {awaitingMe ? 'Compliment' : 'Waiting'}
+                          {awaitingMe ? 'First Move' : 'Waiting'}
                         </Typography>
                       </View>
                     ) : null}

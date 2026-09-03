@@ -125,6 +125,8 @@ const AppShell: React.FC = () => {
   // Rejected profiles disappear from the feed for this account (persisted per user id).
   const [passedProfileIds, setPassedProfileIds] = useState<Set<number>>(new Set());
   const [complimentedProfileIds, setComplimentedProfileIds] = useState<Set<number>>(new Set());
+  // Opened from the Likes inbox: only Reject / Like are offered.
+  const [profileRespondMode, setProfileRespondMode] = useState(false);
   // One like / Green Flag / compliment request at a time, whatever gets tapped.
   const actionInFlightRef = useRef(false);
   const [isProfilePaused, setIsProfilePaused] = useState(false);
@@ -354,12 +356,20 @@ const AppShell: React.FC = () => {
 
   const handleCloseProfile = (preserveSelection = false) => {
     setShowProfileModal(false);
+    setProfileRespondMode(false);
     if (!preserveSelection) {
       setTimeout(() => setSelectedMatch(null), 300);
     }
   };
 
   const handleSwipeLeft = () => {
+    if (selectedMatch && profileRespondMode && authToken) {
+      // Rejecting from the Likes inbox: their like goes away on the server too.
+      void fetch(`${API_BASE_URL}/likes/incoming/${selectedMatch.id}/dismiss`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${authToken}` },
+      }).then(() => fetchBadgeCounts()).catch(() => {});
+    }
     if (selectedMatch) {
       const id = selectedMatch.id;
       setPassedProfileIds((prev) => {
@@ -545,7 +555,7 @@ const AppShell: React.FC = () => {
     }
   };
 
-  const handleSendCompliment = async (targetUserId: number, content: string): Promise<boolean> => {
+  const handleSendCompliment = async (targetUserId: number, content: string, photoUrl?: string | null): Promise<boolean> => {
     if (!authToken) {
       Alert.alert('Sign in required', 'Please restart onboarding to continue.');
       return false;
@@ -563,23 +573,24 @@ const AppShell: React.FC = () => {
         body: JSON.stringify({
           target_user_id: targetUserId,
           content,
+          photo_url: photoUrl || undefined,
         }),
       });
 
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         if (body.already_complimented) setComplimentedProfileIds((prev) => new Set(prev).add(targetUserId));
-        throw new Error(body.error || 'Unable to send compliment.');
+        throw new Error(body.error || 'Unable to send your First Move.');
       }
 
       setComplimentedProfileIds((prev) => new Set(prev).add(targetUserId));
       // A compliment is a like too: the tile dims and the buttons go quiet,
       // the same as after Like or Green Flag.
       setLikedProfileIds((prev) => new Set(prev).add(targetUserId));
-      setNotice({ title: 'Compliment sent', message: 'They will find it in their messages.', icon: 'message-circle' });
+      setNotice({ title: 'First Move sent', message: 'They will find it in their messages.', icon: 'message-circle' });
       return true;
     } catch (error: any) {
-      setNotice({ title: "Couldn't send compliment", message: error.message || 'Please try again.', tone: 'error' });
+      setNotice({ title: "Couldn't send your First Move", message: error.message || 'Please try again.', tone: 'error' });
       return false;
     } finally {
       actionInFlightRef.current = false;
@@ -764,7 +775,13 @@ const AppShell: React.FC = () => {
                 is_on_grid: true,
               });
               setOverlay(null);
+              setProfileRespondMode(true);
               setShowProfileModal(true);
+            }}
+            onOpenConversation={(matchId, matchName, targetUserId) => {
+              setCurrentConversation({ matchId, matchName, targetUserId, status: 'active', requestedBy: null });
+              setShowMessages(true);
+              setOverlay(null);
             }}
           />
         );
@@ -1004,6 +1021,9 @@ const AppShell: React.FC = () => {
               viewer={viewerProfile}
               alreadyLiked={selectedMatch ? likedProfileIds.has(selectedMatch.id) : false}
               alreadyComplimented={selectedMatch ? complimentedProfileIds.has(selectedMatch.id) : false}
+              token={authToken}
+              apiBaseUrl={API_BASE_URL}
+              actionMode={profileRespondMode ? 'respond' : 'full'}
             />
 
             {/* Match Modal */}

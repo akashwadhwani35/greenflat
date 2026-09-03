@@ -1057,9 +1057,13 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
         return (
           <View style={styles.slideStack}>
             <View style={[styles.card, { backgroundColor: '#101D13' }]}>
-              <Typography variant="body" style={{ color: theme.colors.muted }}>Pick your interests (at least 3)</Typography>
+              <Typography variant="body" style={{ color: theme.colors.muted }}>Pick your interests (3 to 10)</Typography>
               {renderChipRow(interestOptions, form.interests, (option) =>
-                setForm((prev) => ({ ...prev, interests: toggleArrayValue(prev.interests, option) }))
+                setForm((prev) => {
+                  const next = toggleArrayValue(prev.interests, option);
+                  // Ten at most; a tap past that does nothing.
+                  return next.length > 10 ? prev : { ...prev, interests: next };
+                })
               )}
               {errors.interests ? <Typography variant="small" tone="error">{errors.interests}</Typography> : null}
             </View>

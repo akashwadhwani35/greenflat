@@ -15,7 +15,7 @@ type ProfileDetailScreenProps = {
   onSwipeLeft: () => void;
   onSwipeRight: () => void;
   onSuperlike?: () => void;
-  onSendCompliment?: (targetUserId: number, content: string) => Promise<boolean | void> | boolean | void;
+  onSendCompliment?: (targetUserId: number, content: string, photoUrl?: string | null) => Promise<boolean | void> | boolean | void;
   onBlock?: (targetUserId: number, name: string) => void;
   onReport?: (targetUserId: number, name: string) => void;
   onHeaderRightPress?: () => void;
@@ -25,8 +25,16 @@ type ProfileDetailScreenProps = {
   hideActionButtons?: boolean;
   /** Like / Green Flag already sent from this account: those buttons go quiet. */
   alreadyLiked?: boolean;
-  /** One compliment per person; the composer stays closed after it. */
+  /** One First Move per person; the composer stays closed after it. */
   alreadyComplimented?: boolean;
+  /** For the AI Match briefing (fetched per profile). */
+  token?: string | null;
+  apiBaseUrl?: string;
+  /**
+   * 'respond': opened from the Likes inbox after they liked / Green Flagged
+   * you. Only Reject and Like, no First Move, no Green Flag.
+   */
+  actionMode?: 'full' | 'respond';
   /**
    * The signed-in user's own answers. When supplied, any detail the two people
    * share is rendered in green. Omitted when someone is previewing their own
@@ -103,12 +111,19 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   hideActionButtons = false,
   alreadyLiked = false,
   alreadyComplimented = false,
+  token = null,
+  apiBaseUrl,
+  actionMode = 'full',
   viewer = null,
 }) => {
   const theme = useTheme();
   const { height: windowHeight } = useWindowDimensions();
   const [composerOpen, setComposerOpen] = useState(false);
   const [composerText, setComposerText] = useState('');
+  // The photo the First Move is being sent from, shown in the popup and sent along.
+  const [composerPhoto, setComposerPhoto] = useState<string | null>(null);
+  const [briefing, setBriefing] = useState<string | null>(null);
+  const [briefingFailed, setBriefingFailed] = useState(false);
   const [sendingCompliment, setSendingCompliment] = useState(false);
   const [sentThisSession, setSentThisSession] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -125,6 +140,33 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     return () => { s1.remove(); s2.remove(); };
   }, []);
   const complimentDone = alreadyComplimented || sentThisSession;
+
+  // Everything about the previous profile goes when a new one opens. The
+  // "already sent" state used to follow the person from profile to profile.
+  useEffect(() => {
+    setSentThisSession(false);
+    setComposerOpen(false);
+    setComposerText('');
+    setComposerPhoto(null);
+    setPhotoIndex(0);
+    setBriefing(null);
+    setBriefingFailed(false);
+  }, [match?.id]);
+
+  // AI Match briefing: what you two have in common, from both sets of answers.
+  useEffect(() => {
+    if (!match || !token || !apiBaseUrl || embedded) return;
+    let cancelled = false;
+    fetch(`${apiBaseUrl}/matches/${match.id}/briefing`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.briefing) setBriefing(String(data.briefing));
+        else setBriefingFailed(true);
+      })
+      .catch(() => { if (!cancelled) setBriefingFailed(true); });
+    return () => { cancelled = true; };
+  }, [match?.id, token, apiBaseUrl, embedded]);
 
   if (!match) {
     if (embedded) return null;
@@ -162,8 +204,12 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const city = matchData.city || 'Location not set';
   const isVerified = Boolean(matchData.is_verified);
   const primaryPhoto = matchData.primary_photo ? { uri: matchData.primary_photo } : fallbackPhoto;
-  const photos = toArray(matchData.photos);
-  const cardPhotos = [primaryPhoto, ...photos.map((url) => ({ uri: url }))];
+  // The primary photo is also in the photos list; without this it showed twice.
+  const photoUrls = Array.from(
+    new Set([matchData.primary_photo, ...toArray(matchData.photos)].filter((u): u is string => typeof u === 'string' && u.length > 0))
+  );
+  const cardPhotos = photoUrls.length > 0 ? photoUrls.map((url) => ({ uri: url })) : [primaryPhoto];
+  const currentPhotoUrl = photoUrls[photoIndex % Math.max(1, photoUrls.length)] || null;
   const aboutText = toText(matchData.bio || matchData.match_reason || '');
   const interests = toTextArray(matchData.interests);
   const matchHighlights = toTextArray(matchData.match_highlights);
@@ -242,20 +288,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const bubbleTextColor = (shared: boolean) =>
     shared ? theme.colors.neonGreen : theme.colors.textDark;
 
-  // Nothing is sent until the person has written something. The compliment
+  // Nothing is sent until the person has written something. The First Move
   // button used to fire a canned line straight away.
-  const openComposer = (seed = '') => {
+  const openComposer = (seed = '', photoUrl: string | null = null) => {
     if (!onSendCompliment || sendingCompliment) return;
     if (complimentDone) {
-      setNotice({ title: 'Already sent', message: `You have already sent ${name} a compliment.`, icon: 'message-circle' });
+      setNotice({ title: 'Already made', message: `You have already made your First Move with ${name}.`, icon: 'message-circle' });
       return;
     }
     setComposerText(seed);
+    setComposerPhoto(photoUrl);
     setComposerOpen(true);
-  };
-
-  const handleCompliment = (prompt: string) => {
-    openComposer(`Loved your "${prompt}" answer. `);
   };
 
   const handleQuickMessage = () => openComposer('');
@@ -264,16 +307,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     const text = composerText.trim().replace(/\s+/g, ' ');
     if (!onSendCompliment || sendingCompliment || complimentDone) return;
     if (text.length < 2) {
-      setNotice({ title: 'Write something first', message: 'A compliment needs a few words.', tone: 'error', icon: 'edit-3' });
+      setNotice({ title: 'Write something first', message: 'A First Move needs a few words.', tone: 'error', icon: 'edit-3' });
       return;
     }
     setSendingCompliment(true);
     try {
-      const result = await onSendCompliment(match.id, text.slice(0, 300));
+      const result = await onSendCompliment(match.id, text.slice(0, 300), composerPhoto);
       if (result !== false) {
         setSentThisSession(true);
         setComposerOpen(false);
         setComposerText('');
+        setComposerPhoto(null);
       }
     } finally {
       setSendingCompliment(false);
@@ -359,6 +403,22 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           accessibilityLabel={`Photo ${photoIndex + 1} of ${cardPhotos.length}, tap for next`}
         >
           <Image source={cardPhotos[photoIndex % Math.max(1, cardPhotos.length)] || primaryPhoto} style={styles.heroPhoto} />
+          {!hideActionButtons && actionMode === 'full' && onSendCompliment ? (
+            <Pressable
+              style={({ pressed }) => [
+                styles.photoFirstMove,
+                { backgroundColor: complimentDone ? 'rgba(16, 29, 19, 0.85)' : theme.colors.neonGreen, borderColor: complimentDone ? theme.colors.neonGreen : theme.colors.neonGreen },
+                pressed && { opacity: 0.85 },
+              ]}
+              onPress={() => openComposer('', currentPhotoUrl)}
+              accessibilityLabel="First Move on this photo"
+            >
+              <Feather name="message-circle" size={14} color={complimentDone ? theme.colors.neonGreen : theme.colors.deepBlack} />
+              <Typography variant="tiny" style={{ color: complimentDone ? theme.colors.neonGreen : theme.colors.deepBlack, fontFamily: 'RedHatDisplay_700Bold', fontSize: 12 }}>
+                {complimentDone ? 'First Move sent' : 'First Move'}
+              </Typography>
+            </Pressable>
+          ) : null}
           {cardPhotos.length > 1 ? (
             <View style={styles.photoDots} pointerEvents="none">
               {cardPhotos.map((_, i) => (
@@ -376,11 +436,41 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
         </Pressable>
 
         <View style={styles.identityBlock}>
-          <Typography variant="h1" style={[styles.nameText, { color: theme.colors.text }]}>
-            {name}
-            {age ? <Typography variant="h2" style={{ color: theme.colors.muted }}>{`, ${age}`}</Typography> : null}
-          </Typography>
+          <View style={styles.identityRow}>
+            <Typography variant="h1" style={[styles.nameText, { color: theme.colors.text }]}>
+              {name}
+              {age ? <Typography variant="h2" style={{ color: theme.colors.muted }}>{`, ${age}`}</Typography> : null}
+            </Typography>
+            {pronouns.length > 0 ? (
+              <View style={[styles.pronounChip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+                <Typography variant="small" style={{ color: theme.colors.textDark }}>{pronouns[0]}</Typography>
+              </View>
+            ) : null}
+          </View>
         </View>
+
+        {!embedded && !hideActionButtons && actionMode === 'full' && token && !briefingFailed ? (
+          <View style={[styles.briefingCard, { borderColor: 'rgba(173, 255, 26, 0.35)', backgroundColor: 'rgba(173, 255, 26, 0.06)' }]}>
+            <View style={styles.sectionHeaderRow}>
+              <PixelFlag size={14} color={theme.colors.neonGreen} />
+              <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>AI Match briefing</Typography>
+            </View>
+            <Typography variant="body" style={{ color: theme.colors.text, lineHeight: 22 }}>
+              {briefing || 'Reading both of your answers...'}
+            </Typography>
+            {onSendCompliment ? (
+              <Pressable
+                style={({ pressed }) => [styles.briefingButton, { backgroundColor: complimentDone ? theme.colors.secondaryHighlight : theme.colors.neonGreen }, pressed && { opacity: 0.85 }]}
+                onPress={() => openComposer('')}
+              >
+                <Feather name="message-circle" size={15} color={complimentDone ? theme.colors.muted : theme.colors.deepBlack} />
+                <Typography variant="bodyStrong" style={{ color: complimentDone ? theme.colors.muted : theme.colors.deepBlack }}>
+                  {complimentDone ? 'First Move sent' : 'Make your First Move'}
+                </Typography>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
 
         {aboutText ? (
           <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
@@ -393,20 +483,6 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </View>
         ) : null}
 
-        {pronouns.length > 0 ? (
-          <View style={styles.chipRow}>
-            {pronouns.map((pronoun) => (
-              <View
-                key={`pronoun-${pronoun}`}
-                style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}
-              >
-                <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
-                  {pronoun}
-                </Typography>
-              </View>
-            ))}
-          </View>
-        ) : null}
 
         {/* 1 — relationship type */}
         <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
@@ -529,7 +605,29 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
         </View>
 
       </ScrollView>
-        {!hideActionButtons ? (
+        {!hideActionButtons && actionMode === 'respond' ? (
+          <View style={styles.actionsFixed} pointerEvents="box-none">
+            <View style={styles.actionButtons}>
+              <TouchableOpacity
+                onPress={onSwipeLeft}
+                style={[styles.respondButton, { backgroundColor: 'rgba(16, 29, 19, 0.92)', borderColor: theme.colors.secondaryHairline }]}
+                activeOpacity={0.8}
+                accessibilityLabel="Reject"
+              >
+                <Feather name="x" size={28} color={theme.colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={onSwipeRight}
+                style={[styles.respondButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
+                activeOpacity={0.8}
+                accessibilityLabel="Like"
+              >
+                <Feather name="heart" size={28} color={theme.colors.deepBlack} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : null}
+        {!hideActionButtons && actionMode === 'full' ? (
           <View style={styles.actionsFixed} pointerEvents="box-none">
             <View style={styles.actionButtons}>
               <TouchableOpacity
@@ -548,7 +646,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 activeOpacity={0.8}
                 onPress={handleQuickMessage}
                 disabled={!onSendCompliment || sendingCompliment}
-                accessibilityLabel="Compliment"
+                accessibilityLabel="First Move"
               >
                 <Feather name="message-circle" size={22} color={complimentDone ? theme.colors.neonGreen : theme.colors.text} />
               </TouchableOpacity>
@@ -593,8 +691,16 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 <Feather name="message-circle" size={26} color={theme.colors.deepBlack} />
               </View>
               <Typography variant="h2" style={[styles.composerTitle, { color: theme.colors.text }]}>
-                Compliment {name}
+                First Move
               </Typography>
+              {composerPhoto ? (
+                <View style={[styles.composerPhotoRow, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.background }]}>
+                  <Image source={{ uri: composerPhoto }} style={styles.composerPhoto} />
+                  <Typography variant="small" style={{ color: theme.colors.muted, flex: 1 }}>
+                    About this photo of {name}. It goes with your message.
+                  </Typography>
+                </View>
+              ) : null}
               <Typography variant="small" style={[styles.composerBody, { color: theme.colors.muted }]}>
                 Tell them what caught your attention.
               </Typography>
@@ -605,7 +711,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 ]}
                 value={composerText}
                 onChangeText={(t) => setComposerText(t.slice(0, 300))}
-                placeholder={`Something you liked about ${name}...`}
+                placeholder={composerPhoto ? 'Say something about this photo...' : `What caught your attention about ${name}?`}
                 placeholderTextColor={theme.colors.muted}
                 multiline
                 maxLength={300}
@@ -626,7 +732,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 disabled={sendingCompliment || composerText.trim().length < 2}
               >
                 <Typography variant="bodyStrong" style={{ color: '#000', fontSize: 17 }}>
-                  {sendingCompliment ? 'Sending...' : 'Send compliment'}
+                  {sendingCompliment ? 'Sending...' : 'Send First Move'}
                 </Typography>
               </Pressable>
             </View>
@@ -703,6 +809,75 @@ const styles = StyleSheet.create({
   },
   identityBlock: {
     paddingHorizontal: 4,
+  },
+  identityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  pronounChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  briefingCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  briefingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingVertical: 12,
+    marginTop: 2,
+  },
+  photoFirstMove: {
+    position: 'absolute',
+    right: 12,
+    bottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  respondButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginHorizontal: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  composerPhotoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    width: '100%',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 8,
+    marginBottom: 12,
+  },
+  composerPhoto: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
   },
   nameText: {
     lineHeight: 38,

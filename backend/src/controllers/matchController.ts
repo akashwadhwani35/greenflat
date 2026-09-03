@@ -2,6 +2,8 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, TOKEN_COSTS } from '../utils/constants';
+import { ANSWER_COLUMNS, describeAnswers } from '../utils/personalityQuestions';
+import { generateMatchBriefing } from '../services/openai.service';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
 import { consumeCredits, getCreditBalance, ensureDailyAllowance } from '../services/credits.service';
@@ -343,6 +345,12 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
         LEFT JOIN likes existing_like ON existing_like.liker_id = $1 AND existing_like.liked_id = u.id
         WHERE u.id != $1
           AND existing_like.id IS NULL
+          -- Anyone already interacted with is gone from both feeds: they
+          -- liked me (answer from Likes), or a chat exists either way
+          -- (pending First Move or a match).
+          AND u.id NOT IN (SELECT liker_id FROM likes WHERE liked_id = $1)
+          AND u.id NOT IN (SELECT user1_id FROM matches WHERE user2_id = $1)
+          AND u.id NOT IN (SELECT user2_id FROM matches WHERE user1_id = $1)
           -- A live block in EITHER direction hides the profile everywhere.
           -- Written as NOT IN over subqueries that only reference $1 (never the
           -- outer row): a LEFT JOIN with a block each way let a lifted block's
@@ -652,8 +660,9 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       normalizedSearchQuery.length > 0 || c.match_percentage >= ON_GRID_MIN_MATCH;
 
     if (is_on_grid === true) {
-      // Only return on-grid matches
-      const requestedLimit = limit || onGridCount;
+      // Only return on-grid matches. The gender rule on the board caps how
+      // many AI Match shows, whatever the app asks for.
+      const requestedLimit = Math.min(limit || onGridCount, onGridCount);
       onGridMatches = scoredCandidates
         .filter(clearsFloor)
         .slice(0, requestedLimit);
@@ -1063,5 +1072,62 @@ export const unmatch = async (req: AuthRequest, res: Response) => {
     return res.status(500).json({ error: 'Failed to unmatch' });
   } finally {
     client.release();
+  }
+};
+
+
+/**
+ * AI Match briefing for the profile being viewed: two sentences on what the
+ * viewer and this person have in common, built from both sets of quiz
+ * answers. Generated once per pair and cached.
+ */
+export const getMatchBriefing = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const targetId = Number(req.params.targetUserId);
+    if (!Number.isFinite(targetId) || targetId === userId) {
+      return res.status(400).json({ error: 'Invalid user' });
+    }
+    const a = Math.min(userId, targetId);
+    const b = Math.max(userId, targetId);
+
+    const cached = await pool.query('SELECT briefing FROM pair_briefings WHERE user_a = $1 AND user_b = $2', [a, b]);
+    if (cached.rows.length > 0) {
+      return res.json({ briefing: cached.rows[0].briefing, cached: true });
+    }
+
+    const load = async (id: number) => {
+      const user = await pool.query('SELECT name FROM users WHERE id = $1', [id]);
+      const profile = await pool.query('SELECT interests, relationship_goal FROM user_profiles WHERE user_id = $1', [id]);
+      const quiz = await pool.query(
+        `SELECT ${ANSWER_COLUMNS.join(', ')}, top_traits, personality_traits FROM personality_responses WHERE user_id = $1`,
+        [id]
+      );
+      const row = quiz.rows[0] || {};
+      const answers = ANSWER_COLUMNS.map((c) => (row[c] as string | null) ?? null);
+      const traits: string[] = Array.from(new Set([...(row.top_traits || []), ...(row.personality_traits || [])])).slice(0, 8) as string[];
+      return {
+        name: user.rows[0]?.name || 'them',
+        answers: describeAnswers(answers),
+        traits,
+        interests: Array.isArray(profile.rows[0]?.interests) ? profile.rows[0].interests : [],
+        relationshipGoal: profile.rows[0]?.relationship_goal || null,
+      };
+    };
+
+    const [reader, other] = await Promise.all([load(userId), load(targetId)]);
+    if (!other.name) return res.status(404).json({ error: 'User not found' });
+
+    const result = await generateMatchBriefing(reader, other);
+    if (!result.degraded) {
+      await pool.query(
+        'INSERT INTO pair_briefings (user_a, user_b, briefing) VALUES ($1, $2, $3) ON CONFLICT (user_a, user_b) DO NOTHING',
+        [a, b, result.briefing]
+      );
+    }
+    res.json({ briefing: result.briefing, cached: false, degraded: result.degraded });
+  } catch (error) {
+    console.error('Match briefing error:', error);
+    res.status(500).json({ error: 'Failed to build the briefing' });
   }
 };

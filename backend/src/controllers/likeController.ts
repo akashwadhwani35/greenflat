@@ -2,7 +2,7 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
-import { notifyLikeReceived, notifyMatch, notifyNewMessage } from '../services/push.service';
+import { notifyLikeReceived, notifyMatch, notifyFirstMove, notifyAccepted } from '../services/push.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
 import { getIO } from '../socket';
 
@@ -264,7 +264,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         `INSERT INTO matches (user1_id, user2_id, status, requested_by)
          VALUES (LEAST($1::int, $2::int), GREATEST($1::int, $2::int), 'active', NULL)
          ON CONFLICT (user1_id, user2_id)
-         DO UPDATE SET status = 'active', requested_by = NULL
+         DO UPDATE SET status = 'active'
          WHERE matches.status <> 'active'
          RETURNING id`,
         [userId, target_user_id]
@@ -274,9 +274,18 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         isMatch = true;
         matchId = matchResult.rows[0].id;
 
-        // Send match notifications to both users
+        // Liking back someone who sent a Green Flag is accepting it: they
+        // hear that, not a generic match line.
+        const theirLike = await client.query(
+          'SELECT is_superlike FROM likes WHERE liker_id = $1 AND liked_id = $2',
+          [target_user_id, userId]
+        );
+        const theyGreenFlagged = Boolean(theirLike.rows[0]?.is_superlike);
         notifyMatch(userId, targetName).catch(err => console.error('Failed to send match notification:', err));
-        notifyMatch(target_user_id, likerName).catch(err => console.error('Failed to send match notification:', err));
+        (theyGreenFlagged
+          ? notifyAccepted(target_user_id, likerName, 'green_flag')
+          : notifyMatch(target_user_id, likerName)
+        ).catch(err => console.error('Failed to send match notification:', err));
       }
     } else {
       // Not a match yet - notify the target user they received a like
@@ -433,10 +442,13 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
 
   try {
     const userId = req.userId!;
-    const { target_user_id, content } = req.body as {
+    const { target_user_id, content, photo_url } = req.body as {
       target_user_id?: number;
       content?: string;
+      /** The photo the First Move was sent from, shown small in the chat. */
+      photo_url?: string;
     };
+    const photoUrl = typeof photo_url === 'string' && /^https?:\/\//.test(photo_url.trim()) ? photo_url.trim().slice(0, 1000) : null;
 
     // Compliments cost tokens, so settle the free allowance first.
     await ensureDailyAllowance(userId);
@@ -447,7 +459,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
 
     const complimentText = (content || '').trim().slice(0, 300);
     if (!complimentText) {
-      return res.status(400).json({ error: 'Compliment text is required' });
+      return res.status(400).json({ error: 'Write your First Move first' });
     }
 
     await client.query('BEGIN');
@@ -467,7 +479,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     if (existingLike.rows.length > 0 && existingLike.rows[0].is_compliment) {
       await client.query('ROLLBACK');
       return res.status(409).json({
-        error: 'You have already sent this person a compliment',
+        error: 'You have already made your First Move with this person',
         already_complimented: true,
       });
     }
@@ -484,7 +496,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     } catch (error: any) {
       await client.query('ROLLBACK');
       if (error.message === 'INSUFFICIENT_CREDITS') {
-        return res.status(402).json({ error: 'Not enough tokens. Compliments cost 6 tokens.' });
+        return res.status(402).json({ error: 'Not enough tokens. A First Move costs 6 tokens.' });
       }
       throw error;
     }
@@ -518,7 +530,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
        ON CONFLICT (user1_id, user2_id)
        DO UPDATE SET
          status = CASE WHEN matches.status = 'active' OR EXCLUDED.status = 'active' THEN 'active' ELSE matches.status END,
-         requested_by = CASE WHEN matches.status = 'active' OR EXCLUDED.status = 'active' THEN NULL ELSE matches.requested_by END
+         requested_by = COALESCE(matches.requested_by, EXCLUDED.requested_by)
        RETURNING id, status`,
       [userId, target_user_id, isMutual ? 'active' : 'pending', isMutual ? null : userId]
     );
@@ -529,16 +541,25 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     const senderName: string = senderRow.rows[0]?.name || 'Someone';
     const targetName: string = targetUserResult.rows[0]?.name || 'Someone';
 
+    // No automatic greeting: the First Move is the photo it was sent from
+    // (if any) and the person's own words, nothing else.
     const inserted: any[] = [];
-    for (const text of ['Hey 👋', complimentText]) {
+    if (photoUrl) {
       const row = await client.query(
-        `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type)
-         VALUES ($1, $2, $3, $4, 'text')
+        `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type, kind)
+         VALUES ($1, $2, $3, $4, 'image', 'first_move_photo')
          RETURNING *`,
-        [matchId, userId, target_user_id, text]
+        [matchId, userId, target_user_id, photoUrl]
       );
       inserted.push(row.rows[0]);
     }
+    const textRow = await client.query(
+      `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type, kind)
+       VALUES ($1, $2, $3, $4, 'text', 'first_move')
+       RETURNING *`,
+      [matchId, userId, target_user_id, complimentText]
+    );
+    inserted.push(textRow.rows[0]);
     await client.query('UPDATE matches SET last_message_at = NOW() WHERE id = $1', [matchId]);
 
     await client.query('COMMIT');
@@ -549,13 +570,13 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
         io.to(`user:${target_user_id}`).emit('message:new', { message, matchId });
         io.to(`user:${userId}`).emit('message:new', { message, matchId });
       }
-      const payload = { matchId, lastMessage: complimentText, lastMessageTime: inserted[1]?.created_at, status: matchStatus };
+      const payload = { matchId, lastMessage: complimentText, lastMessageTime: inserted[inserted.length - 1]?.created_at, status: matchStatus };
       io.to(`user:${target_user_id}`).emit('conversation:updated', payload);
       io.to(`user:${userId}`).emit('conversation:updated', payload);
     }
     pokeCounts(target_user_id, userId);
-    notifyNewMessage(target_user_id, senderName, complimentText).catch((err) =>
-      console.error('Failed to send compliment notification:', err)
+    notifyFirstMove(target_user_id, senderName, complimentText).catch((err) =>
+      console.error('Failed to send First Move notification:', err)
     );
     if (isMutual) {
       notifyMatch(userId, targetName).catch(() => {});
@@ -563,15 +584,15 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     }
 
     res.json({
-      message: 'Compliment sent successfully',
+      message: 'First Move sent',
       credit_balance: remainingCredits,
       match_id: matchId,
       match_status: matchStatus,
     });
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Send compliment error:', error);
-    res.status(500).json({ error: 'Failed to send compliment' });
+    console.error('Send First Move error:', error);
+    res.status(500).json({ error: 'Failed to send your First Move' });
   } finally {
     client.release();
   }
@@ -650,7 +671,7 @@ export const acceptMatchRequest = async (req: AuthRequest, res: Response) => {
     const otherId = match.user1_id === userId ? match.user2_id : match.user1_id;
 
     await client.query(
-      "UPDATE matches SET status = 'active', requested_by = NULL, matched_at = NOW() WHERE id = $1",
+      "UPDATE matches SET status = 'active', matched_at = NOW() WHERE id = $1",
       [matchId]
     );
     // Accepting is a like back, so the likes table tells the same story.
@@ -664,7 +685,7 @@ export const acceptMatchRequest = async (req: AuthRequest, res: Response) => {
     await client.query('COMMIT');
 
     const nameOf = (id: number) => names.rows.find((r: any) => r.id === id)?.name || 'Someone';
-    notifyMatch(otherId, nameOf(userId)).catch(() => {});
+    notifyAccepted(otherId, nameOf(userId), 'first_move').catch(() => {});
     const io = getIO();
     if (io) {
       const payload = { matchId, status: 'active' };
@@ -769,5 +790,72 @@ export const getBadgeCounts = async (req: AuthRequest, res: Response) => {
   } catch (error) {
     console.error('Badge counts error:', error);
     res.status(500).json({ error: 'Failed to fetch counts' });
+  }
+};
+
+
+/**
+ * Reject from the Likes inbox: the like goes away and the person will not be
+ * shown again there. Only when there is no conversation yet.
+ */
+export const dismissIncomingLike = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const likerId = Number(req.params.likerId);
+    if (!Number.isFinite(likerId)) return res.status(400).json({ error: 'Invalid user' });
+    const matched = await pool.query(
+      "SELECT 1 FROM matches WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int) AND status = 'active'",
+      [userId, likerId]
+    );
+    if (matched.rows.length > 0) {
+      return res.status(409).json({ error: 'You already matched. Unmatch from the chat instead.' });
+    }
+    await pool.query('DELETE FROM likes WHERE liker_id = $1 AND liked_id = $2', [likerId, userId]);
+    pokeCounts(userId);
+    res.json({ ok: true });
+  } catch (error) {
+    console.error('Dismiss like error:', error);
+    res.status(500).json({ error: 'Failed to dismiss' });
+  }
+};
+
+/**
+ * "XYZ accepted your Green Flag" / "... your First Move": the matches that
+ * started with something this person sent and the other side said yes to.
+ */
+export const getAcceptedLikes = async (req: AuthRequest, res: Response) => {
+  try {
+    const userId = req.userId!;
+    const result = await pool.query(
+      `SELECT
+         m.id AS match_id,
+         m.matched_at,
+         m.requested_by,
+         other.id AS user_id,
+         other.name,
+         other.city,
+         mine.is_superlike AS my_green_flag,
+         primary_photo.photo_url AS primary_photo
+       FROM matches m
+       JOIN users other ON ((m.user1_id = $1 AND other.id = m.user2_id) OR (m.user2_id = $1 AND other.id = m.user1_id))
+       LEFT JOIN likes mine ON mine.liker_id = $1 AND mine.liked_id = other.id
+       LEFT JOIN photos primary_photo ON primary_photo.user_id = other.id AND primary_photo.is_primary = TRUE
+       WHERE (m.user1_id = $1 OR m.user2_id = $1)
+         AND m.status = 'active'
+         AND (m.requested_by = $1 OR COALESCE(mine.is_superlike, FALSE) = TRUE)
+       ORDER BY m.matched_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+    const accepted = result.rows.map((row: any) => ({
+      match_id: row.match_id,
+      matched_at: row.matched_at,
+      kind: row.requested_by === userId ? 'first_move' : 'green_flag',
+      user: { id: row.user_id, name: row.name, city: row.city, primary_photo: row.primary_photo },
+    }));
+    res.json({ accepted });
+  } catch (error) {
+    console.error('Accepted likes error:', error);
+    res.status(500).json({ error: 'Failed to fetch accepted' });
   }
 };

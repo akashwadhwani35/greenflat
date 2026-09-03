@@ -82,7 +82,7 @@ export const CheckoutScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onP
 
   const actions = [
     { label: 'AI Searches', count: Math.floor(previewBalance / TOKEN_COSTS.AI_SEARCH) },
-    { label: 'Compliments', count: Math.floor(previewBalance / TOKEN_COSTS.COMPLIMENT) },
+    { label: 'First Moves', count: Math.floor(previewBalance / TOKEN_COSTS.COMPLIMENT) },
     { label: 'GreenFlags', count: Math.floor(previewBalance / TOKEN_COSTS.SUPER_LIKE) },
     { label: 'Boost', count: Math.floor(previewBalance / TOKEN_COSTS.BOOST) },
   ];

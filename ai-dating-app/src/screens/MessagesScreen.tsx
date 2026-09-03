@@ -32,6 +32,8 @@ type Message = {
   sender_id: number;
   content: string;
   message_type?: 'text' | 'image' | 'voice';
+  /** 'first_move' / 'first_move_photo' for the messages a First Move creates. */
+  kind?: string | null;
   reply_to_message_id?: number | null;
   created_at: string;
   is_read: boolean;
@@ -126,6 +128,28 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // Drives the green shared-answer highlighting on the profile card.
   const viewerProfile = useViewerProfile(token, apiBaseUrl);
   const [profileData, setProfileData] = useState<any | null>(null);
+  // Short read on the person under the header: who they are, in a glance.
+  const [snapshot, setSnapshot] = useState<{ age?: number | null; city?: string; interests: string[]; goal?: string | null } | null>(null);
+  useEffect(() => {
+    if (!targetUserId) return;
+    let cancelled = false;
+    fetch(`${apiBaseUrl}/matches/user/${targetUserId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.user) return;
+        const u = data.user;
+        const dob = u.date_of_birth ? new Date(u.date_of_birth) : null;
+        const age = typeof u.age === 'number' ? u.age : dob ? Math.floor((Date.now() - dob.getTime()) / (365.25 * 24 * 3600 * 1000)) : null;
+        setSnapshot({
+          age,
+          city: u.city,
+          interests: Array.isArray(u.interests) ? u.interests.slice(0, 4) : [],
+          goal: u.relationship_goal || null,
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [targetUserId, apiBaseUrl, token]);
   const [androidKeyboardOffset, setAndroidKeyboardOffset] = useState(0);
   const [mediaUploadProvider, setMediaUploadProvider] = useState<MediaUploadProvider>('local');
   const [peerTyping, setPeerTyping] = useState(false);
@@ -718,6 +742,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               </View>
             );
           })() : null}
+          {item.kind === 'first_move' ? (
+            <Typography variant="tiny" style={{ color: isMyMessage ? 'rgba(16,29,19,0.7)' : theme.colors.neonGreen, marginBottom: 4, fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 0.4 }}>
+              {isMyMessage ? 'YOUR FIRST MOVE' : 'FIRST MOVE'}
+            </Typography>
+          ) : null}
           {item.message_type === 'image' ? (
             <TouchableOpacity
               activeOpacity={0.85}
@@ -726,7 +755,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               }}
               onLongPress={() => setReplyTo(item)}
             >
-              <Image source={{ uri: item.content }} style={styles.messageImage} />
+              <Image source={{ uri: item.content }} style={item.kind === 'first_move_photo' ? styles.messageImageSmall : styles.messageImage} />
             </TouchableOpacity>
           ) : item.message_type === 'voice' ? (
             <TouchableOpacity
@@ -795,6 +824,27 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           <Feather name="more-vertical" size={24} color={theme.colors.text} />
         </TouchableOpacity>
       </View>
+
+      {/* Profile snapshot: the person in a glance, then the conversation. */}
+      {snapshot ? (
+        <TouchableOpacity style={[styles.snapshot, { backgroundColor: theme.colors.deepBlack, borderBottomColor: theme.colors.border }]} onPress={openProfile} activeOpacity={0.85}>
+          <Typography variant="small" style={{ color: theme.colors.muted }}>
+            {[snapshot.age ? `${snapshot.age}` : null, snapshot.city || null, snapshot.goal ? `Looking for ${String(snapshot.goal).replace(/[_-]/g, ' ')}` : null].filter(Boolean).join(' · ')}
+          </Typography>
+          {snapshot.interests.length > 0 ? (
+            <View style={styles.snapshotChips}>
+              {snapshot.interests.map((i) => (
+                <View key={`snap-${i}`} style={[styles.snapshotChip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+                  <Typography variant="tiny" style={{ color: theme.colors.textDark }}>{String(i).replace(/[_-]/g, ' ')}</Typography>
+                </View>
+              ))}
+            </View>
+          ) : null}
+          <Typography variant="small" style={{ color: theme.colors.neonGreen }}>
+            This could be the start of something great.
+          </Typography>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Menu Popup */}
       <Modal
@@ -940,7 +990,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             Would you want to accept this?
           </Typography>
           <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'center', marginTop: 4 }}>
-            {matchName} sent you a compliment. Accept to start chatting.
+            {matchName} made a First Move. Accept to start chatting.
           </Typography>
           <View style={styles.requestButtons}>
             <TouchableOpacity
@@ -965,7 +1015,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       {awaitingTheirAnswer ? (
         <View style={[styles.requestPanel, { backgroundColor: theme.colors.charcoal, borderTopColor: theme.colors.border }]}>
           <Typography variant="small" style={{ color: theme.colors.muted, textAlign: 'center' }}>
-            Waiting for {matchName} to accept your compliment. You can chat once they do.
+            Waiting for {matchName} to accept your First Move. You can chat once they do.
           </Typography>
         </View>
       ) : null}
@@ -1209,6 +1259,31 @@ const styles = StyleSheet.create({
     height: 180,
     borderRadius: 12,
     backgroundColor: '#0f0f0f',
+  },
+  // The photo a First Move was sent from: a small reference, not a full photo.
+  messageImageSmall: {
+    width: 96,
+    height: 96,
+    borderRadius: 10,
+    backgroundColor: '#0f0f0f',
+  },
+  snapshot: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+    gap: 8,
+    borderBottomWidth: 1,
+  },
+  snapshotChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  snapshotChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
   },
   voiceNote: {
     flexDirection: 'row',

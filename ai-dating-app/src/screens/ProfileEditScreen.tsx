@@ -80,7 +80,7 @@ const INTEREST_CATEGORIES = [
   },
 ];
 
-const MAX_INTEREST_SELECTION = 5;
+const MAX_INTEREST_SELECTION = 10;
 const ALL_INTEREST_OPTIONS = INTEREST_CATEGORIES.flatMap((category) => category.items);
 const normalizeInterestValue = (value: string) => value.trim().toLowerCase();
 const INTEREST_CANONICAL_MAP = ALL_INTEREST_OPTIONS.reduce((map, interest) => {
@@ -1453,10 +1453,10 @@ const styles = StyleSheet.create({
 
   moreAboutContent: {
     paddingHorizontal: 20,
-    paddingBottom: 260,
+    paddingBottom: 24,
   },
   moreAboutBottomSpacer: {
-    height: 60,
+    height: 0,
   },
   moreRow: {
     flexDirection: 'row',

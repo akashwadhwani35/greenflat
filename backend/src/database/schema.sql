@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS messages (
     message_type VARCHAR(20) DEFAULT 'text' CHECK (message_type IN ('text', 'image', 'voice')),
     is_read BOOLEAN DEFAULT FALSE,
     is_deleted BOOLEAN DEFAULT FALSE,
+    kind VARCHAR(24), -- 'first_move' / 'first_move_photo' for the messages a First Move creates
     reply_to_message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -403,3 +404,14 @@ CREATE INDEX idx_subscriptions_user_id ON subscriptions(user_id);
 CREATE INDEX idx_subscriptions_status ON subscriptions(status);
 CREATE INDEX idx_token_purchases_user_id ON token_purchases(user_id);
 CREATE INDEX idx_token_purchases_created_at ON token_purchases(created_at DESC);
+
+-- AI Match briefing per pair (see migration 024)
+CREATE TABLE IF NOT EXISTS pair_briefings (
+    id SERIAL PRIMARY KEY,
+    user_a INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_b INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    briefing TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_a, user_b),
+    CHECK (user_a < user_b)
+);

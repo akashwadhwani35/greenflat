@@ -308,7 +308,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
                   <Text style={styles.modalBodyText}>GreenFlag provides verification tools (phone OTP, selfie age check, location) to promote trust. Always exercise caution when meeting in person.</Text>
 
                   <Text style={[styles.modalSectionTitle, { color: theme.colors.text }]}>6. Premium & Credits</Text>
-                  <Text style={styles.modalBodyText}>Certain features (AI Search, Compliments, Boosts) require credits or a premium subscription. All purchases are final unless required otherwise by applicable law. Credit balances have no cash value.</Text>
+                  <Text style={styles.modalBodyText}>Certain features (AI Search, First Moves, Boosts) require credits or a premium subscription. All purchases are final unless required otherwise by applicable law. Credit balances have no cash value.</Text>
 
                   <Text style={[styles.modalSectionTitle, { color: theme.colors.text }]}>7. Termination</Text>
                   <Text style={styles.modalBodyText}>You may delete your account at any time from Settings. We may suspend or terminate accounts that violate these terms. Upon termination, your profile, matches, and messages will be permanently deleted.</Text>

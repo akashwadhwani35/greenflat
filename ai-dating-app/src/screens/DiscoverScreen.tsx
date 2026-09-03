@@ -251,7 +251,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
           search_query: filters?.keywords?.trim() || '',
           charge_credits: pendingAISearchCharge,
           filters: buildBackendFilters(),
-          limit: 12,
         }),
       });
       reachedServer = true;

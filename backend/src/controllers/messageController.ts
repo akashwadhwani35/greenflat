@@ -121,7 +121,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     if (match.status === 'pending') {
       await client.query('ROLLBACK');
       return res.status(403).json({
-        error: match.requested_by === userId ? 'Waiting for them to accept your compliment' : 'Accept the request to start chatting',
+        error: match.requested_by === userId ? 'Waiting for them to accept your First Move' : 'Accept the First Move to start chatting',
         pending: true,
       });
     }

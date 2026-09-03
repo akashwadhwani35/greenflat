@@ -234,3 +234,28 @@ export const unregisterPushToken = async (userId: number): Promise<boolean> => {
     return false;
   }
 };
+
+export const notifyFirstMove = async (recipientId: number, senderName: string, preview: string): Promise<void> => {
+  await sendPushNotification(
+    recipientId,
+    `${senderName} made a First Move`,
+    preview.substring(0, 100),
+    { type: 'first_move', screen: 'Conversations' },
+    'messages'
+  );
+};
+
+/** "XYZ accepted your Green Flag" / "... your First Move" to the person who sent it. */
+export const notifyAccepted = async (
+  senderId: number,
+  accepterName: string,
+  kind: 'green_flag' | 'first_move'
+): Promise<void> => {
+  await sendPushNotification(
+    senderId,
+    kind === 'green_flag' ? `${accepterName} accepted your Green Flag` : `${accepterName} accepted your First Move`,
+    'You can message each other now.',
+    { type: 'match', screen: 'Conversations' },
+    'matches'
+  );
+};

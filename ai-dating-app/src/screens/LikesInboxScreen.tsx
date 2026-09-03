@@ -20,14 +20,22 @@ type Props = {
     is_verified?: boolean;
     primary_photo?: string;
   }) => void;
+  onOpenConversation?: (matchId: number, matchName: string, targetUserId: number) => void;
 };
 
-export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onViewProfile }) => {
+export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onViewProfile, onOpenConversation }) => {
   const theme = useTheme();
   const [likes, setLikes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notificationsEnabled, setNotificationsEnabled] = useState<boolean | null>(null);
+  const [accepted, setAccepted] = useState<any[]>([]);
+  useEffect(() => {
+    fetch(`${apiBaseUrl}/likes/accepted`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : { accepted: [] }))
+      .then((d) => setAccepted(Array.isArray(d.accepted) ? d.accepted : []))
+      .catch(() => {});
+  }, [apiBaseUrl, token]);
   const greenFlags = likes.filter((item) => Boolean(item?.is_superlike));
   const regularLikes = likes.filter((item) => !item?.is_superlike);
 
@@ -89,7 +97,34 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
           </Typography>
         ) : null}
 
-        {!loading && !error && likes.length === 0 ? (
+        {/* What you sent and they said yes to */}
+        {accepted.length > 0 ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <View style={[styles.sectionIcon, { backgroundColor: theme.colors.secondaryHighlight, borderWidth: 1, borderColor: theme.colors.secondaryHairline }]}>
+                <Feather name="check" size={13} color={theme.colors.neonGreen} />
+              </View>
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Accepted</Typography>
+            </View>
+            {accepted.map((item) => (
+              <View key={`acc-${item.match_id}`} style={[styles.card, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
+                <Image source={item.user?.primary_photo ? { uri: item.user.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Typography variant="bodyStrong">{item.user?.name}</Typography>
+                  <Typography variant="small" style={{ color: theme.colors.neonGreen }}>
+                    {item.kind === 'green_flag' ? 'accepted your Green Flag' : 'accepted your First Move'}
+                  </Typography>
+                </View>
+                <Button
+                  label="Message"
+                  onPress={() => onOpenConversation?.(item.match_id, item.user?.name || 'Chat', item.user?.id)}
+                />
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {!loading && !error && likes.length === 0 && accepted.length === 0 ? (
           <Typography variant="body" muted>
             Nobody yet. Likes and Green Flags you receive show up here.
           </Typography>

@@ -695,3 +695,61 @@ Return strict JSON:
     };
   }
 };
+
+export type BriefingPersona = {
+  name: string;
+  answers: string; // describeAnswers() output
+  traits: string[];
+  interests: string[];
+  relationshipGoal?: string | null;
+};
+
+/**
+ * Two sentences on what the two people have in common, written to the reader
+ * as "you both". Built mainly from the ten situational answers; interests and
+ * traits fill in. Cached per pair by the caller, so this runs once per pair.
+ */
+export const generateMatchBriefing = async (
+  reader: BriefingPersona,
+  other: BriefingPersona
+): Promise<{ briefing: string; degraded: boolean }> => {
+  const shared = other.interests.filter((i) => reader.interests.map((x) => x.toLowerCase()).includes(i.toLowerCase()));
+  const fallback = shared.length > 0
+    ? `You both share ${shared.slice(0, 2).join(' and ')}${shared.length > 2 ? ' and more' : ''}, and your answers point to a similar outlook.`
+    : `Your answers point to a similar outlook, with enough difference to keep it interesting.`;
+
+  if (!process.env.OPENAI_API_KEY) return { briefing: fallback, degraded: true };
+
+  const prompt = `You write a two-sentence briefing for a dating app. The reader is about to look at ${other.name}'s profile.
+
+Reader's situational quiz answers (each line: question, chosen answer, what it signals):
+${reader.answers || '(none)'}
+Reader's traits: ${reader.traits.join(', ') || '(none)'}
+Reader's interests: ${reader.interests.join(', ') || '(none)'}
+Reader is looking for: ${reader.relationshipGoal || 'unspecified'}
+
+${other.name}'s situational quiz answers:
+${other.answers || '(none)'}
+${other.name}'s traits: ${other.traits.join(', ') || '(none)'}
+${other.name}'s interests: ${other.interests.join(', ') || '(none)'}
+${other.name} is looking for: ${other.relationshipGoal || 'unspecified'}
+
+Write exactly two short sentences, addressed to the reader as "you both" / "you", about what the two of them have in common and how they would fit. Lead with the quiz answers; use interests and traits only to add colour. Concrete and warm, no hedging, no names, no emojis, no percentages. Return JSON: {"briefing": "..."}.`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: OPENAI_MODEL,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.6,
+      max_tokens: 120,
+      response_format: { type: 'json_object' },
+    });
+    const content = response.choices[0].message.content;
+    const parsed = content ? JSON.parse(content) : {};
+    const text = typeof parsed.briefing === 'string' ? parsed.briefing.trim() : '';
+    return text ? { briefing: text, degraded: false } : { briefing: fallback, degraded: true };
+  } catch (error) {
+    console.error('Error generating match briefing:', error);
+    return { briefing: fallback, degraded: true };
+  }
+};

@@ -143,13 +143,6 @@ export const MatchModal: React.FC<MatchModalProps> = ({
             <Feather name="x" size={24} color={theme.colors.text} />
           </TouchableOpacity>
 
-          {/* Match Animation Circle */}
-          <View style={styles.matchCircle}>
-            <View style={[styles.matchCircleInner, { backgroundColor: theme.colors.neonGreen }]}>
-              <Feather name="heart" size={60} color={theme.colors.deepBlack} />
-            </View>
-          </View>
-
           {/* Match Photo */}
           {matchPhoto && (
             <View style={styles.photoContainer}>
