@@ -18,7 +18,8 @@
     },
     "production": {
       "ios": {
-        "simulator": false
+        "simulator": false,
+        "autoIncrement": true
       },
       "android": {
         "buildType": "app-bundle"
@@ -26,6 +27,11 @@
     }
   },
   "submit": {
-    "production": {}
+    "production": {
+      "ios": {
+        "appleId": "akash@sheets.works",
+        "appleTeamId": "7VB53598L4"
+      }
+    }
   }
 }

@@ -21,7 +21,9 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "GreenFlag needs your location to suggest nearby matches and verify your city.",
         "NSCameraUsageDescription": "GreenFlag needs camera access to take profile photos.",
-        "NSPhotoLibraryUsageDescription": "GreenFlag needs photo library access to select profile photos."
+        "NSPhotoLibraryUsageDescription": "GreenFlag needs photo library access to select profile photos.",
+        "NSMicrophoneUsageDescription": "GreenFlag needs the microphone to record voice notes in chat.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

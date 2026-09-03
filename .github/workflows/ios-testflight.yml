@@ -1,0 +1,49 @@
+name: Frontend - iOS TestFlight
+
+# Manual only: an iOS build is slower and counts against the EAS quota, so it
+# runs when someone asks for it, not on every push. Needs Apple signing to
+# have been set up once on EAS (see README, "iOS builds").
+on:
+  workflow_dispatch:
+    inputs:
+      submit:
+        description: 'Upload to TestFlight after the build'
+        type: boolean
+        default: true
+
+jobs:
+  ios:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ai-dating-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: ai-dating-app/package-lock.json
+
+      - name: Setup Expo & EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build iOS (App Store)
+        run: eas build --platform ios --profile production --non-interactive
+
+      - name: Submit to TestFlight
+        if: ${{ inputs.submit }}
+        env:
+          # App-specific password for the Apple ID in eas.json (appleid.apple.com).
+          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_APP_SPECIFIC_PASSWORD }}
+        run: eas submit --platform ios --profile production --latest --non-interactive
