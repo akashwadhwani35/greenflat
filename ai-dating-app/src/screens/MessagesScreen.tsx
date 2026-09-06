@@ -23,6 +23,7 @@ import type { Socket } from 'socket.io-client';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { NoticeModal, type Notice } from '../components/NoticeModal';
+import { PixelFlag } from '../components/PixelFlag';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
 import { useViewerProfile } from '../hooks/useViewerProfile';
 import { MatchCandidate } from './MatchboardScreen';
@@ -146,6 +147,23 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           interests: Array.isArray(u.interests) ? u.interests.slice(0, 4) : [],
           goal: u.relationship_goal || null,
         });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [targetUserId, apiBaseUrl, token]);
+  // AI summary of the two of you, same text as on the profile card, cached per
+  // pair on the server. Sits at the top of the chat so an incoming First Move
+  // arrives with context.
+  const [briefing, setBriefing] = useState<string | null>(null);
+  useEffect(() => {
+    if (!targetUserId) return;
+    let cancelled = false;
+    setBriefing(null);
+    fetch(`${apiBaseUrl}/matches/${targetUserId}/briefing`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled) return;
+        if (data?.briefing) setBriefing(String(data.briefing));
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -448,6 +466,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
   };
 
+  // GIFs survive the picker only when nothing re-encodes them, so they are
+  // detected by type or extension and sent through as they are.
+  const isGifAsset = (asset: ImagePicker.ImagePickerAsset) =>
+    asset.mimeType === 'image/gif' || /\.gif($|\?)/i.test(asset.uri || '') || /\.gif$/i.test(asset.fileName || '');
+
   const blobToDataUrl = (blob: Blob): Promise<string> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -467,7 +490,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     mediaType: 'image' | 'voice'
   ): Promise<string> => {
     const fallbackMimeType = mediaType === 'image' ? 'image/jpeg' : 'video/mp4';
-    const mimeType = asset.mimeType || fallbackMimeType;
+    const gif = isGifAsset(asset);
+    const mimeType = gif ? 'image/gif' : (asset.mimeType || fallbackMimeType);
 
     if (mediaType === 'image' && asset.base64) {
       return `data:${mimeType};base64,${asset.base64}`;
@@ -478,7 +502,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       throw new Error('Failed to read selected media');
     }
     const blob = await fileResponse.blob();
-    return blobToDataUrl(blob);
+    const dataUrl = await blobToDataUrl(blob);
+    // The blob reader guesses a type from the file, sometimes octet-stream.
+    return gif ? dataUrl.replace(/^data:[^;]*;/, 'data:image/gif;') : dataUrl;
   };
 
   const uploadViaLocal = async (
@@ -520,9 +546,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     }
 
     const upload = signatureBody.upload;
-    const extension = mediaType === 'image' ? 'jpg' : 'mp4';
+    const gif = mediaType === 'image' && isGifAsset(asset);
+    const extension = mediaType === 'image' ? (gif ? 'gif' : 'jpg') : 'mp4';
     const fileType = mediaType === 'image'
-      ? (asset.mimeType || 'image/jpeg')
+      ? (gif ? 'image/gif' : (asset.mimeType || 'image/jpeg'))
       : (asset.mimeType || 'video/mp4');
 
     const formData = new FormData();
@@ -825,13 +852,28 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Profile snapshot: the person in a glance, then the conversation. */}
-      {snapshot ? (
+      {/* AI summary first, then the person in a glance, then the conversation. */}
+      {snapshot || briefing ? (
         <TouchableOpacity style={[styles.snapshot, { backgroundColor: theme.colors.deepBlack, borderBottomColor: theme.colors.border }]} onPress={openProfile} activeOpacity={0.85}>
+          {briefing ? (
+            <View style={[styles.briefingCard, { borderColor: 'rgba(173, 255, 26, 0.35)', backgroundColor: 'rgba(173, 255, 26, 0.06)' }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <PixelFlag size={14} color={theme.colors.neonGreen} />
+                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+                  AI Summary
+                </Typography>
+              </View>
+              <Typography variant="small" style={{ color: theme.colors.textDark, lineHeight: 21 }}>
+                {briefing}
+              </Typography>
+            </View>
+          ) : null}
+          {snapshot ? (
           <Typography variant="small" style={{ color: theme.colors.muted }}>
             {[snapshot.age ? `${snapshot.age}` : null, snapshot.city || null, snapshot.goal ? `Looking for ${String(snapshot.goal).replace(/[_-]/g, ' ')}` : null].filter(Boolean).join(' · ')}
           </Typography>
-          {snapshot.interests.length > 0 ? (
+          ) : null}
+          {snapshot && snapshot.interests.length > 0 ? (
             <View style={styles.snapshotChips}>
               {snapshot.interests.map((i) => (
                 <View key={`snap-${i}`} style={[styles.snapshotChip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
@@ -949,6 +991,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContent}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          // With the keyboard open, the first touch on the list only dismissed
+          // the keyboard, so a long-press never reached the bubble and Reply
+          // needed the keyboard closed first.
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="none"
         />
       )}
 
@@ -1042,7 +1089,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             onPress={async () => {
               const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
-                allowsEditing: true,
+                // The crop step re-encodes the picture, which turned every GIF
+                // into a still JPEG. Chat photos do not need cropping.
+                allowsEditing: false,
                 quality: 0.5,
                 base64: true,
               });
@@ -1284,6 +1333,14 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 9,
     paddingVertical: 4,
+  },
+  briefingCard: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 8,
+    marginBottom: 2,
   },
   voiceNote: {
     flexDirection: 'row',

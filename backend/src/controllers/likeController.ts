@@ -397,8 +397,16 @@ export const getIncomingLikes = async (req: AuthRequest, res: Response) => {
        LEFT JOIN blocks blocked_rel
          ON ((blocked_rel.blocker_id = $1 AND blocked_rel.blocked_id = liker.id)
           OR (blocked_rel.blocker_id = liker.id AND blocked_rel.blocked_id = $1))
+       -- Once the like has been answered (liked back, so a match exists) it is
+       -- no longer pending and leaves the inbox. Rejecting deletes the row
+       -- outright, so both outcomes clear the card.
+       LEFT JOIN matches active_match
+         ON ((active_match.user1_id = $1 AND active_match.user2_id = liker.id)
+          OR (active_match.user1_id = liker.id AND active_match.user2_id = $1))
+        AND active_match.status = 'active'
        WHERE l.liked_id = $1
          AND blocked_rel.id IS NULL
+         AND active_match.id IS NULL
          AND COALESCE(l.is_compliment, FALSE) = FALSE
        ORDER BY COALESCE(l.is_superlike, FALSE) DESC, l.created_at DESC
        LIMIT 50`,

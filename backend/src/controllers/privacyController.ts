@@ -25,7 +25,7 @@ const loadSettings = async (userId: number) => {
     hide_distance: false,
     hide_city: false,
     incognito_mode: false,
-    show_online_status: true,
+    show_online_status: false,
   };
 };
 
@@ -53,7 +53,7 @@ export const updatePrivacySettings = async (req: AuthRequest, res: Response) => 
     await pool.query(
       `INSERT INTO user_privacy_settings (
          user_id, hide_distance, hide_city, incognito_mode, show_online_status, updated_at
-       ) VALUES ($1, COALESCE($2, FALSE), COALESCE($3, FALSE), COALESCE($4, FALSE), COALESCE($5, TRUE), NOW())
+       ) VALUES ($1, COALESCE($2, FALSE), COALESCE($3, FALSE), COALESCE($4, FALSE), COALESCE($5, FALSE), NOW())
        ON CONFLICT (user_id)
        DO UPDATE SET
          hide_distance = COALESCE($2, user_privacy_settings.hide_distance),

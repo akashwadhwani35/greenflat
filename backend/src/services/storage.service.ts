@@ -20,6 +20,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'image/jpg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
+  'image/gif': 'gif',
   'image/heic': 'heic',
   'image/heif': 'heic',
   'audio/m4a': 'm4a',

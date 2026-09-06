@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput, Modal, Image, Pressable, BackHandler,
+import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput, Modal, Image, Pressable, BackHandler, AppState,
 } from 'react-native';
 import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisplay_600SemiBold, RedHatDisplay_700Bold } from '@expo-google-fonts/red-hat-display';
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
@@ -37,11 +37,12 @@ import { TermsScreen } from './src/screens/TermsScreen';
 import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
 import { CheckoutScreen } from './src/screens/CheckoutScreen';
 import { ProfileOverviewScreen } from './src/screens/ProfileOverviewScreen';
+import { ProfileScreen } from './src/screens/ProfileScreen';
 import { AISearchScreen } from './src/screens/AISearchScreen';
 import { DeleteAccountScreen } from './src/screens/DeleteAccountScreen';
 import { SubscriptionScreen } from './src/screens/SubscriptionScreen';
 import { PausedBanner } from './src/components/PausedBanner';
-import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown, loadPassedIds, savePassedIds } from './src/utils/session';
+import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown, loadPassedIds, savePassedIds, loadSubscriptionNudgeShownAt, markSubscriptionNudgeShown } from './src/utils/session';
 import { configurePurchases, logOutPurchases } from './src/services/purchases';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
@@ -108,7 +109,37 @@ const AppShell: React.FC = () => {
   const [badgeCounts, setBadgeCounts] = useState<{ likes: number; messages: number }>({ likes: 0, messages: 0 });
   const [showMatchModal, setShowMatchModal] = useState(false);
   const [matchedUser, setMatchedUser] = useState<{ matchId: number; userId: number; name: string; photo?: string } | null>(null);
-  const [overlay, setOverlay] = useState<Overlay>(null);
+  const [overlay, setOverlayState] = useState<Overlay>(null);
+  // Overlay screens stack: Settings → Verification → Back should land on
+  // Settings, not Home. Every open pushes the screen it covers; Back pops.
+  // Setting null (tab change, apply, logout) clears the stack.
+  const overlayRef = useRef<Overlay>(null);
+  const overlayHistoryRef = useRef<Overlay[]>([]);
+  const setOverlay = (next: Overlay) => {
+    const current = overlayRef.current;
+    if (next === null) {
+      overlayHistoryRef.current = [];
+    } else if (current && current !== next) {
+      overlayHistoryRef.current.push(current);
+    }
+    overlayRef.current = next;
+    setOverlayState(next);
+  };
+  // Swap the current screen without adding a Back step (e.g. checkout → wallet
+  // after a purchase, where returning to checkout would make no sense).
+  const replaceOverlay = (next: Overlay) => {
+    overlayRef.current = next;
+    setOverlayState(next);
+  };
+  const goBackOverlay = () => {
+    const previous = overlayHistoryRef.current.pop() ?? null;
+    overlayRef.current = previous;
+    setOverlayState(previous);
+    if (!previous) setActiveTab('explore');
+  };
+  // Remounts the Likes inbox after a like / reject from a card opened there,
+  // so the answered card is gone when the person lands back on the list.
+  const [likesRefreshKey, setLikesRefreshKey] = useState(0);
   const [subscriptionTab, setSubscriptionTab] = useState<'pro' | 'premium'>('pro');
   const [walletRefreshKey, setWalletRefreshKey] = useState(0);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({});
@@ -149,6 +180,36 @@ const AppShell: React.FC = () => {
     }
   };
 
+  // The subscription page comes up on its own every six hours (board note:
+  // "this specific page will pop up every 6 hour"), for accounts that are not
+  // paying and have already done their first search. Never over another
+  // screen, and never during the first session.
+  const SUBSCRIPTION_NUDGE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+  const nudgeInFlightRef = useRef(false);
+  const maybeShowSubscriptionNudge = async (id: number, token: string) => {
+    if (nudgeInFlightRef.current) return;
+    nudgeInFlightRef.current = true;
+    try {
+      const lastShown = await loadSubscriptionNudgeShownAt(id);
+      if (Date.now() - lastShown < SUBSCRIPTION_NUDGE_INTERVAL_MS) return;
+      if (overlayRef.current || backStateRef.current.showMessages || backStateRef.current.showProfileModal) return;
+      const response = await fetch(`${API_BASE_URL}/profile/me`, { headers: { Authorization: `Bearer ${token}` } });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) return;
+      const expiresAt = body?.user?.premium_expires_at ? new Date(body.user.premium_expires_at).getTime() : null;
+      const paying = Boolean(body?.user?.is_premium) && (expiresAt === null || expiresAt > Date.now());
+      if (paying) return;
+      if (overlayRef.current || backStateRef.current.stage !== 'matchboard') return;
+      setSubscriptionTab('pro');
+      setOverlay('subscription');
+      void markSubscriptionNudgeShown(id);
+    } catch {
+      // Best-effort only.
+    } finally {
+      nudgeInFlightRef.current = false;
+    }
+  };
+
   const applyEntryPointForUser = async (id: number) => {
     const firstSearchDone = await loadFirstSearchDone(id);
     setHasCompletedFirstSearch(firstSearchDone);
@@ -157,6 +218,8 @@ const AppShell: React.FC = () => {
     if (firstSearchDone) {
       setOverlay(null);
       setActiveTab('explore');
+      const sessionToken = authRef.current.token;
+      if (sessionToken) setTimeout(() => { void maybeShowSubscriptionNudge(id, sessionToken); }, 800);
       return;
     }
     setAiSearchKey((k) => k + 1);
@@ -222,6 +285,19 @@ const AppShell: React.FC = () => {
   // closes first. Returning true swallows the event; false lets the OS act.
   const backStateRef = useRef({ stage, overlay, showMessages, showProfileModal });
   backStateRef.current = { stage, overlay, showMessages, showProfileModal };
+  const authRef = useRef<{ token: string | null; userId: number | null }>({ token: authToken, userId });
+  authRef.current = { token: authToken, userId };
+
+  // Coming back to the app counts as a fresh visit for the six-hour nudge.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') return;
+      const { token, userId: id } = authRef.current;
+      if (!token || !id || backStateRef.current.stage !== 'matchboard') return;
+      void maybeShowSubscriptionNudge(id, token);
+    });
+    return () => sub.remove();
+  }, []);
   useEffect(() => {
     const onBack = () => {
       const st = backStateRef.current;
@@ -232,7 +308,7 @@ const AppShell: React.FC = () => {
         setOverlay('conversations');
         return true;
       }
-      if (st.overlay) { setOverlay(null); return true; }
+      if (st.overlay) { goBackOverlay(); return true; }
       if (st.stage === 'login' || st.stage === 'signup' || st.stage === 'forgotPassword') { setStage('welcome'); return true; }
       // Onboarding handles its own back inside the screen; welcome and the main
       // screen fall through to the OS, which is the one place leaving is right.
@@ -368,7 +444,7 @@ const AppShell: React.FC = () => {
       void fetch(`${API_BASE_URL}/likes/incoming/${selectedMatch.id}/dismiss`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${authToken}` },
-      }).then(() => fetchBadgeCounts()).catch(() => {});
+      }).then(() => { void fetchBadgeCounts(); setLikesRefreshKey((k) => k + 1); }).catch(() => {});
     }
     if (selectedMatch) {
       const id = selectedMatch.id;
@@ -461,6 +537,7 @@ const AppShell: React.FC = () => {
     if (actionInFlightRef.current) return;
     actionInFlightRef.current = true;
 
+    const answeredFromInbox = profileRespondMode;
     handleCloseProfile(true);
 
     try {
@@ -480,6 +557,7 @@ const AppShell: React.FC = () => {
 
       const data = await response.json();
       setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
+      if (answeredFromInbox) { setLikesRefreshKey((k) => k + 1); void fetchBadgeCounts(); }
       if (data.is_match && data.match_id) {
         // Show match modal
         setMatchedUser({
@@ -511,6 +589,7 @@ const AppShell: React.FC = () => {
     if (actionInFlightRef.current) return;
     actionInFlightRef.current = true;
 
+    const answeredFromInbox = profileRespondMode;
     handleCloseProfile(true);
 
     try {
@@ -535,6 +614,7 @@ const AppShell: React.FC = () => {
 
       const data = await response.json();
       setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
+      if (answeredFromInbox) { setLikesRefreshKey((k) => k + 1); void fetchBadgeCounts(); }
       if (data.is_match && data.match_id) {
         setMatchedUser({
           matchId: data.match_id,
@@ -707,10 +787,7 @@ const AppShell: React.FC = () => {
     if (!overlay) return null;
 
     const overlayProps = {
-      onBack: () => {
-        setOverlay(null);
-        setActiveTab('explore');
-      },
+      onBack: goBackOverlay,
     };
 
     switch (overlay) {
@@ -761,6 +838,7 @@ const AppShell: React.FC = () => {
         ) : (
           <LikesInboxScreen
             {...overlayProps}
+            key={`likes-${likesRefreshKey}`}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             onViewProfile={(user) => {
@@ -774,7 +852,7 @@ const AppShell: React.FC = () => {
                 is_verified: user.is_verified,
                 is_on_grid: true,
               });
-              setOverlay(null);
+              // The inbox stays underneath; closing the card returns to it.
               setProfileRespondMode(true);
               setShowProfileModal(true);
             }}
@@ -852,7 +930,7 @@ const AppShell: React.FC = () => {
       case 'deleteAccount':
         return (
           <DeleteAccountScreen
-            onBack={() => setOverlay('privacySafety')}
+            onBack={goBackOverlay}
             onClose={() => setOverlay(null)}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
@@ -865,15 +943,15 @@ const AppShell: React.FC = () => {
       case 'terms':
         return <TermsScreen {...overlayProps} />;
       case 'checkout':
-        return <CheckoutScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onPurchased={() => { setWalletRefreshKey((k) => k + 1); setOverlay('wallet'); }} />;
+        return <CheckoutScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onPurchased={() => { setWalletRefreshKey((k) => k + 1); replaceOverlay('wallet'); }} />;
       case 'subscription':
         return (
           <SubscriptionScreen
-            onClose={() => setOverlay('wallet')}
+            onClose={goBackOverlay}
             initialTab={subscriptionTab}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
-            onPurchased={() => { setWalletRefreshKey((k) => k + 1); setOverlay('wallet'); }}
+            onPurchased={() => { setWalletRefreshKey((k) => k + 1); replaceOverlay('wallet'); }}
                       onOpenTerms={() => setOverlay('terms')}
           />
         );
@@ -893,14 +971,17 @@ const AppShell: React.FC = () => {
         return <AdminDashboardScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'profile':
         return (
-          <ProfileOverviewScreen
+          <ProfileScreen
             {...overlayProps}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             onOpenSettings={() => setOverlay('settings')}
             onEditProfile={() => setOverlay('profileEdit')}
             onManagePhotos={() => setOverlay('photos')}
-            onSessionExpired={logout}
+            onOpenSubscription={(tab) => { setSubscriptionTab(tab); setOverlay('subscription'); }}
+            onOpenLikes={() => setOverlay('likes')}
+            onOpenConversations={() => setOverlay('conversations')}
+            onOpenWallet={() => setOverlay('wallet')}
           />
         );
       default:
@@ -976,11 +1057,12 @@ const AppShell: React.FC = () => {
         if (!authToken) return null;
 
         // Render main content based on overlay state
-        const mainContent = overlay ? (
-          renderOverlay()
-        ) : (
+        // The profile card and match popup live outside the overlay switch so
+        // a card opened from the Likes inbox sits on top of the inbox rather
+        // than replacing it.
+        const mainContent = (
           <>
-            {isProfilePaused ? (
+            {overlay ? renderOverlay() : isProfilePaused ? (
               <PausedBanner onUnpause={handleUnpause} />
             ) : (
               <ExploreScreen

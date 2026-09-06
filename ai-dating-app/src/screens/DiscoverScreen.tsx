@@ -589,7 +589,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
             <Feather name="search" size={40} color={theme.colors.neonGreen} />
           </View>
           <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 24, marginBottom: 12 }}>
-            {activeTab === 'onGrid' && !hasSearchQuery ? 'Tell the AI who you want' : 'No matches yet'}
+            {activeTab === 'onGrid' && !hasSearchQuery ? 'Search who you want' : 'No matches yet'}
           </Typography>
           <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', paddingHorizontal: 40 }}>
             {activeTab === 'onGrid'
@@ -925,6 +925,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
+    // The area below the tabs runs under the nav bar, so its centre sat low on
+    // the screen. Lifting it by roughly the header + tabs height puts the
+    // content at the middle of the phone.
+    paddingBottom: 140,
   },
   emptyIconCircle: {
     width: 100,

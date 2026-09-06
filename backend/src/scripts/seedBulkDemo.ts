@@ -283,8 +283,8 @@ const main = async () => {
         );
         await client.query(
           `INSERT INTO user_privacy_settings (user_id, hide_distance, hide_city, incognito_mode, show_online_status)
-           VALUES ($1, $2, FALSE, $3, TRUE) ON CONFLICT (user_id) DO NOTHING`,
-          [userId, chance(0.1), chance(0.05)]
+           VALUES ($1, FALSE, FALSE, $2, FALSE) ON CONFLICT (user_id) DO NOTHING`,
+          [userId, chance(0.05)]
         );
         await client.query(
           `INSERT INTO user_notification_preferences (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING`,

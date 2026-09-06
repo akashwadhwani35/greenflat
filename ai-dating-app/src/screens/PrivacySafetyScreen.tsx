@@ -26,7 +26,7 @@ export const PrivacySafetyScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl
     hide_distance: false,
     hide_city: false,
     incognito_mode: false,
-    show_online_status: true,
+    show_online_status: false,
   });
   const [blocked, setBlocked] = useState<Array<{ user_id: number; name: string; city?: string }>>([]);
   const [loading, setLoading] = useState(false);

@@ -153,6 +153,34 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     setBriefingFailed(false);
   }, [match?.id]);
 
+  // Full profile from the server. Cards opened from the Likes inbox or a chat
+  // only carried a name, age, city and one photo; this fills in the rest,
+  // including how far away they are.
+  const [details, setDetails] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    setDetails(null);
+    if (!match || !token || !apiBaseUrl || embedded) return;
+    let cancelled = false;
+    fetch(`${apiBaseUrl}/matches/user/${match.id}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.user) return;
+        const photos: string[] = Array.isArray(data.photos)
+          ? data.photos.map((p: any) => p?.photo_url).filter((u: unknown): u is string => typeof u === 'string' && u.length > 0)
+          : [];
+        const primary = Array.isArray(data.photos) ? data.photos.find((p: any) => p?.is_primary)?.photo_url : undefined;
+        const next: Record<string, unknown> = {};
+        Object.entries(data.user as Record<string, unknown>).forEach(([key, value]) => {
+          if (value !== null && value !== undefined && value !== '') next[key] = value;
+        });
+        if (photos.length > 0) next.photos = photos;
+        if (typeof primary === 'string' && primary) next.primary_photo = primary;
+        setDetails(next);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [match?.id, token, apiBaseUrl, embedded]);
+
   // AI Match briefing: what you two have in common, from both sets of answers.
   useEffect(() => {
     if (!match || !token || !apiBaseUrl || embedded) return;
@@ -177,7 +205,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     );
   }
 
-  const matchData = match as MatchCandidate & {
+  const matchData = { ...match, ...(details || {}) } as MatchCandidate & {
     bio?: string;
     gender?: string;
     relationship_goal?: string;
@@ -257,9 +285,10 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   );
 
   const heightValue = matchData.height ? String(matchData.height) : '';
+  // Miles, per the board ("would say mile mein hi rakhiyega").
   const distanceValue =
     typeof matchData.distance_km === 'number' && Number.isFinite(matchData.distance_km)
-      ? `${Math.round(matchData.distance_km)} km away`
+      ? `${Math.max(1, Math.round(matchData.distance_km * 0.621371))} mi away`
       : '';
 
   // Section 2 of the card, in the order the design board sets out: location,
@@ -601,6 +630,14 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             <Typography variant="small" style={[styles.locationText, { color: theme.colors.textDark }]}>
               {city}
             </Typography>
+            {distanceValue ? (
+              <View style={[styles.chip, styles.distanceBubble, bubbleStyle(false)]}>
+                <Feather name="navigation" size={11} color={bubbleTextColor(false)} />
+                <Typography variant="tiny" style={{ color: bubbleTextColor(false) }}>
+                  {distanceValue}
+                </Typography>
+              </View>
+            ) : null}
           </View>
         </View>
 
@@ -828,6 +865,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 12,
     gap: 10,
+  },
+  distanceBubble: {
+    marginLeft: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
   },
   briefingButton: {
     flexDirection: 'row',

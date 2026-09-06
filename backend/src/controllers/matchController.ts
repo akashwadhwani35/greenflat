@@ -993,6 +993,9 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
     const result = await pool.query(
       `SELECT
         u.id, u.name, u.gender, u.orientation, u.pronouns, u.date_of_birth, u.city, u.is_verified,
+        u.latitude, u.longitude,
+        COALESCE(priv.hide_distance, FALSE) AS hide_distance,
+        COALESCE(priv.hide_city, FALSE) AS hide_city,
         p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
         p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.education, p.occupation,
         p.relationship_goal, p.family_oriented, p.spiritual, p.open_minded, p.career_focused,
@@ -1003,6 +1006,7 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
       LEFT JOIN personality_responses pr ON u.id = pr.user_id
+      LEFT JOIN user_privacy_settings priv ON priv.user_id = u.id
       WHERE u.id = $1`,
       [targetUserId]
     );
@@ -1017,12 +1021,28 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
       [targetUserId]
     );
 
-    const user = result.rows[0];
+    const { latitude, longitude, hide_distance, hide_city, ...user } = result.rows[0];
+
+    // How far away they are, for the profile card. Search results already
+    // carry this; profiles opened from the inbox or a chat did not, so the
+    // distance bubble was missing there. Respects their "hide distance".
+    let distance_km: number | null = null;
+    if (!hide_distance && latitude != null && longitude != null) {
+      const viewer = await pool.query('SELECT latitude, longitude FROM users WHERE id = $1', [userId]);
+      const v = viewer.rows[0];
+      if (v?.latitude != null && v?.longitude != null) {
+        distance_km = haversineDistanceKm(
+          parseFloat(v.latitude), parseFloat(v.longitude), parseFloat(latitude), parseFloat(longitude)
+        );
+      }
+    }
 
     res.json({
       user: {
         ...user,
+        city: hide_city ? null : user.city,
         age: calculateAge(user.date_of_birth),
+        distance_km,
       },
       photos: photosResult.rows,
     });

@@ -12,6 +12,7 @@ export type SavedSession = {
 const SESSION_KEY = 'greenflag.session.v1';
 const FIRST_SEARCH_DONE_PREFIX = 'greenflag.firstSearchDone.v1.';
 const WELCOME_SHOWN_PREFIX = 'greenflag.welcomeShown.v1.';
+const SUBSCRIPTION_NUDGE_PREFIX = 'greenflag.subscriptionNudgeAt.v1.';
 const PASSED_IDS_PREFIX = 'greenflag.passedIds.v1.';
 
 export const loadSession = async (): Promise<SavedSession | null> => {
@@ -79,5 +80,24 @@ export const savePassedIds = async (userId: number, ids: number[]): Promise<void
     await AsyncStorage.setItem(`${PASSED_IDS_PREFIX}${userId}`, JSON.stringify(ids.slice(-500)));
   } catch {
     // Best-effort; the in-memory set still applies for this session.
+  }
+};
+
+/** When the subscription page was last shown as a pop-up (ms since epoch), or 0. */
+export const loadSubscriptionNudgeShownAt = async (userId: number): Promise<number> => {
+  try {
+    const raw = await AsyncStorage.getItem(`${SUBSCRIPTION_NUDGE_PREFIX}${userId}`);
+    const value = raw ? Number(raw) : 0;
+    return Number.isFinite(value) ? value : 0;
+  } catch {
+    return 0;
+  }
+};
+
+export const markSubscriptionNudgeShown = async (userId: number): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(`${SUBSCRIPTION_NUDGE_PREFIX}${userId}`, String(Date.now()));
+  } catch {
+    // Best-effort only.
   }
 };

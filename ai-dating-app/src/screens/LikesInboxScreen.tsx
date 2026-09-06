@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, View, Image, ActivityIndicator, Linking } from 'react-native';
+import { ScrollView, StyleSheet, View, Image, ActivityIndicator, Linking, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -110,15 +110,20 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
               <View key={`acc-${item.match_id}`} style={[styles.card, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
                 <Image source={item.user?.primary_photo ? { uri: item.user.primary_photo } : require('../../assets/icon.png')} style={styles.photo} />
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Typography variant="bodyStrong">{item.user?.name}</Typography>
-                  <Typography variant="small" style={{ color: theme.colors.neonGreen }}>
-                    {item.kind === 'green_flag' ? 'accepted your Green Flag' : 'accepted your First Move'}
+                  <Typography variant="bodyStrong" numberOfLines={1}>{item.user?.name}</Typography>
+                  <Typography variant="small" numberOfLines={1} style={{ color: theme.colors.neonGreen }}>
+                    {item.kind === 'green_flag' ? 'Accepted your Green Flag' : 'Accepted your First Move'}
                   </Typography>
                 </View>
-                <Button
-                  label="Message"
+                <TouchableOpacity
+                  style={[styles.iconButton, { backgroundColor: theme.colors.neonGreen }]}
                   onPress={() => onOpenConversation?.(item.match_id, item.user?.name || 'Chat', item.user?.id)}
-                />
+                  accessibilityRole="button"
+                  accessibilityLabel={`Message ${item.user?.name || ''}`}
+                  activeOpacity={0.8}
+                >
+                  <Feather name="message-circle" size={22} color={theme.colors.deepBlack} />
+                </TouchableOpacity>
               </View>
             ))}
           </View>
@@ -314,5 +319,14 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 14,
     borderWidth: 1,
+  },
+  // "Message" as a circle: the word crowded the row and pushed the copy onto
+  // two lines.
+  iconButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -481,6 +481,69 @@ describe('GreenFlag backend core flow', () => {
     expect(incomingLikesAfterUpgrade.body.likes[1].is_superlike).toBe(true);
   });
 
+  it('drops a like from the inbox once it has been answered, either way', async () => {
+    const receiver = await signupAndCompleteProfile({
+      email: `answered_receiver_${Date.now()}@example.com`,
+      name: 'Answered Receiver',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const likedBack = await signupAndCompleteProfile({
+      email: `answered_liked_back_${Date.now()}@example.com`,
+      name: 'Liked Back',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const rejected = await signupAndCompleteProfile({
+      email: `answered_rejected_${Date.now()}@example.com`,
+      name: 'Rejected',
+      gender: 'male',
+      interested_in: 'female',
+    });
+
+    for (const liker of [likedBack, rejected]) {
+      const like = await agent
+        .post('/api/likes')
+        .set('Authorization', `Bearer ${liker.token}`)
+        .send({ target_user_id: receiver.userId, is_on_grid: true, is_superlike: liker === rejected });
+      expect(like.status).toBe(200);
+    }
+
+    const before = await agent
+      .get('/api/likes/incoming')
+      .set('Authorization', `Bearer ${receiver.token}`);
+    expect(before.status).toBe(200);
+    expect(before.body.likes.map((row: any) => row.user.id).sort()).toEqual(
+      [likedBack.userId, rejected.userId].sort()
+    );
+
+    // Liking back makes a match; the card is answered and leaves the inbox.
+    const likeBack = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${receiver.token}`)
+      .send({ target_user_id: likedBack.userId, is_on_grid: true });
+    expect(likeBack.status).toBe(200);
+    expect(likeBack.body.is_match).toBe(true);
+
+    const afterLike = await agent
+      .get('/api/likes/incoming')
+      .set('Authorization', `Bearer ${receiver.token}`);
+    expect(afterLike.status).toBe(200);
+    expect(afterLike.body.likes.map((row: any) => row.user.id)).toEqual([rejected.userId]);
+
+    // Rejecting a Green Flag removes it the same way.
+    const dismiss = await agent
+      .post(`/api/likes/incoming/${rejected.userId}/dismiss`)
+      .set('Authorization', `Bearer ${receiver.token}`);
+    expect(dismiss.status).toBe(200);
+
+    const afterReject = await agent
+      .get('/api/likes/incoming')
+      .set('Authorization', `Bearer ${receiver.token}`);
+    expect(afterReject.status).toBe(200);
+    expect(afterReject.body.likes).toEqual([]);
+  });
+
   it('blocks a banned user on their existing token, not just at login', async () => {
     const user = await signupAndCompleteProfile({
       email: `banned_${Date.now()}@example.com`,

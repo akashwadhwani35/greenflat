@@ -1,541 +1,370 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
-  Animated,
-  View,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Image,
-  Platform,
-  StatusBar,
   ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Feather } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PixelFlag } from '../components/PixelFlag';
+import { PageHeader } from '../components/PageHeader';
+import { NoticeModal, type Notice } from '../components/NoticeModal';
 
-type ProfileScreenProps = {
+/**
+ * The Profile tab, laid out per the "Greenflag edits" board: photo with an edit
+ * badge, name and flag, Edit Profile, a completion bar, the three action tiles
+ * (Boost, First Moves, Green Flags), then the plan picker with Upgrade.
+ *
+ * Settings is behind the gear; previewing your own card is under Settings →
+ * Your profile.
+ */
+type Props = {
   onBack: () => void;
   onOpenSettings: () => void;
   onEditProfile: () => void;
   onManagePhotos: () => void;
-  onOpenCheckout: () => void;
+  onOpenSubscription: (tab: 'pro' | 'premium') => void;
+  onOpenLikes: () => void;
+  onOpenConversations: () => void;
+  onOpenWallet?: () => void;
   token: string;
   apiBaseUrl: string;
 };
 
-type PlanTab = 'plus' | 'premium';
+type PlanTab = 'pro' | 'premium';
 
-const PLUS_FEATURES = [
-  'Unlimited likes',
-  'See who likes you',
-  'Advanced filters',
-];
+const BOOST_COST = 20;
 
-const PREMIUM_FEATURES = [
-  'Unlimited likes',
-  'See who likes you',
-  'Advanced filters',
-  'Priority visibility',
-  'Read receipts',
-  'Profile boost monthly',
-];
+const PLAN_COPY: Record<PlanTab, { title: string; blurb: string }> = {
+  pro: { title: 'Pro', blurb: 'Send unlimited likes & rewind anytime.' },
+  premium: { title: 'Premium', blurb: 'Everything in Pro, and you get seen first.' },
+};
 
-const normalizeLabel = (value: string) =>
-  value
-    .replace(/[_-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/\b\w/g, (m) => m.toUpperCase());
-
-export const ProfileScreen: React.FC<ProfileScreenProps> = ({
+export const ProfileScreen: React.FC<Props> = ({
   onBack,
   onOpenSettings,
   onEditProfile,
   onManagePhotos,
-  onOpenCheckout,
+  onOpenSubscription,
+  onOpenLikes,
+  onOpenConversations,
+  onOpenWallet,
   token,
   apiBaseUrl,
 }) => {
   const theme = useTheme();
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [selectedPlan, setSelectedPlan] = useState<PlanTab>('plus');
-  const [showBoostTip, setShowBoostTip] = useState(false);
-  const boostTipOpacity = useRef(new Animated.Value(0)).current;
+  const [selectedPlan, setSelectedPlan] = useState<PlanTab>('pro');
+  const [boosting, setBoosting] = useState(false);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const response = await fetch(`${apiBaseUrl}/profile/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        const data = await response.json();
-        if (response.ok) {
-          setProfile(data);
-        }
-      } catch (error) {
-        console.error('Error fetching profile:', error);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchProfile().catch((err) => console.warn('Failed to load profile:', err));
+  const fetchProfile = useCallback(async () => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/profile/me`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setProfile(data);
+    } catch (error) {
+      console.warn('Failed to load profile:', error);
+    } finally {
+      setLoading(false);
+    }
   }, [apiBaseUrl, token]);
 
-  const primaryPhoto = profile?.photos?.find((p: any) => p.is_primary) || profile?.photos?.[0];
-  const isVerified = profile?.user?.is_verified || false;
-  const userName = profile?.user?.name || 'New User';
-  const userCity = profile?.user?.city || '';
+  useEffect(() => {
+    void fetchProfile();
+  }, [fetchProfile]);
+
+  const user = profile?.user || {};
   const profileData = profile?.profile || {};
-  const personalityData = profile?.personality || {};
-
-  const aboutText = (profileData.bio || profile?.ai_persona?.self_summary || '').trim();
+  const photos: any[] = Array.isArray(profile?.photos) ? profile.photos : [];
+  const primaryPhoto = photos.find((p) => p?.is_primary) || photos[0];
+  const isVerified = Boolean(user.is_verified);
+  const userName = user.name || 'You';
   const interests: string[] = Array.isArray(profileData.interests) ? profileData.interests : [];
-  const topTraits: string[] = Array.isArray(personalityData.top_traits)
-    ? personalityData.top_traits
-    : (Array.isArray(personalityData.personality_traits) ? personalityData.personality_traits : []);
-
-  const smokingValue = (() => {
-    if (typeof profileData.smoker === 'boolean') return profileData.smoker ? 'Smoker' : 'Non-smoker';
-    if (profileData.smoking_habit) return normalizeLabel(String(profileData.smoking_habit));
-    return null;
-  })();
-  const drinkingValue = profileData.drinker ? normalizeLabel(String(profileData.drinker)) : null;
-  const relationshipGoal = profileData.relationship_goal ? normalizeLabel(String(profileData.relationship_goal)) : null;
-  const heightValue = profileData.height ? `${profileData.height} cm` : null;
-
-  const profileDetails = [
-    { label: 'Work', value: profileData.occupation || null },
-    { label: 'Education', value: profileData.education_level || profileData.education || null },
-    { label: 'Hometown', value: profileData.hometown || null },
-    { label: 'Height', value: heightValue },
-    { label: 'Looking for', value: relationshipGoal },
-    { label: 'Drinking', value: drinkingValue },
-    { label: 'Smoking', value: smokingValue },
-    { label: 'Religion', value: profileData.religion || null },
-    { label: 'Politics', value: profileData.politics || null },
-  ].filter((item) => Boolean(item.value));
 
   const completionSignals = [
-    (profile?.photos || []).length > 0,
-    Boolean(profile?.user?.city),
-    Boolean(profile?.user?.date_of_birth),
-    Boolean(profile?.user?.gender),
+    photos.length > 0,
+    photos.length >= 3,
+    Boolean(user.city),
+    Boolean(user.date_of_birth),
+    Boolean(user.gender),
     Boolean(profileData.bio),
-    interests.length > 0,
+    interests.length >= 3,
     Boolean(profileData.height),
     Boolean(profileData.relationship_goal),
-    profileData.smoker !== null && profileData.smoker !== undefined,
     Boolean(profileData.drinker),
+    Boolean(profileData.smoking_habit || typeof profileData.smoker === 'boolean'),
+    Boolean(profile?.personality?.personality_traits?.length),
   ];
   const completionPercent = Math.round(
     (completionSignals.filter(Boolean).length / completionSignals.length) * 100
   );
 
-  const profileTags = [
-    profile?.user?.age ? `${profile.user.age}` : null,
-    profile?.user?.gender ? normalizeLabel(String(profile.user.gender)) : null,
-    userCity || null,
-  ].filter(Boolean) as string[];
-
-  const currentFeatures = selectedPlan === 'plus' ? PLUS_FEATURES : PREMIUM_FEATURES;
-  const premiumExpiresAt = profile?.user?.premium_expires_at ? new Date(profile.user.premium_expires_at).getTime() : null;
-  const hasPaidPlan = Boolean(profile?.user?.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > Date.now());
-  const creditBalance = Number(profile?.user?.credit_balance || 0);
-  const canUseTokensForBoost = creditBalance >= 20;
-  const canActivateBoost = hasPaidPlan || canUseTokensForBoost;
-  const boostExpiresAtMs = profile?.user?.boost_expires_at ? new Date(profile.user.boost_expires_at).getTime() : null;
+  const premiumExpiresAt = user.premium_expires_at ? new Date(user.premium_expires_at).getTime() : null;
+  const hasPaidPlan = Boolean(user.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > Date.now());
+  const creditBalance = Number(user.credit_balance || 0);
+  const boostExpiresAtMs = user.boost_expires_at ? new Date(user.boost_expires_at).getTime() : null;
   const isBoostActive = Boolean(boostExpiresAtMs && boostExpiresAtMs > Date.now());
 
-  const boostSubtitle = (() => {
-    if (isBoostActive && boostExpiresAtMs) {
-      const diffMs = Math.max(0, boostExpiresAtMs - Date.now());
-      const hours = Math.floor(diffMs / (1000 * 60 * 60));
-      const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-      return `Boost active • ${hours}h ${minutes}m left`;
-    }
-    if (hasPaidPlan) {
-      return 'Get seen by 10X more people for 6 hours';
-    }
-    if (canUseTokensForBoost) {
-      return 'Use 20 tokens for a 6-hour boost';
-    }
-    return 'Requires Premium or 20 tokens';
-  })();
-
-  const flashBoostTip = () => {
-    setShowBoostTip(true);
-    Animated.sequence([
-      Animated.timing(boostTipOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
-      Animated.delay(2000),
-      Animated.timing(boostTipOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
-    ]).start(() => setShowBoostTip(false));
+  const boostTimeLeft = () => {
+    if (!boostExpiresAtMs) return '';
+    const diffMs = Math.max(0, boostExpiresAtMs - Date.now());
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const minutes = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m left`;
   };
 
-  const handleBoost = async () => {
-    if (!canActivateBoost) {
-      flashBoostTip();
-      return;
-    }
+  const activateBoost = async () => {
+    if (boosting) return;
+    setBoosting(true);
     try {
       const response = await fetch(`${apiBaseUrl}/profile/boost`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body.error || 'Unable to activate boost');
-      }
-
-      if (body.boost_expires_at) {
-        setProfile((prev: any) => ({
-          ...prev,
-          user: {
-            ...(prev?.user || {}),
-            boost_expires_at: body.boost_expires_at,
-          },
-        }));
-      }
-      if (typeof body.credit_balance === 'number') {
-        setProfile((prev: any) => ({
-          ...prev,
-          user: {
-            ...(prev?.user || {}),
-            credit_balance: body.credit_balance,
-          },
-        }));
-      }
-
-      const chargedTokens = Number(body?.charged_tokens || 0);
-      const successMessage = chargedTokens > 0
-        ? `Your profile is boosted for 6 hours. ${chargedTokens} tokens used.`
-        : 'Your profile is boosted for 6 hours.';
-      Alert.alert('Boost activated', successMessage);
+      if (!response.ok) throw new Error(body.error || 'Unable to activate boost');
+      setProfile((prev: any) => ({
+        ...prev,
+        user: {
+          ...(prev?.user || {}),
+          ...(body.boost_expires_at ? { boost_expires_at: body.boost_expires_at } : {}),
+          ...(typeof body.credit_balance === 'number' ? { credit_balance: body.credit_balance } : {}),
+        },
+      }));
+      const charged = Number(body?.charged_tokens || 0);
+      setNotice({
+        title: 'Boooost activated',
+        message: charged > 0
+          ? `You are at the front of the line for the next 6 hours. ${charged} GFT used.`
+          : 'You are at the front of the line for the next 6 hours.',
+        icon: 'zap',
+        buttonLabel: "Let's gooo",
+      });
     } catch (error: any) {
-      Alert.alert('Boost failed', error?.message || 'Unable to activate boost');
+      setNotice({ title: 'Boost failed', message: error?.message || 'Please try again.', tone: 'error' });
+    } finally {
+      setBoosting(false);
     }
   };
 
-  if (loading) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={theme.colors.neonGreen} />
-        </View>
-      </View>
+  const handleBoost = () => {
+    if (isBoostActive) {
+      setNotice({ title: 'Boost is on', message: `Your profile is boosted. ${boostTimeLeft()}.`, icon: 'zap' });
+      return;
+    }
+    if (hasPaidPlan) {
+      void activateBoost();
+      return;
+    }
+    if (creditBalance < BOOST_COST) {
+      Alert.alert(
+        'Not enough GFT',
+        `A boost costs ${BOOST_COST} GFT. You have ${creditBalance}.`,
+        onOpenWallet
+          ? [{ text: 'Not now', style: 'cancel' }, { text: 'Get tokens', onPress: onOpenWallet }]
+          : [{ text: 'OK' }]
+      );
+      return;
+    }
+    Alert.alert(
+      'Boost your profile?',
+      `Get seen by more people for 6 hours. Costs ${BOOST_COST} GFT.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Boost', onPress: () => { void activateBoost(); } },
+      ]
     );
-  }
+  };
+
+  const tiles: Array<{
+    key: string;
+    label: string;
+    caption: string;
+    onPress: () => void;
+    icon: React.ReactNode;
+    highlighted?: boolean;
+  }> = [
+    {
+      key: 'boost',
+      label: 'Boost',
+      caption: isBoostActive ? boostTimeLeft() : hasPaidPlan ? 'Included' : `${BOOST_COST} GFT`,
+      onPress: handleBoost,
+      icon: <MaterialCommunityIcons name="rocket-launch-outline" size={26} color={theme.colors.neonGreen} />,
+      highlighted: isBoostActive,
+    },
+    {
+      key: 'first-moves',
+      label: 'First Moves',
+      caption: 'In your chats',
+      onPress: onOpenConversations,
+      icon: <Feather name="send" size={24} color={theme.colors.neonGreen} />,
+    },
+    {
+      key: 'green-flags',
+      label: 'Green Flags',
+      caption: 'In your inbox',
+      onPress: onOpenLikes,
+      icon: <PixelFlag size={26} color={theme.colors.neonGreen} />,
+    },
+  ];
+
+  const plan = PLAN_COPY[selectedPlan];
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.deepBlack }]}>
-      <StatusBar barStyle="light-content" />
-
-      <View style={[styles.header, { backgroundColor: theme.colors.deepBlack, borderBottomColor: theme.colors.border }]}>
-        <TouchableOpacity
-          onPress={onBack}
-          style={[styles.headerButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
-        >
-          <Feather name="arrow-left" size={22} color={theme.colors.text} />
-        </TouchableOpacity>
-        <Typography variant="h2" style={{ color: theme.colors.text, flex: 1 }}>
-          Profile
-        </Typography>
-        <TouchableOpacity
-          onPress={onOpenSettings}
-          style={[styles.headerButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
-        >
-          <Feather name="settings" size={24} color={theme.colors.text} />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        contentInsetAdjustmentBehavior="automatic"
-        bounces
-      >
-        <View style={[styles.photoSectionCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-          <TouchableOpacity onPress={onManagePhotos} activeOpacity={0.8}>
-            <View style={[styles.photoContainer, { borderColor: isVerified ? theme.colors.neonGreen : theme.colors.border }]}>
-              {primaryPhoto ? (
-                <Image source={{ uri: primaryPhoto.photo_url }} style={styles.profilePhoto} />
-              ) : (
-                <View style={[styles.profilePhoto, { backgroundColor: theme.colors.surfaceLight, alignItems: 'center', justifyContent: 'center' }]}>
-                  <Feather name="user" size={48} color={theme.colors.muted} />
-                </View>
-              )}
-              <View style={[styles.editIconOverlay, { backgroundColor: theme.colors.neonGreen }]}>
-                <Feather name="edit-2" size={14} color={theme.colors.deepBlack} />
-              </View>
-            </View>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <PageHeader
+        title="Profile"
+        onBack={onBack}
+        right={
+          <TouchableOpacity
+            onPress={onOpenSettings}
+            style={[styles.gearButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            activeOpacity={0.8}
+          >
+            <Feather name="settings" size={22} color={theme.colors.text} />
           </TouchableOpacity>
+        }
+      />
 
-          <View style={styles.nameRow}>
-            <Typography variant="h1" style={{ color: theme.colors.text }}>
-              {userName}
-            </Typography>
-            <View style={styles.flagIcon}>
+      {loading ? (
+        <View style={styles.loading}>
+          <ActivityIndicator size="large" color={theme.colors.neonGreen} />
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {/* Photo, name, edit */}
+          <View style={styles.hero}>
+            <TouchableOpacity onPress={onManagePhotos} activeOpacity={0.85} accessibilityLabel="Change photos">
+              <View style={[styles.avatarRing, { borderColor: theme.colors.neonGreen }]}>
+                {primaryPhoto?.photo_url ? (
+                  <Image source={{ uri: primaryPhoto.photo_url }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, { backgroundColor: theme.colors.surfaceLight, alignItems: 'center', justifyContent: 'center' }]}>
+                    <Feather name="user" size={44} color={theme.colors.muted} />
+                  </View>
+                )}
+              </View>
+              <View style={[styles.editBadge, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.background }]}>
+                <Feather name="edit-2" size={13} color={theme.colors.deepBlack} />
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.nameRow}>
+              <Typography variant="h1" style={{ color: theme.colors.text }} numberOfLines={1}>
+                {userName}
+              </Typography>
               <PixelFlag size={20} color={isVerified ? theme.colors.neonGreen : theme.colors.muted} />
             </View>
-          </View>
 
-          {profileTags.length > 0 ? (
-            <View style={styles.tagsRow}>
-              {profileTags.map((tag) => (
-                <View key={tag} style={[styles.tagPill, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
-                  <Typography variant="tiny" style={{ color: theme.colors.textDark }}>
-                    {tag}
-                  </Typography>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
-          <View style={styles.quickActionRow}>
             <TouchableOpacity
-              style={[styles.quickActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
               onPress={onEditProfile}
+              style={[styles.editButton, { borderColor: theme.colors.text }]}
               activeOpacity={0.8}
             >
-              <Feather name="edit-3" size={16} color={theme.colors.text} />
-              <Typography variant="small" style={{ color: theme.colors.text, marginLeft: 8 }}>
-                Edit profile
-              </Typography>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.quickActionButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
-              onPress={onManagePhotos}
-              activeOpacity={0.8}
-            >
-              <Feather name="camera" size={16} color={theme.colors.text} />
-              <Typography variant="small" style={{ color: theme.colors.text, marginLeft: 8 }}>
-                Manage photos
-              </Typography>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={[styles.completionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
-          <View style={styles.completionHeaderRow}>
-            <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-              Profile completion
-            </Typography>
-            <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
-              {completionPercent}%
-            </Typography>
-          </View>
-          <View style={[styles.completionTrack, { backgroundColor: theme.colors.border }]}>
-            <View style={[styles.completionFill, { width: `${completionPercent}%`, backgroundColor: theme.colors.neonGreen }]} />
-          </View>
-          <Typography variant="tiny" style={{ color: theme.colors.muted }}>
-            Complete your profile to get better AI matches.
-          </Typography>
-        </View>
-
-        <View style={[styles.infoCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-          <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-            About me
-          </Typography>
-          <Typography variant="body" style={{ color: theme.colors.textDark, lineHeight: 24 }}>
-            {aboutText || 'Add a short bio to help people understand who you are.'}
-          </Typography>
-        </View>
-
-        {interests.length > 0 ? (
-          <View style={[styles.infoCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-            <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-              Interests
-            </Typography>
-            <View style={styles.chipsWrap}>
-              {interests.slice(0, 12).map((interest) => (
-                <View key={interest} style={[styles.chip, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
-                  <Typography variant="small" style={{ color: theme.colors.textDark }}>
-                    {normalizeLabel(String(interest))}
-                  </Typography>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {topTraits.length > 0 ? (
-          <View style={[styles.infoCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-            <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-              Personality
-            </Typography>
-            <View style={styles.chipsWrap}>
-              {topTraits.slice(0, 8).map((trait) => (
-                <View key={trait} style={[styles.chip, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}>
-                  <Typography variant="small" style={{ color: theme.colors.textDark }}>
-                    {normalizeLabel(String(trait))}
-                  </Typography>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {profileDetails.length > 0 ? (
-          <View style={[styles.infoCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-            <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-              Profile details
-            </Typography>
-            <View style={styles.detailList}>
-              {profileDetails.map((item, index) => (
-                <View
-                  key={item.label}
-                  style={[
-                    styles.detailRow,
-                    index !== profileDetails.length - 1 ? { borderBottomColor: theme.colors.border } : null,
-                  ]}
-                >
-                  <Typography variant="small" style={{ color: theme.colors.muted }}>
-                    {item.label}
-                  </Typography>
-                  <Typography
-                    variant="small"
-                    style={[styles.detailValue, { color: theme.colors.textDark }]}
-                    numberOfLines={1}
-                  >
-                    {normalizeLabel(String(item.value))}
-                  </Typography>
-                </View>
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        <View style={styles.planSection}>
-          <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-            GreenFlag plans
-          </Typography>
-
-          <View style={styles.planTabs}>
-            <TouchableOpacity
-              style={[
-                styles.planTab,
-                selectedPlan === 'plus'
-                  ? { backgroundColor: theme.colors.neonGreen }
-                  : { backgroundColor: 'transparent', borderWidth: 2, borderColor: theme.colors.neonGreen },
-              ]}
-              onPress={() => setSelectedPlan('plus')}
-              activeOpacity={0.8}
-            >
-              <PixelFlag size={16} color={selectedPlan === 'plus' ? theme.colors.deepBlack : theme.colors.neonGreen} />
-              <Typography
-                variant="bodyStrong"
-                style={{
-                  color: selectedPlan === 'plus' ? theme.colors.deepBlack : theme.colors.neonGreen,
-                  marginLeft: 6,
-                }}
-              >
-                Plus
-              </Typography>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.planTab,
-                selectedPlan === 'premium'
-                  ? { backgroundColor: theme.colors.neonGreen }
-                  : { backgroundColor: 'transparent', borderWidth: 2, borderColor: theme.colors.neonGreen },
-              ]}
-              onPress={() => setSelectedPlan('premium')}
-              activeOpacity={0.8}
-            >
-              <PixelFlag size={16} color={selectedPlan === 'premium' ? theme.colors.deepBlack : theme.colors.neonGreen} />
-              <Typography
-                variant="bodyStrong"
-                style={{
-                  color: selectedPlan === 'premium' ? theme.colors.deepBlack : theme.colors.neonGreen,
-                  marginLeft: 6,
-                }}
-              >
-                Premium
+              <Typography variant="small" style={{ color: theme.colors.text }}>
+                Edit Profile
               </Typography>
             </TouchableOpacity>
           </View>
 
-          <View style={[styles.featuresCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-            <Typography variant="bodyStrong" style={{ color: theme.colors.text, marginBottom: 12 }}>
-              What you get
-            </Typography>
-            {currentFeatures.map((feature, index) => (
-              <View key={index} style={styles.featureRow}>
-                <Typography variant="body" style={{ color: theme.colors.textDark, flex: 1 }}>
-                  {feature}
+          {/* Completion */}
+          <View style={styles.progressBlock}>
+            <View style={[styles.progressTrack, { backgroundColor: theme.colors.border }]}>
+              <View style={[styles.progressFill, { width: `${completionPercent}%`, backgroundColor: theme.colors.neonGreen }]} />
+              <View style={[styles.progressBubble, { left: `${completionPercent}%`, backgroundColor: theme.colors.neonGreen }]}>
+                <Typography variant="tiny" style={{ color: theme.colors.deepBlack, fontFamily: 'RedHatDisplay_700Bold' }}>
+                  {completionPercent}%
                 </Typography>
-                <Feather name="check" size={18} color={theme.colors.neonGreen} />
               </View>
+            </View>
+            <Typography variant="tiny" style={{ color: theme.colors.muted, textAlign: 'center' }}>
+              {completionPercent >= 100 ? 'Your profile is complete.' : 'Complete your profile to get better AI matches.'}
+            </Typography>
+          </View>
+
+          {/* Boost / First Moves / Green Flags */}
+          <View style={styles.tileRow}>
+            {tiles.map((tile) => (
+              <TouchableOpacity
+                key={tile.key}
+                style={[
+                  styles.tile,
+                  { backgroundColor: theme.colors.charcoal, borderColor: tile.highlighted ? theme.colors.neonGreen : theme.colors.border },
+                ]}
+                onPress={tile.onPress}
+                activeOpacity={0.8}
+                disabled={tile.key === 'boost' && boosting}
+              >
+                <View style={styles.tileIcon}>{tile.icon}</View>
+                <Typography variant="small" style={{ color: theme.colors.text }} numberOfLines={1}>
+                  {tile.label}
+                </Typography>
+                <Typography variant="tiny" style={{ color: theme.colors.muted }} numberOfLines={1}>
+                  {tile.caption}
+                </Typography>
+              </TouchableOpacity>
             ))}
           </View>
 
-          {showBoostTip && (
-            <Animated.View style={[styles.boostTip, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, opacity: boostTipOpacity }]}>
-              <Typography variant="small" style={{ color: theme.colors.text, textAlign: 'center' }}>
-                Boost requires 20 tokens
-              </Typography>
-            </Animated.View>
-          )}
-          <TouchableOpacity
-            style={[
-              styles.actionButton,
-              { backgroundColor: theme.colors.neonGreen },
-              !canActivateBoost ? styles.actionButtonDisabled : null,
-            ]}
-            onPress={handleBoost}
-            activeOpacity={0.8}
-          >
-            <Typography
-              variant="h2"
-              style={styles.boostButtonTitle}
-            >
-              BOOOOOOOOOOST
-            </Typography>
-            <Typography variant="small" style={{ color: theme.colors.deepBlack, marginTop: 4 }}>
-              {boostSubtitle}
-            </Typography>
-          </TouchableOpacity>
+          {/* Plan picker */}
+          <View style={[styles.segment, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+            {(['pro', 'premium'] as PlanTab[]).map((tab) => {
+              const active = selectedPlan === tab;
+              return (
+                <TouchableOpacity
+                  key={tab}
+                  style={[styles.segmentHalf, active && { backgroundColor: theme.colors.neonGreen }]}
+                  onPress={() => setSelectedPlan(tab)}
+                  activeOpacity={0.85}
+                >
+                  <Typography
+                    variant="bodyStrong"
+                    style={{ color: active ? theme.colors.deepBlack : theme.colors.text }}
+                  >
+                    {PLAN_COPY[tab].title}
+                  </Typography>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
-          <TouchableOpacity
-            style={[styles.checkoutButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}
-            onPress={onOpenCheckout}
-            activeOpacity={0.85}
-          >
-            <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-              View plan options
+          <View style={[styles.planCard, { borderColor: theme.colors.neonGreen, backgroundColor: theme.colors.charcoal }]}>
+            <Typography variant="body" style={{ color: theme.colors.text, textAlign: 'center' }}>
+              {hasPaidPlan ? `You are on ${plan.title}.` : plan.blurb}
             </Typography>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+            <TouchableOpacity
+              style={[styles.upgradeButton, { backgroundColor: theme.colors.neonGreen }]}
+              onPress={() => onOpenSubscription(selectedPlan)}
+              activeOpacity={0.85}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+                {hasPaidPlan ? 'Manage plan' : 'Upgrade'}
+              </Typography>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
+      )}
+
+      <NoticeModal notice={notice} onClose={() => setNotice(null)} />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingTop: Platform.OS === 'ios' ? 60 : (StatusBar.currentHeight || 0) + 32,
-    paddingBottom: 14,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-  },
-  headerButton: {
+  container: { flex: 1 },
+  loading: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  gearButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
@@ -543,188 +372,117 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
   },
-  scrollView: {
-    flex: 1,
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 140,
+    gap: 22,
   },
-  scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === 'ios' ? 190 : 160,
-    flexGrow: 1,
-    gap: 12,
-  },
-  photoSectionCard: {
-    borderWidth: 1,
-    borderRadius: 18,
+  hero: {
     alignItems: 'center',
-    paddingVertical: 18,
-    paddingHorizontal: 14,
     gap: 10,
   },
-  photoContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+  avatarRing: {
+    width: 132,
+    height: 132,
+    borderRadius: 66,
     borderWidth: 3,
-    overflow: 'visible',
-    position: 'relative',
+    padding: 3,
   },
-  profilePhoto: {
+  avatar: {
     width: '100%',
     height: '100%',
-    borderRadius: 58,
+    borderRadius: 60,
   },
-  editIconOverlay: {
+  editBadge: {
     position: 'absolute',
-    bottom: 4,
+    top: 4,
     right: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
     gap: 8,
-  },
-  flagIcon: {
-    marginLeft: 4,
-  },
-  tagsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  tagPill: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  quickActionRow: {
-    flexDirection: 'row',
-    width: '100%',
-    gap: 10,
     marginTop: 4,
+    maxWidth: '85%',
   },
-  quickActionButton: {
-    flex: 1,
+  editButton: {
     borderWidth: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  completionCard: {
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 8,
-  },
-  completionHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  completionTrack: {
-    height: 8,
     borderRadius: 999,
-    overflow: 'hidden',
+    paddingVertical: 8,
+    paddingHorizontal: 22,
   },
-  completionFill: {
+  progressBlock: {
+    gap: 10,
+    paddingTop: 14,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 999,
+    marginHorizontal: 10,
+  },
+  progressFill: {
     height: '100%',
     borderRadius: 999,
   },
-  infoCard: {
-    borderWidth: 1,
-    borderRadius: 14,
-    padding: 14,
-    gap: 10,
-  },
-  chipsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  chip: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-  },
-  detailList: {
-    gap: 0,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    gap: 10,
-  },
-  detailValue: {
-    flexShrink: 1,
-    textAlign: 'right',
-  },
-  planSection: {
-    gap: 12,
-    marginTop: 4,
-  },
-  planTabs: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  planTab: {
-    flex: 1,
-    flexDirection: 'row',
+  progressBubble: {
+    position: 'absolute',
+    top: -12,
+    marginLeft: -22,
+    minWidth: 44,
+    height: 30,
+    borderRadius: 15,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 30,
+    paddingHorizontal: 8,
   },
-  featuresCard: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 16,
-  },
-  featureRow: {
+  tileRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
+    gap: 12,
   },
-  actionButton: {
-    paddingVertical: 18,
-    borderRadius: 30,
-    alignItems: 'center',
-  },
-  boostButtonTitle: {
-    color: '#101D13',
-    letterSpacing: 2,
-    fontFamily: 'RedHatDisplay_700Bold',
-    includeFontPadding: false,
-  },
-  actionButtonDisabled: {
-    opacity: 0.35,
-  },
-  boostTip: {
-    alignSelf: 'center',
-    borderRadius: 12,
+  tile: {
+    flex: 1,
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    marginBottom: 8,
-  },
-  checkoutButton: {
-    borderWidth: 1,
-    borderRadius: 16,
-    paddingVertical: 14,
+    borderRadius: 18,
+    paddingVertical: 16,
+    paddingHorizontal: 8,
     alignItems: 'center',
+    gap: 4,
+  },
+  tileIcon: {
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  segment: {
+    flexDirection: 'row',
+    borderRadius: 999,
+    borderWidth: 1,
+    padding: 4,
+  },
+  segmentHalf: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  planCard: {
+    borderWidth: 1.5,
+    borderRadius: 18,
+    padding: 18,
+    gap: 14,
+    alignItems: 'center',
+  },
+  upgradeButton: {
+    borderRadius: 999,
+    paddingVertical: 12,
+    paddingHorizontal: 36,
   },
 });

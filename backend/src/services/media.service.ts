@@ -175,6 +175,7 @@ const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpg',
   'image/png',
   'image/webp',
+  'image/gif',
   'image/heic',
   'image/heif',
 ]);
@@ -194,6 +195,7 @@ const extensionByMime: Record<string, string> = {
   'image/jpg': 'jpg',
   'image/png': 'png',
   'image/webp': 'webp',
+  'image/gif': 'gif',
   'image/heic': 'heic',
   'image/heif': 'heif',
   'video/mp4': 'mp4',
