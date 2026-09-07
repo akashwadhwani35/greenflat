@@ -319,30 +319,6 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
           )}
         </View>
 
-        {/* Boost button */}
-        <Pressable
-          onPress={handleBoost}
-          disabled={boosting}
-          style={({ pressed }) => [
-            styles.boostButton,
-            { backgroundColor: theme.colors.neonGreen },
-            pressed && { opacity: 0.9, transform: [{ scale: 0.98 }] },
-            boosting && { opacity: 0.6 },
-          ]}
-        >
-          {boosting ? (
-            <ActivityIndicator color="#000" />
-          ) : (
-            <>
-              <Typography variant="h1" style={styles.boostText}>
-                BOOOOOOOOOST
-              </Typography>
-              <Typography variant="small" style={{ color: 'rgba(0,0,0,0.7)', textAlign: 'center' }}>
-                Get seen by 10X more people
-              </Typography>
-            </>
-          )}
-        </Pressable>
       </ScrollView>
     </View>
   );

@@ -322,6 +322,9 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
+  // City suggestions for the Location field (board 11.1), same lookup as onboarding.
+  const [citySuggestions, setCitySuggestions] = useState<{ city: string; label?: string }[]>([]);
+  const [cityLookupPending, setCityLookupPending] = useState(false);
   const [selectedMoreField, setSelectedMoreField] = useState<MoreAboutField | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [profileSnapshot, setProfileSnapshot] = useState<any>(null);
@@ -421,6 +424,30 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const timeout = setTimeout(() => setSaveNotice(null), 2600);
     return () => clearTimeout(timeout);
   }, [saveNotice]);
+
+  const cityLookupTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lookupCities = (text: string) => {
+    if (cityLookupTimer.current) clearTimeout(cityLookupTimer.current);
+    const query = text.trim();
+    if (query.length < 2) { setCitySuggestions([]); setCityLookupPending(false); return; }
+    setCityLookupPending(true);
+    cityLookupTimer.current = setTimeout(async () => {
+      try {
+        const response = await fetch(`${apiBaseUrl}/geocode`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ query }),
+        });
+        const body = await response.json().catch(() => ({}));
+        const list = Array.isArray(body?.suggestions) ? body.suggestions : (body?.city ? [{ city: body.city }] : []);
+        setCitySuggestions(list.slice(0, 5));
+      } catch {
+        setCitySuggestions([]);
+      } finally {
+        setCityLookupPending(false);
+      }
+    }, 350);
+  };
 
   const toggleArrayItem = (key: 'interests' | 'languages' | 'pronouns' | 'communities', item: string, maxItems?: number) => {
     setForm((prev) => {
@@ -663,7 +690,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Interests Modal
   const renderInterestsModal = () => (
-    <Modal visible={activeModal === 'interests'} animationType="none">
+    <Modal visible={activeModal === 'interests'} animationType="none" onRequestClose={() => setActiveModal(null)}>
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -735,7 +762,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Languages Modal
   const renderLanguagesModal = () => (
-    <Modal visible={activeModal === 'languages'} animationType="none">
+    <Modal visible={activeModal === 'languages'} animationType="none" onRequestClose={() => setActiveModal(null)}>
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -802,7 +829,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Pronouns Modal
   const renderPronounsModal = () => (
-    <Modal visible={activeModal === 'pronouns'} animationType="none">
+    <Modal visible={activeModal === 'pronouns'} animationType="none" onRequestClose={() => setActiveModal(null)}>
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -873,7 +900,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Communities Modal
   const renderCommunitiesModal = () => (
-    <Modal visible={activeModal === 'communities'} animationType="none">
+    <Modal visible={activeModal === 'communities'} animationType="none" onRequestClose={() => setActiveModal(null)}>
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -935,7 +962,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Bio Modal
   const renderBioModal = () => (
-    <Modal visible={activeModal === 'bio'} animationType="none">
+    <Modal visible={activeModal === 'bio'} animationType="none" onRequestClose={() => setActiveModal(null)}>
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -1019,7 +1046,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const moreRows: MoreAboutField[] = ['height', 'exercise', 'educationLevel', 'drinking', 'smoking', 'lookingFor', 'kids', 'haveKids', 'starSign', 'politics', 'religion'];
 
     return (
-      <Modal visible={activeModal === 'moreAbout'} animationType="none">
+      <Modal visible={activeModal === 'moreAbout'} animationType="none" onRequestClose={() => setActiveModal(null)}>
         <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
           <PageHeader title="More about you" onBack={() => setActiveModal(null)} />
 
@@ -1094,7 +1121,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const value = getFieldValue(field) === 'Add' ? '' : getFieldValue(field).replace(' cm', '');
 
     return (
-      <Modal visible animationType="none">
+      <Modal visible animationType="none" onRequestClose={() => setActiveModal('moreAbout')}>
         <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
           <PageHeader title={title} onBack={() => setActiveModal('moreAbout')} />
 
@@ -1136,9 +1163,35 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
                 placeholder={`Add ${title.toLowerCase()}`}
                 placeholderTextColor={theme.colors.muted}
                 value={value}
-                onChangeText={(text) => setFieldValue(field, text)}
+                onChangeText={(text) => {
+                  setFieldValue(field, text);
+                  if (field === 'location') lookupCities(text);
+                }}
                 keyboardType={field === 'age' || field === 'height' ? 'number-pad' : 'default'}
               />
+              {field === 'location' && (cityLookupPending || citySuggestions.length > 0) ? (
+                <View style={[styles.suggestionBox, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+                  {cityLookupPending ? (
+                    <Typography variant="small" style={{ color: theme.colors.muted, padding: 12 }}>Searching…</Typography>
+                  ) : null}
+                  {citySuggestions.map((item) => (
+                    <TouchableOpacity
+                      key={`${item.city}-${item.label || ''}`}
+                      style={[styles.suggestionRow, { borderBottomColor: theme.colors.border }]}
+                      onPress={() => {
+                        setFieldValue('location', item.city);
+                        setCitySuggestions([]);
+                        setActiveModal('moreAbout');
+                      }}
+                    >
+                      <Feather name="map-pin" size={14} color={theme.colors.neonGreen} />
+                      <Typography variant="body" style={{ color: theme.colors.text, marginLeft: 10 }}>
+                        {item.label || item.city}
+                      </Typography>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
               <TouchableOpacity
                 style={[styles.doneButton, { backgroundColor: theme.colors.neonGreen }]}
                 onPress={() => setActiveModal('moreAbout')}
@@ -1486,6 +1539,19 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  suggestionBox: {
+    borderWidth: 1,
+    borderRadius: 14,
+    marginTop: 8,
+    overflow: 'hidden',
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
   },
   moreFieldInputWrap: {
     paddingHorizontal: 20,

@@ -15,6 +15,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
+import { hapticLight } from '../utils/haptics';
 import { PixelFlag } from '../components/PixelFlag';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -356,6 +357,7 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
     const query = pendingSearchQuery;
     setShowMatchesFoundPopup(false);
     setPendingSearchQuery(null);
+    hapticLight();
     onApplySearchQuery?.(query);
     resetFreshPage();
   };

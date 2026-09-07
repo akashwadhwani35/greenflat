@@ -14,14 +14,13 @@ import { useTheme } from '../theme/ThemeProvider';
 import { PixelFlag } from '../components/PixelFlag';
 import { PageHeader } from '../components/PageHeader';
 import { NoticeModal, type Notice } from '../components/NoticeModal';
+import { hapticStrong } from '../utils/haptics';
 
 /**
- * The Profile tab, laid out per the "Greenflag edits" board: photo with an edit
- * badge, name and flag, Edit Profile, a completion bar, the three action tiles
- * (Boost, First Moves, Green Flags), then the plan picker with Upgrade.
- *
- * Settings is behind the gear; previewing your own card is under Settings →
- * Your profile.
+ * The Profile tab after round 8: photo with an edit badge, name and the
+ * face-verification flag, Edit Profile, a completion bar that counts every
+ * field, the plan box (bigger, and aware of the plan the person is on), and
+ * Boost at the bottom, moved here from the wallet.
  */
 type Props = {
   onBack: () => void;
@@ -29,8 +28,6 @@ type Props = {
   onEditProfile: () => void;
   onManagePhotos: () => void;
   onOpenSubscription: (tab: 'pro' | 'premium') => void;
-  onOpenLikes: () => void;
-  onOpenConversations: () => void;
   onOpenWallet?: () => void;
   token: string;
   apiBaseUrl: string;
@@ -40,9 +37,24 @@ type PlanTab = 'pro' | 'premium';
 
 const BOOST_COST = 20;
 
-const PLAN_COPY: Record<PlanTab, { title: string; blurb: string }> = {
-  pro: { title: 'Pro', blurb: 'Send unlimited likes & rewind anytime.' },
-  premium: { title: 'Premium', blurb: 'Everything in Pro, and you get seen first.' },
+const PLAN_COPY: Record<PlanTab, { title: string; blurb: string; perks: string[] }> = {
+  pro: {
+    title: 'Pro',
+    blurb: 'Send unlimited likes & rewind anytime.',
+    perks: ['Unlimited likes', 'Unlimited rewinds', 'More filters', '30 GFT every month'],
+  },
+  premium: {
+    title: 'Premium',
+    blurb: 'Everything in Pro, and you get seen first.',
+    perks: ['Everything in Pro', 'Seen first in AI Match', '3x more matches', '60 GFT every month'],
+  },
+};
+
+const filled = (value: unknown) => {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === 'boolean') return true;
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
+  return typeof value === 'string' && value.trim().length > 0;
 };
 
 export const ProfileScreen: React.FC<Props> = ({
@@ -51,26 +63,32 @@ export const ProfileScreen: React.FC<Props> = ({
   onEditProfile,
   onManagePhotos,
   onOpenSubscription,
-  onOpenLikes,
-  onOpenConversations,
   onOpenWallet,
   token,
   apiBaseUrl,
 }) => {
   const theme = useTheme();
   const [profile, setProfile] = useState<any>(null);
+  const [activePlan, setActivePlan] = useState<PlanTab | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<PlanTab>('pro');
   const [boosting, setBoosting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
-  const fetchProfile = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
-      const response = await fetch(`${apiBaseUrl}/profile/me`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await response.json().catch(() => ({}));
-      if (response.ok) setProfile(data);
+      const [profileResponse, walletResponse] = await Promise.all([
+        fetch(`${apiBaseUrl}/profile/me`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${apiBaseUrl}/wallet/summary`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const profileBody = await profileResponse.json().catch(() => ({}));
+      if (profileResponse.ok) setProfile(profileBody);
+      const walletBody = await walletResponse.json().catch(() => ({}));
+      if (walletResponse.ok) {
+        const plan = walletBody?.active_plan;
+        setActivePlan(plan === 'pro' || plan === 'premium' ? plan : null);
+        if (plan === 'pro') setSelectedPlan('premium');
+      }
     } catch (error) {
       console.warn('Failed to load profile:', error);
     } finally {
@@ -79,34 +97,52 @@ export const ProfileScreen: React.FC<Props> = ({
   }, [apiBaseUrl, token]);
 
   useEffect(() => {
-    void fetchProfile();
-  }, [fetchProfile]);
+    void fetchAll();
+  }, [fetchAll]);
 
   const user = profile?.user || {};
   const profileData = profile?.profile || {};
+  const personality = profile?.personality || {};
   const photos: any[] = Array.isArray(profile?.photos) ? profile.photos : [];
   const primaryPhoto = photos.find((p) => p?.is_primary) || photos[0];
-  const isVerified = Boolean(user.is_verified);
+  // Board 17: green only after face verification. The server now sets
+  // is_verified from the selfie check alone.
+  const isFaceVerified = Boolean(user.is_verified);
   const userName = user.name || 'You';
-  const interests: string[] = Array.isArray(profileData.interests) ? profileData.interests : [];
 
-  const completionSignals = [
+  // Board 21: every field the person can fill counts, so 100% means 100%.
+  const completionFields: unknown[] = [
     photos.length > 0,
-    photos.length >= 3,
-    Boolean(user.city),
-    Boolean(user.date_of_birth),
-    Boolean(user.gender),
-    Boolean(profileData.bio),
-    interests.length >= 3,
-    Boolean(profileData.height),
-    Boolean(profileData.relationship_goal),
-    Boolean(profileData.drinker),
-    Boolean(profileData.smoking_habit || typeof profileData.smoker === 'boolean'),
-    Boolean(profile?.personality?.personality_traits?.length),
+    photos.length >= 3 ? true : '',
+    user.name,
+    user.date_of_birth,
+    user.gender,
+    user.city,
+    user.pronouns,
+    profileData.bio,
+    profileData.prompt1,
+    profileData.interests,
+    profileData.languages,
+    profileData.occupation,
+    profileData.education,
+    profileData.hometown,
+    profileData.height,
+    profileData.fitness_level,
+    profileData.education_level,
+    profileData.drinker,
+    profileData.smoking_habit || (typeof profileData.smoker === 'boolean' ? 'set' : ''),
+    profileData.relationship_goal,
+    profileData.have_kids,
+    profileData.star_sign,
+    profileData.politics,
+    profileData.religion,
+    personality.personality_traits,
   ];
   const completionPercent = Math.round(
-    (completionSignals.filter(Boolean).length / completionSignals.length) * 100
+    (completionFields.filter(filled).length / completionFields.length) * 100
   );
+  // Board 26: keep the bubble inside the track at the ends.
+  const bubbleLeft = Math.min(Math.max(completionPercent, 6), 94);
 
   const premiumExpiresAt = user.premium_expires_at ? new Date(user.premium_expires_at).getTime() : null;
   const hasPaidPlan = Boolean(user.is_premium) && (premiumExpiresAt === null || premiumExpiresAt > Date.now());
@@ -157,6 +193,7 @@ export const ProfileScreen: React.FC<Props> = ({
   };
 
   const handleBoost = () => {
+    hapticStrong();
     if (isBoostActive) {
       setNotice({ title: 'Boost is on', message: `Your profile is boosted. ${boostTimeLeft()}.`, icon: 'zap' });
       return;
@@ -185,39 +222,16 @@ export const ProfileScreen: React.FC<Props> = ({
     );
   };
 
-  const tiles: Array<{
-    key: string;
-    label: string;
-    caption: string;
-    onPress: () => void;
-    icon: React.ReactNode;
-    highlighted?: boolean;
-  }> = [
-    {
-      key: 'boost',
-      label: 'Boost',
-      caption: isBoostActive ? boostTimeLeft() : hasPaidPlan ? 'Included' : `${BOOST_COST} GFT`,
-      onPress: handleBoost,
-      icon: <MaterialCommunityIcons name="rocket-launch-outline" size={26} color={theme.colors.neonGreen} />,
-      highlighted: isBoostActive,
-    },
-    {
-      key: 'first-moves',
-      label: 'First Moves',
-      caption: 'In your chats',
-      onPress: onOpenConversations,
-      icon: <Feather name="send" size={24} color={theme.colors.neonGreen} />,
-    },
-    {
-      key: 'green-flags',
-      label: 'Green Flags',
-      caption: 'In your inbox',
-      onPress: onOpenLikes,
-      icon: <PixelFlag size={26} color={theme.colors.neonGreen} />,
-    },
-  ];
-
-  const plan = PLAN_COPY[selectedPlan];
+  // Board 25: on Pro you are offered Premium only; on Premium nothing to buy.
+  const planTabs: PlanTab[] = activePlan === 'pro' ? ['premium'] : activePlan === 'premium' ? [] : ['pro', 'premium'];
+  const shownPlan: PlanTab = activePlan === 'premium' ? 'premium' : activePlan === 'pro' ? 'premium' : selectedPlan;
+  const plan = PLAN_COPY[shownPlan];
+  const planHeadline = activePlan === 'premium'
+    ? 'You are on Premium.'
+    : activePlan === 'pro'
+      ? 'You are on Pro. Premium gets you seen first.'
+      : plan.blurb;
+  const planCta = activePlan === 'premium' ? null : activePlan === 'pro' ? 'Upgrade to Premium' : 'Upgrade';
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -264,15 +278,15 @@ export const ProfileScreen: React.FC<Props> = ({
               <Typography variant="h1" style={{ color: theme.colors.text }} numberOfLines={1}>
                 {userName}
               </Typography>
-              <PixelFlag size={20} color={isVerified ? theme.colors.neonGreen : theme.colors.muted} />
+              <PixelFlag size={20} color={isFaceVerified ? theme.colors.neonGreen : theme.colors.muted} />
             </View>
 
             <TouchableOpacity
               onPress={onEditProfile}
-              style={[styles.editButton, { borderColor: theme.colors.text }]}
-              activeOpacity={0.8}
+              style={[styles.editButton, { backgroundColor: '#FFFFFF' }]}
+              activeOpacity={0.85}
             >
-              <Typography variant="small" style={{ color: theme.colors.text }}>
+              <Typography variant="small" style={{ color: '#000000', fontFamily: theme.fonts.bodyStrong.family }}>
                 Edit Profile
               </Typography>
             </TouchableOpacity>
@@ -282,7 +296,7 @@ export const ProfileScreen: React.FC<Props> = ({
           <View style={styles.progressBlock}>
             <View style={[styles.progressTrack, { backgroundColor: theme.colors.border }]}>
               <View style={[styles.progressFill, { width: `${completionPercent}%`, backgroundColor: theme.colors.neonGreen }]} />
-              <View style={[styles.progressBubble, { left: `${completionPercent}%`, backgroundColor: theme.colors.neonGreen }]}>
+              <View style={[styles.progressBubble, { left: `${bubbleLeft}%`, backgroundColor: theme.colors.neonGreen }]}>
                 <Typography variant="tiny" style={{ color: theme.colors.deepBlack, fontFamily: 'RedHatDisplay_700Bold' }}>
                   {completionPercent}%
                 </Typography>
@@ -293,66 +307,96 @@ export const ProfileScreen: React.FC<Props> = ({
             </Typography>
           </View>
 
-          {/* Boost / First Moves / Green Flags */}
-          <View style={styles.tileRow}>
-            {tiles.map((tile) => (
-              <TouchableOpacity
-                key={tile.key}
-                style={[
-                  styles.tile,
-                  { backgroundColor: theme.colors.charcoal, borderColor: tile.highlighted ? theme.colors.neonGreen : theme.colors.border },
-                ]}
-                onPress={tile.onPress}
-                activeOpacity={0.8}
-                disabled={tile.key === 'boost' && boosting}
-              >
-                <View style={styles.tileIcon}>{tile.icon}</View>
-                <Typography variant="small" style={{ color: theme.colors.text }} numberOfLines={1}>
-                  {tile.label}
-                </Typography>
-                <Typography variant="tiny" style={{ color: theme.colors.muted }} numberOfLines={1}>
-                  {tile.caption}
-                </Typography>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Plan picker */}
-          <View style={[styles.segment, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
-            {(['pro', 'premium'] as PlanTab[]).map((tab) => {
-              const active = selectedPlan === tab;
-              return (
-                <TouchableOpacity
-                  key={tab}
-                  style={[styles.segmentHalf, active && { backgroundColor: theme.colors.neonGreen }]}
-                  onPress={() => setSelectedPlan(tab)}
-                  activeOpacity={0.85}
-                >
-                  <Typography
-                    variant="bodyStrong"
-                    style={{ color: active ? theme.colors.deepBlack : theme.colors.text }}
+          {/* Plan picker (only the plans that are still an upgrade) */}
+          {planTabs.length > 1 ? (
+            <View style={[styles.segment, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+              {planTabs.map((tab) => {
+                const active = shownPlan === tab;
+                return (
+                  <TouchableOpacity
+                    key={tab}
+                    style={[styles.segmentHalf, active && { backgroundColor: theme.colors.neonGreen }]}
+                    onPress={() => setSelectedPlan(tab)}
+                    activeOpacity={0.85}
                   >
-                    {PLAN_COPY[tab].title}
-                  </Typography>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                    <Typography variant="bodyStrong" style={{ color: active ? theme.colors.deepBlack : theme.colors.text }}>
+                      {PLAN_COPY[tab].title}
+                    </Typography>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
 
           <View style={[styles.planCard, { borderColor: theme.colors.neonGreen, backgroundColor: theme.colors.charcoal }]}>
-            <Typography variant="body" style={{ color: theme.colors.text, textAlign: 'center' }}>
-              {hasPaidPlan ? `You are on ${plan.title}.` : plan.blurb}
-            </Typography>
-            <TouchableOpacity
-              style={[styles.upgradeButton, { backgroundColor: theme.colors.neonGreen }]}
-              onPress={() => onOpenSubscription(selectedPlan)}
-              activeOpacity={0.85}
-            >
-              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
-                {hasPaidPlan ? 'Manage plan' : 'Upgrade'}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <PixelFlag size={16} color={theme.colors.neonGreen} />
+              <Typography variant="h2" style={{ color: theme.colors.text }}>
+                {plan.title}
               </Typography>
-            </TouchableOpacity>
+            </View>
+            <Typography variant="body" style={{ color: theme.colors.text, textAlign: 'center' }}>
+              {planHeadline}
+            </Typography>
+            <View style={styles.perkList}>
+              {plan.perks.map((perk) => (
+                <View key={perk} style={styles.perkRow}>
+                  <Feather name="check" size={16} color={theme.colors.neonGreen} />
+                  <Typography variant="small" style={{ color: theme.colors.textDark }}>
+                    {perk}
+                  </Typography>
+                </View>
+              ))}
+            </View>
+            {planCta ? (
+              <TouchableOpacity
+                style={[styles.upgradeButton, { backgroundColor: theme.colors.neonGreen }]}
+                onPress={() => onOpenSubscription(shownPlan)}
+                activeOpacity={0.85}
+              >
+                <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+                  {planCta}
+                </Typography>
+              </TouchableOpacity>
+            ) : null}
           </View>
+
+          {/* Boost, moved here from the wallet (board 15.1) */}
+          <TouchableOpacity
+            style={[
+              styles.boostButton,
+              { backgroundColor: isBoostActive ? theme.colors.charcoal : theme.colors.neonGreen, borderColor: theme.colors.neonGreen },
+            ]}
+            onPress={handleBoost}
+            disabled={boosting}
+            activeOpacity={0.85}
+          >
+            {boosting ? (
+              <ActivityIndicator color={theme.colors.deepBlack} />
+            ) : (
+              <>
+                <MaterialCommunityIcons
+                  name="rocket-launch-outline"
+                  size={24}
+                  color={isBoostActive ? theme.colors.neonGreen : theme.colors.deepBlack}
+                />
+                <View style={{ alignItems: 'center' }}>
+                  <Typography
+                    variant="bodyStrong"
+                    style={{ color: isBoostActive ? theme.colors.neonGreen : theme.colors.deepBlack, letterSpacing: 1 }}
+                  >
+                    {isBoostActive ? 'BOOST ON' : 'BOOOOOOOST'}
+                  </Typography>
+                  <Typography
+                    variant="tiny"
+                    style={{ color: isBoostActive ? theme.colors.muted : 'rgba(16,29,19,0.7)' }}
+                  >
+                    {isBoostActive ? boostTimeLeft() : hasPaidPlan ? 'Included in your plan · 6 hours' : `Get seen by more people · ${BOOST_COST} GFT`}
+                  </Typography>
+                </View>
+              </>
+            )}
+          </TouchableOpacity>
         </ScrollView>
       )}
 
@@ -376,7 +420,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 140,
-    gap: 22,
+    gap: 20,
   },
   hero: {
     alignItems: 'center',
@@ -413,10 +457,9 @@ const styles = StyleSheet.create({
     maxWidth: '85%',
   },
   editButton: {
-    borderWidth: 1,
     borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 22,
+    paddingVertical: 9,
+    paddingHorizontal: 24,
   },
   progressBlock: {
     gap: 10,
@@ -442,25 +485,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
-  tileRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  tile: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 18,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-    gap: 4,
-  },
-  tileIcon: {
-    height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
   segment: {
     flexDirection: 'row',
     borderRadius: 999,
@@ -475,14 +499,37 @@ const styles = StyleSheet.create({
   },
   planCard: {
     borderWidth: 1.5,
-    borderRadius: 18,
-    padding: 18,
-    gap: 14,
+    borderRadius: 20,
+    paddingVertical: 24,
+    paddingHorizontal: 20,
+    gap: 16,
     alignItems: 'center',
+    minHeight: 260,
+  },
+  perkList: {
+    alignSelf: 'stretch',
+    gap: 8,
+    paddingHorizontal: 8,
+  },
+  perkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   upgradeButton: {
     borderRadius: 999,
-    paddingVertical: 12,
-    paddingHorizontal: 36,
+    paddingVertical: 13,
+    paddingHorizontal: 40,
+    marginTop: 4,
+  },
+  boostButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
   },
 });

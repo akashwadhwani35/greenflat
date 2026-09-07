@@ -84,3 +84,16 @@ export const initializeUserDefaults = async (client: any, userId: number) => {
     [userId]
   );
 };
+
+/**
+ * The app sends its install id as `x-device-id` (Android ID / iOS vendor id).
+ * Opaque, not secret; only used to notice one phone creating many accounts.
+ */
+export const deviceIdFromRequest = (req: { headers: Record<string, unknown> }): string | null => {
+  const raw = req.headers['x-device-id'];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9._:-]{8,128}$/.test(trimmed)) return null;
+  return trimmed;
+};

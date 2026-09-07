@@ -134,3 +134,27 @@ export const consumeCredits = async (
 
   return Number(updateResult.rows[0].credit_balance || 0);
 };
+
+/**
+ * Gives tokens back after a charged action failed to deliver (e.g. an AI search
+ * that errored after the token was taken). Ledgered as a credit so the wallet
+ * history shows both sides.
+ */
+export const refundCredits = async (
+  userId: number,
+  amount: number,
+  reason: string,
+  metadata: Record<string, unknown> = {}
+): Promise<number> => {
+  const result = await pool.query(
+    `UPDATE users SET credit_balance = credit_balance + $1::int, updated_at = NOW()
+     WHERE id = $2 RETURNING credit_balance`,
+    [amount, userId]
+  );
+  await pool.query(
+    `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
+     VALUES ($1, $2, 'credit', $3, $4)`,
+    [userId, amount, reason, JSON.stringify(metadata)]
+  );
+  return result.rows[0]?.credit_balance ?? 0;
+};

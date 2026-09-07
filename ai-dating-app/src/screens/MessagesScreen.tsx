@@ -24,6 +24,8 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { NoticeModal, type Notice } from '../components/NoticeModal';
 import { PixelFlag } from '../components/PixelFlag';
+import { hapticLight } from '../utils/haptics';
+import { toUploadableDataUrl } from '../utils/image';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
 import { useViewerProfile } from '../hooks/useViewerProfile';
 import { MatchCandidate } from './MatchboardScreen';
@@ -493,8 +495,16 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     const gif = isGifAsset(asset);
     const mimeType = gif ? 'image/gif' : (asset.mimeType || fallbackMimeType);
 
-    if (mediaType === 'image' && asset.base64) {
-      return `data:${mimeType};base64,${asset.base64}`;
+    if (mediaType === 'image' && gif && asset.base64) {
+      return `data:image/gif;base64,${asset.base64}`;
+    }
+    if (mediaType === 'image' && !gif) {
+      // Full-quality pick means a multi-megabyte camera photo; shrink it.
+      try {
+        return await toUploadableDataUrl(asset.uri);
+      } catch {
+        if (asset.base64) return `data:${mimeType};base64,${asset.base64}`;
+      }
     }
 
     const fileResponse = await fetch(asset.uri);
@@ -613,6 +623,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       recordingRef.current = recording;
       setIsRecording(true);
+      hapticLight();
     } catch (error: any) {
       Alert.alert('Could not record', error?.message || 'Please try again.');
     }
@@ -632,6 +643,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       // A tap rather than a hold produces a fraction of a second of silence.
       if ((status.durationMillis || 0) < 700) return;
       setSending(true);
+      hapticLight();
       const content = await uploadMediaAsset({ uri } as unknown as ImagePicker.ImagePickerAsset, 'voice');
       await sendMessage({ content, message_type: 'voice' });
     } catch (error: any) {
@@ -680,6 +692,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     const messageText = payload?.content ?? fallbackText;
     const messageType = payload?.message_type ?? 'text';
     if (!messageText) return;
+    hapticLight();
 
     if (messageType === 'text') {
       setNewMessage('');
@@ -833,6 +846,48 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     );
   };
 
+  // Board 3.2: the chat opens with the AI Summary and one line under it, and
+  // both scroll away with the conversation instead of sitting fixed above it.
+  const chatHeader = briefing ? (
+    <View style={styles.chatHeader}>
+      <TouchableOpacity
+        style={[styles.briefingCard, { borderColor: 'rgba(173, 255, 26, 0.35)', backgroundColor: 'rgba(173, 255, 26, 0.06)' }]}
+        onPress={openProfile}
+        activeOpacity={0.85}
+      >
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <PixelFlag size={14} color={theme.colors.neonGreen} />
+          <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
+            AI Summary
+          </Typography>
+        </View>
+        <Typography variant="small" style={{ color: theme.colors.textDark, lineHeight: 21 }}>
+          {briefing}
+        </Typography>
+      </TouchableOpacity>
+      <Typography variant="small" style={{ color: theme.colors.neonGreen, textAlign: 'center', fontStyle: 'italic' }}>
+        This could be the start of something great.
+      </Typography>
+    </View>
+  ) : null;
+
+  const emptyConversation = (
+    <View style={styles.emptyContainer}>
+      <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(173, 255, 26, 0.1)' }]}>
+        <Feather name="message-circle" size={40} color={theme.colors.neonGreen} />
+      </View>
+      <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 24 }}>
+        Start the conversation
+      </Typography>
+      <Typography
+        variant="body"
+        style={{ color: theme.colors.muted, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}
+      >
+        Say hello to {matchName}!
+      </Typography>
+    </View>
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <StatusBar barStyle="light-content" />
@@ -852,41 +907,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* AI summary first, then the person in a glance, then the conversation. */}
-      {snapshot || briefing ? (
-        <TouchableOpacity style={[styles.snapshot, { backgroundColor: theme.colors.deepBlack, borderBottomColor: theme.colors.border }]} onPress={openProfile} activeOpacity={0.85}>
-          {briefing ? (
-            <View style={[styles.briefingCard, { borderColor: 'rgba(173, 255, 26, 0.35)', backgroundColor: 'rgba(173, 255, 26, 0.06)' }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <PixelFlag size={14} color={theme.colors.neonGreen} />
-                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>
-                  AI Summary
-                </Typography>
-              </View>
-              <Typography variant="small" style={{ color: theme.colors.textDark, lineHeight: 21 }}>
-                {briefing}
-              </Typography>
-            </View>
-          ) : null}
-          {snapshot ? (
-          <Typography variant="small" style={{ color: theme.colors.muted }}>
-            {[snapshot.age ? `${snapshot.age}` : null, snapshot.city || null, snapshot.goal ? `Looking for ${String(snapshot.goal).replace(/[_-]/g, ' ')}` : null].filter(Boolean).join(' · ')}
-          </Typography>
-          ) : null}
-          {snapshot && snapshot.interests.length > 0 ? (
-            <View style={styles.snapshotChips}>
-              {snapshot.interests.map((i) => (
-                <View key={`snap-${i}`} style={[styles.snapshotChip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
-                  <Typography variant="tiny" style={{ color: theme.colors.textDark }}>{String(i).replace(/[_-]/g, ' ')}</Typography>
-                </View>
-              ))}
-            </View>
-          ) : null}
-          <Typography variant="small" style={{ color: theme.colors.neonGreen }}>
-            This could be the start of something great.
-          </Typography>
-        </TouchableOpacity>
-      ) : null}
 
       {/* Menu Popup */}
       <Modal
@@ -967,27 +987,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={theme.colors.neonGreen} />
         </View>
-      ) : messages.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(173, 255, 26, 0.1)' }]}>
-            <Feather name="message-circle" size={40} color={theme.colors.neonGreen} />
-          </View>
-          <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 24 }}>
-            Start the conversation
-          </Typography>
-          <Typography
-            variant="body"
-            style={{ color: theme.colors.muted, marginTop: 12, textAlign: 'center', paddingHorizontal: 40 }}
-          >
-            Say hello to {matchName}!
-          </Typography>
-        </View>
       ) : (
         <FlatList
           ref={flatListRef}
           data={messages}
           renderItem={renderMessage}
           keyExtractor={(item) => item.id.toString()}
+          ListHeaderComponent={chatHeader}
+          ListEmptyComponent={emptyConversation}
           style={styles.messagesList}
           contentContainerStyle={styles.messagesContent}
           onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
@@ -1092,7 +1099,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 // The crop step re-encodes the picture, which turned every GIF
                 // into a still JPEG. Chat photos do not need cropping.
                 allowsEditing: false,
-                quality: 0.5,
+                // Below 1 the Android picker re-encodes through a bitmap and a GIF
+                // comes out as a still PNG. Full quality copies the file as-is;
+                // ordinary photos are downscaled below before upload.
+                quality: 1,
                 base64: true,
               });
               if (!result.canceled && result.assets[0]) {
@@ -1239,10 +1249,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   emptyContainer: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
+    paddingVertical: 40,
+  },
+  chatHeader: {
+    gap: 12,
+    marginBottom: 16,
   },
   emptyIconCircle: {
     width: 100,

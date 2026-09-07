@@ -544,6 +544,46 @@ describe('GreenFlag backend core flow', () => {
     expect(afterReject.body.likes).toEqual([]);
   });
 
+  it('refuses throwaway inboxes in the signup funnel', async () => {
+    const start = await agent.post('/api/auth/register/start').send({});
+    expect(start.status).toBe(201);
+    const token = start.body.registration_token;
+
+    const throwaway = await agent
+      .post('/api/auth/register/email')
+      .send({ registration_token: token, email: `bot_${Date.now()}@mailinator.com` });
+    expect(throwaway.status).toBe(400);
+    expect(throwaway.body.error).toMatch(/temporary email/i);
+  });
+
+  it('charges one token per query and not again for a retry within minutes', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `pay_once_${Date.now()}@example.com`,
+      name: 'Pay Once',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    await signupAndCompleteProfile({
+      email: `pay_once_target_${Date.now()}@example.com`,
+      name: 'Pay Once Target',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    // Two identical charged searches: the ledger must show at most one debit.
+    for (let i = 0; i < 2; i += 1) {
+      const search = await agent
+        .post('/api/matches/search')
+        .set('Authorization', `Bearer ${seeker.token}`)
+        .send({ search_query: 'kind and funny', is_on_grid: true, charge_credits: true, filters: {} });
+      expect(search.status).toBe(200);
+    }
+    const debits = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM credit_transactions WHERE user_id = $1 AND reason = 'ai_search'`,
+      [seeker.userId]
+    );
+    expect(debits.rows[0].n).toBeLessThanOrEqual(1);
+  });
+
   it('blocks a banned user on their existing token, not just at login', async () => {
     const user = await signupAndCompleteProfile({
       email: `banned_${Date.now()}@example.com`,
@@ -807,8 +847,10 @@ describe('GreenFlag backend core flow', () => {
     expect(verify.status).toBe(200);
     expect(verify.body.verification.email_verified).toBe(true);
 
+    // Board rule 17/22: the flag next to a name means face-verified, so an
+    // email code must not light it up.
     const flag = await pool.query('SELECT is_verified FROM users WHERE id = $1', [user.userId]);
-    expect(flag.rows[0].is_verified).toBe(true);
+    expect(flag.rows[0].is_verified).toBe(false);
   });
 
   it('rejects a malformed email for OTP', async () => {

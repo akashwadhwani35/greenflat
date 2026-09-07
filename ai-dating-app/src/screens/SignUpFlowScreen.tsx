@@ -17,6 +17,7 @@ import { Typography } from '../components/Typography';
 import { UnderlineInput } from '../components/UnderlineInput';
 import { Button } from '../components/Button';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { getDeviceId } from '../utils/deviceId';
 import { useTheme } from '../theme/ThemeProvider';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -229,7 +230,8 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
   const post = async (path: string, body: Record<string, unknown>) => {
     const response = await fetch(`${apiBaseUrl}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      // The install id lets the server notice one phone creating many accounts.
+      headers: { 'Content-Type': 'application/json', 'x-device-id': (await getDeviceId()) || '' },
       body: JSON.stringify({ registration_token: registrationToken, ...body }),
     });
     const data = await response.json().catch(() => ({}));

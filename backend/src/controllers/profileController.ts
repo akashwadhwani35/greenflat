@@ -375,7 +375,8 @@ export const getProfile = async (req: AuthRequest, res: Response) => {
     // Get user data
     const userResult = await pool.query(
       `SELECT id, email, name, gender, interested_in, orientation, pronouns, date_of_birth, city, distance_radius,
-              is_verified, is_premium, premium_expires_at, boost_expires_at, credit_balance, cooldown_enabled
+              is_verified, is_premium, premium_expires_at, boost_expires_at, credit_balance, cooldown_enabled,
+              (onboarding_completed_at IS NOT NULL) AS onboarding_completed
        FROM users
        WHERE id = $1`,
       [userId]

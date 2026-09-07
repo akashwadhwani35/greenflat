@@ -1,3 +1,5 @@
+import crypto from 'crypto';
+import { deviceIdFromRequest } from '../services/accounts.service';
 import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
@@ -87,7 +89,8 @@ export const verifyOtp = async (req: AuthRequest, res: Response) => {
       return res.status(outcome.status).json({ error: outcome.error });
     }
 
-    await pool.query('UPDATE users SET is_verified = TRUE WHERE id = $1', [userId]);
+    // The green flag means face-verified (board rule 17/22), so an OTP no longer
+    // touches users.is_verified.
 
     const statusResult = target.channel === 'email'
       ? await pool.query(
@@ -150,6 +153,36 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
       return res.status(400).json({ error: 'Upload a profile photo before selfie verification' });
     }
 
+    // Spam-account guard, cheap version. A verified selfie leaves a fingerprint:
+    // the exact bytes (so the same file cannot verify a second account) and the
+    // device it came from (so one phone cannot verify a stack of accounts).
+    // A real "same face, different photo" check needs a face-embedding service;
+    // this stops the lazy cases without paying for that yet.
+    const selfieHash = crypto.createHash('sha256').update(String(photo_url)).digest('hex');
+    const deviceId = deviceIdFromRequest(req);
+    const reuse = await pool.query(
+      `SELECT u.id
+         FROM users u
+         JOIN verification_status vs ON vs.user_id = u.id
+        WHERE u.id <> $1
+          AND vs.face_status = 'verified'
+          AND (vs.selfie_hash = $2 OR ($3::text IS NOT NULL AND u.device_id = $3::text))
+        LIMIT 1`,
+      [userId, selfieHash, deviceId]
+    );
+    if (reuse.rows.length > 0) {
+      await pool.query(
+        `INSERT INTO verification_status (user_id, face_status, age_verified, updated_at)
+         VALUES ($1, 'failed', FALSE, NOW())
+         ON CONFLICT (user_id) DO UPDATE SET face_status = 'failed', age_verified = FALSE, updated_at = NOW()`,
+        [userId]
+      );
+      return res.status(409).json({
+        error: 'This face or device is already verified on another GreenFlag account.',
+        duplicate_account: true,
+      });
+    }
+
     const result = await analyzeSelfieAgainstProfile(photo_url, profilePhotoUrls);
     if (!result.isAdult || !result.isMatch) {
       await pool.query(
@@ -165,10 +198,15 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
     }
 
     await pool.query(
-      `INSERT INTO verification_status (user_id, face_status, age_verified, updated_at)
-       VALUES ($1, 'verified', TRUE, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET face_status = 'verified', age_verified = TRUE, updated_at = NOW()`,
-      [userId]
+      `INSERT INTO verification_status (user_id, face_status, age_verified, selfie_hash, updated_at)
+       VALUES ($1, 'verified', TRUE, $2, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET face_status = 'verified', age_verified = TRUE, selfie_hash = $2, updated_at = NOW()`,
+      [userId, selfieHash]
+    );
+    // The green flag next to the name.
+    await pool.query(
+      'UPDATE users SET is_verified = TRUE, device_id = COALESCE($2, device_id) WHERE id = $1',
+      [userId, deviceId]
     );
 
     res.json({

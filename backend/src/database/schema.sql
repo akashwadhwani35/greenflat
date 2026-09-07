@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS users (
     is_admin BOOLEAN DEFAULT FALSE,
     is_banned BOOLEAN DEFAULT FALSE,
     is_shadow_banned BOOLEAN DEFAULT FALSE,
+    device_id VARCHAR(128),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -205,6 +206,7 @@ CREATE TABLE IF NOT EXISTS search_history (
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     search_query TEXT NOT NULL,
     filters JSONB, -- Store filters as JSON
+    charged BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -377,6 +379,7 @@ CREATE TABLE IF NOT EXISTS verification_status (
     location_lat DECIMAL(10, 8),
     location_lng DECIMAL(11, 8),
     location_city TEXT,
+    selfie_hash VARCHAR(64),
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

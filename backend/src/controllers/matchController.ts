@@ -6,7 +6,7 @@ import { ANSWER_COLUMNS, describeAnswers } from '../utils/personalityQuestions';
 import { generateMatchBriefing } from '../services/openai.service';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
-import { consumeCredits, getCreditBalance, ensureDailyAllowance } from '../services/credits.service';
+import { consumeCredits, getCreditBalance, ensureDailyAllowance, refundCredits } from '../services/credits.service';
 
 // AI Match is the curated set. Anything the scorer puts under this is not a
 // recommendation worth making; it stays available to search and off-grid.
@@ -194,6 +194,10 @@ const calculateMatchPercentage = (
 };
 
 export const searchMatches = async (req: AuthRequest, res: Response) => {
+  // Hoisted so the outer catch can refund a token taken earlier in the request.
+  let chargedNow = false;
+  let normalizedSearchQueryForRefund = '';
+  const userId = req.userId!;
   try {
     const userId = req.userId!;
     const { search_query, filters = {}, exclude_ids = [], is_on_grid, limit } = req.body as {
@@ -205,6 +209,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       charge_credits?: boolean;
     };
     const chargeCredits = Boolean((req.body as any)?.charge_credits);
+    normalizedSearchQueryForRefund = String((req.body as any)?.search_query || '').trim();
 
     // Top up the free allowance before anything reads or spends the balance.
     await ensureDailyAllowance(userId);
@@ -221,7 +226,29 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const aiInferredFilterKeys: Array<keyof SearchFilters> = [];
 
     if (isAIEnabled && search_query && search_query.trim().length > 0) {
-      aiParsedQuery = await parseSearchQuery(search_query);
+      // "Someone who matches my vibe" means nothing to the parser on its own.
+      // Resolve "me" into the seeker's own traits and interests before parsing.
+      let parserInput = search_query;
+      if (/\b(my vibe|mera vibe|meri vibe|like me|similar to me|same as me|my type|my kind of person|matches me)\b/i.test(search_query)) {
+        const me = await pool.query(
+          `SELECT p.interests, pr.top_traits, pr.personality_traits, p.relationship_goal
+             FROM users u
+             LEFT JOIN user_profiles p ON p.user_id = u.id
+             LEFT JOIN personality_responses pr ON pr.user_id = u.id
+            WHERE u.id = $1`,
+          [userId]
+        );
+        const row = me.rows[0] || {};
+        const traits = Array.from(new Set([...(row.top_traits || []), ...(row.personality_traits || [])])).slice(0, 8);
+        const interests = (row.interests || []).slice(0, 8);
+        const bits = [
+          traits.length ? `personality: ${traits.join(', ')}` : '',
+          interests.length ? `interests: ${interests.join(', ')}` : '',
+          row.relationship_goal ? `looking for: ${row.relationship_goal}` : '',
+        ].filter(Boolean);
+        if (bits.length) parserInput = `${search_query}. My own vibe is: ${bits.join('; ')}.`;
+      }
+      aiParsedQuery = await parseSearchQuery(parserInput);
 
       const applyInferred = <K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) => {
         if (value === undefined || value === null) return;
@@ -748,7 +775,21 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     // Charge only when we are returning visible on-grid profiles AND the AI
     // actually ran. If every model call fell back to canned copy, the search was
     // keyword matching, so billing a token for it would be charging for nothing.
-    if (shouldChargeForAISearch && onGridWithReasons.length > 0 && aiDidRealWork) {
+    // A retry of the same words within a few minutes is free: the app may resend
+    // after a timeout, and the person should never pay twice for one search.
+    let alreadyPaid = false;
+    if (shouldChargeForAISearch) {
+      const paid = await pool.query(
+        `SELECT 1 FROM search_history
+          WHERE user_id = $1 AND charged = TRUE AND LOWER(search_query) = LOWER($2)
+            AND created_at > NOW() - INTERVAL '10 minutes'
+          LIMIT 1`,
+        [userId, normalizedSearchQuery]
+      );
+      alreadyPaid = paid.rows.length > 0;
+    }
+
+    if (shouldChargeForAISearch && !alreadyPaid && onGridWithReasons.length > 0 && aiDidRealWork) {
       try {
         remainingCredits = await consumeCredits(
           userId,
@@ -756,6 +797,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
           'ai_search',
           { search_query: normalizedSearchQuery, on_grid_results: onGridWithReasons.length }
         );
+        chargedNow = true;
       } catch (error: any) {
         if (error.message === 'INSUFFICIENT_CREDITS') {
           return res.status(402).json({ error: 'Not enough tokens. AI Search costs 1 token.' });
@@ -768,8 +810,8 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
 
     // Save search history
     await pool.query(
-      'INSERT INTO search_history (user_id, search_query, filters) VALUES ($1, $2, $3)',
-      [userId, search_query || '', JSON.stringify(enhancedFilters)]
+      'INSERT INTO search_history (user_id, search_query, filters, charged) VALUES ($1, $2, $3, $4)',
+      [userId, search_query || '', JSON.stringify(enhancedFilters), chargedNow || alreadyPaid]
     );
 
     // Record the off-grid set that is about to be shown, so Rewind can bring it
@@ -842,6 +884,14 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       });
     }
   } catch (error) {
+    if (chargedNow) {
+      // The token was taken but the results never went out: give it back.
+      try {
+        await refundCredits(userId, TOKEN_COSTS.AI_SEARCH, 'ai_search_refund', { search_query: normalizedSearchQueryForRefund });
+      } catch (refundError) {
+        console.error('AI search refund failed:', refundError);
+      }
+    }
     console.error('Search matches error:', error);
     res.status(500).json({ error: 'Failed to search matches' });
   }

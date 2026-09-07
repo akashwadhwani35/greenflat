@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { clearOnboardingDraft, loadOnboardingDraft, saveOnboardingDraft } from '../utils/session';
 import {
   ActivityIndicator,
   Alert,
@@ -186,6 +187,62 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
   useEffect(() => {
     scrollRef.current?.scrollTo({ y: 0, animated: false });
   }, [step, quizIndex]);
+
+  // Board 1.1 / 2.1: an app kill mid-onboarding used to restart at step one
+  // with everything typed gone. The draft (step, question, every answer) is
+  // saved on each change and restored on the next open of this account.
+  const draftReadyRef = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    const restore = async () => {
+      if (!existingUserId) { draftReadyRef.current = true; return; }
+      const draft = await loadOnboardingDraft(existingUserId);
+      if (cancelled) return;
+      if (draft) {
+        setForm((prev) => ({ ...prev, ...(draft.form as Partial<typeof prev>) }));
+        if (Number.isFinite(draft.step)) setStep(Math.max(0, Math.min(draft.step, allSlides.length - 1)));
+        if (Number.isFinite(draft.quizIndex)) setQuizIndex(Math.max(0, draft.quizIndex));
+      }
+      draftReadyRef.current = true;
+    };
+    void restore();
+    return () => { cancelled = true; };
+  }, [existingUserId]);
+
+  useEffect(() => {
+    if (!existingUserId || !draftReadyRef.current) return;
+    const handle = setTimeout(() => {
+      void saveOnboardingDraft(existingUserId, { step, quizIndex, form: form as unknown as Record<string, unknown> });
+    }, 400);
+    return () => clearTimeout(handle);
+  }, [existingUserId, step, quizIndex, form]);
+
+  // Board 2.1: the name, gender and birthday reach the server as soon as the
+  // first step is done, so an abandoned onboarding never shows "GreenFlag User".
+  const persistStepToServer = async (key: SlideKey) => {
+    if (!existingToken) return;
+    const body: Record<string, unknown> = {};
+    if (key === 'basic') {
+      if (form.name.trim()) body.name = form.name.trim();
+      if (form.gender) body.gender = form.gender;
+      if (form.dateOfBirth) body.date_of_birth = form.dateOfBirth;
+      if (form.pronouns.length) body.pronouns = form.pronouns;
+    } else if (key === 'intentions') {
+      if (form.interestedIn) body.interested_in = form.interestedIn;
+    } else if (key === 'location') {
+      if (form.city && form.cityConfirmed) body.city = form.city;
+    }
+    if (Object.keys(body).length === 0) return;
+    try {
+      await fetch(`${apiBaseUrl}/profile/basic`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${existingToken}` },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      // The full submit at the end carries everything anyway.
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -429,6 +486,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       setLoading(true);
       try {
         const result = await submitToBackend();
+        if (existingUserId) void clearOnboardingDraft(existingUserId);
         onComplete({ token: result.token, name: form.name.trim(), userId: result.userId });
       } catch (error: any) {
         Alert.alert('Error', error.message || 'Something went wrong finishing setup.');
@@ -438,6 +496,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       return;
     }
 
+    void persistStepToServer(slides[step].key);
     setStep((prev) => Math.min(prev + 1, slides.length - 1));
   };
 
@@ -450,6 +509,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     setLoading(true);
     try {
       const result = await submitToBackend({ skipFaceCheck: true });
+      if (existingUserId) void clearOnboardingDraft(existingUserId);
       onComplete({ token: result.token, name: form.name.trim(), userId: result.userId });
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Something went wrong finishing setup.');

@@ -6,6 +6,7 @@ import { Typography } from '../components/Typography';
 import { Button } from '../components/Button';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
+import { getDeviceId } from '../utils/deviceId';
 
 type Props = {
   onBack: () => void;
@@ -91,6 +92,8 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
+          // Lets the server notice one phone verifying many accounts.
+          'x-device-id': (await getDeviceId()) || '',
         },
         body: JSON.stringify({ photo_url: selfiePayload }),
       });

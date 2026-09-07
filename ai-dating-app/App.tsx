@@ -42,7 +42,8 @@ import { AISearchScreen } from './src/screens/AISearchScreen';
 import { DeleteAccountScreen } from './src/screens/DeleteAccountScreen';
 import { SubscriptionScreen } from './src/screens/SubscriptionScreen';
 import { PausedBanner } from './src/components/PausedBanner';
-import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown, loadPassedIds, savePassedIds, loadSubscriptionNudgeShownAt, markSubscriptionNudgeShown } from './src/utils/session';
+import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown, loadPassedIds, savePassedIds, loadSubscriptionNudgeShownAt, markSubscriptionNudgeShown, loadLastSearch } from './src/utils/session';
+import { hapticLight, hapticStrong } from './src/utils/haptics';
 import { configurePurchases, logOutPurchases } from './src/services/purchases';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
@@ -216,6 +217,8 @@ const AppShell: React.FC = () => {
     await resetPerAccountState(id);
 
     if (firstSearchDone) {
+      const last = await loadLastSearch(id);
+      if (last?.query) setAdvancedFilters((prev) => ({ ...prev, keywords: last.query }));
       setOverlay(null);
       setActiveTab('explore');
       const sessionToken = authRef.current.token;
@@ -330,6 +333,21 @@ const AppShell: React.FC = () => {
           if (session.user.id) {
             // RevenueCat is keyed by our user id so the backend can verify purchases.
             await configurePurchases(session.user.id);
+            // Board 1.1: an app kill during onboarding used to land on the main
+            // screen with a placeholder profile. Ask the server where they are.
+            let onboardingDone = true;
+            try {
+              const me = await fetch(`${API_BASE_URL}/profile/me`, { headers: { Authorization: `Bearer ${session.token}` } });
+              const body = await me.json().catch(() => ({}));
+              if (me.ok && body?.user?.onboarding_completed === false) onboardingDone = false;
+              if (me.ok && typeof body?.user?.name === 'string' && body.user.name) setUserName(body.user.name);
+            } catch {
+              // Offline: fall through to the main screen as before.
+            }
+            if (!onboardingDone) {
+              setStage('onboarding');
+              return;
+            }
             await applyEntryPointForUser(session.user.id);
             void maybeShowWelcome(session.user.id);
           }
@@ -466,6 +484,7 @@ const AppShell: React.FC = () => {
    */
   const likeFromList = async (targetUserId: number, isOnGrid = false) => {
     if (!authToken) return;
+    hapticLight();
     try {
       const response = await fetch(`${API_BASE_URL}/likes`, {
         method: 'POST',
@@ -538,6 +557,7 @@ const AppShell: React.FC = () => {
     actionInFlightRef.current = true;
 
     const answeredFromInbox = profileRespondMode;
+    hapticLight();
     handleCloseProfile(true);
 
     try {
@@ -568,7 +588,6 @@ const AppShell: React.FC = () => {
         });
         setShowMatchModal(true);
       } else {
-        setNotice({ title: 'Liked', message: `${selectedMatch.name} will be notified. We'll let you know if it's a match.`, icon: 'heart' });
         setTimeout(() => setSelectedMatch(null), 300);
       }
     } catch (error: any) {
@@ -590,6 +609,7 @@ const AppShell: React.FC = () => {
     actionInFlightRef.current = true;
 
     const answeredFromInbox = profileRespondMode;
+    hapticStrong();
     handleCloseProfile(true);
 
     try {
@@ -979,8 +999,6 @@ const AppShell: React.FC = () => {
             onEditProfile={() => setOverlay('profileEdit')}
             onManagePhotos={() => setOverlay('photos')}
             onOpenSubscription={(tab) => { setSubscriptionTab(tab); setOverlay('subscription'); }}
-            onOpenLikes={() => setOverlay('likes')}
-            onOpenConversations={() => setOverlay('conversations')}
             onOpenWallet={() => setOverlay('wallet')}
           />
         );
@@ -1088,6 +1106,7 @@ const AppShell: React.FC = () => {
                 onConsumeAISearchCharge={() => setPendingAISearchCharge(false)}
                 likedIds={likedProfileIds}
                 passedIds={passedProfileIds}
+                userId={userId}
               />
             )}
             <ProfileDetailScreen

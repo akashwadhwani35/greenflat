@@ -186,3 +186,19 @@ export const sendOtpEmail = async (to: string, code: string): Promise<void> => {
     throw new Error(`Email delivery failed: ${detail.slice(0, 200)}`);
   }
 };
+
+// Throwaway inbox providers. Not exhaustive; it removes the lazy path for bot
+// signups without touching real providers.
+const DISPOSABLE_EMAIL_DOMAINS = new Set([
+  'mailinator.com', 'guerrillamail.com', 'guerrillamail.net', '10minutemail.com', '10minutemail.net',
+  'tempmail.com', 'temp-mail.org', 'temp-mail.io', 'throwawaymail.com', 'yopmail.com', 'yopmail.fr',
+  'trashmail.com', 'trashmail.me', 'getnada.com', 'dispostable.com', 'fakeinbox.com', 'sharklasers.com',
+  'maildrop.cc', 'mailnesia.com', 'mintemail.com', 'mohmal.com', 'tempr.email', 'emailondeck.com',
+  'moakt.com', 'burnermail.io', 'mailsac.com', 'inboxkitten.com', 'tmpmail.org', 'tmpmail.net', 'tmails.net',
+]);
+
+export const isDisposableEmail = (email: string): boolean => {
+  const at = email.lastIndexOf('@');
+  if (at === -1) return false;
+  return DISPOSABLE_EMAIL_DOMAINS.has(email.slice(at + 1).toLowerCase());
+};

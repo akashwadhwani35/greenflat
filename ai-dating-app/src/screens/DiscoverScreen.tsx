@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { loadLastSearch, saveLastSearch } from '../utils/session';
 import { Alert, View, StyleSheet, ScrollView, TouchableOpacity, Image, Platform, StatusBar, ActivityIndicator, Dimensions, RefreshControl, Animated } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -51,6 +52,8 @@ type DiscoverScreenProps = {
   likedIds?: Set<number>;
   /** Rejected from the profile screen: gone from the grid straight away. */
   passedIds?: Set<number>;
+  /** Keys the on-device cache of the last AI Match results. */
+  userId?: number | null;
 };
 
 const fallbackPhotos = [
@@ -111,6 +114,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   onConsumeAISearchCharge,
   likedIds,
   passedIds,
+  userId,
 }) => {
   const theme = useTheme();
   const [activeTab, setActiveTab] = useState<'onGrid' | 'offGrid'>('onGrid');
@@ -142,6 +146,11 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   // to refetch, which excluded everything already seen, so the tab showed
   // fewer tiles each time until it showed none.
   const offGridCacheRef = useRef<MatchCandidate[]>([]);
+  // Board 4.2: Explore should not repeat the people already on AI Match.
+  const onGridIdsRef = useRef<number[]>([]);
+  // Board 8.2: a search is one of idle / searching / done / failed / timed out.
+  const [searchError, setSearchError] = useState<'timeout' | 'failed' | null>(null);
+  const SEARCH_TIMEOUT_MS = 30000;
 
   const fetchNewOffGridProfiles = useCallback(async () => {
     setLoading(true);
@@ -156,14 +165,27 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         },
         body: JSON.stringify({
           is_on_grid: false,
-          exclude_ids: viewedProfileIds, // Exclude already seen profiles
+          // Already seen here, plus whoever AI Match is showing right now.
+          exclude_ids: Array.from(new Set([...viewedProfileIds, ...onGridIdsRef.current])),
           limit: 4,
         }),
       });
 
       if (response.ok) {
         const data = await response.json();
-        const newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
+        let newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
+        if (newProfiles.length === 0 && onGridIdsRef.current.length > 0) {
+          // Small community: nobody left outside AI Match. Overlap beats an empty grid.
+          const retry = await fetch(`${apiBaseUrl}/matches/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ is_on_grid: false, exclude_ids: viewedProfileIds, limit: 4 }),
+          });
+          if (retry.ok) {
+            const retryData = await retry.json();
+            newProfiles = (retryData.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
+          }
+        }
         if (matches.length > 0) {
           setOffGridHistory((prev) => [...prev.slice(-9), matches]);
         }
@@ -229,16 +251,37 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   // AI Match only ever shows what a search asked for.
   const hasSearchQuery = Boolean(filters?.keywords?.trim());
 
-  const fetchOnGridMatches = useCallback(async () => {
-    if (!filters?.keywords?.trim()) {
+  const fetchOnGridMatches = useCallback(async (options: { force?: boolean } = {}) => {
+    const query = filters?.keywords?.trim() || '';
+    if (!query) {
       setMatches([]);
+      onGridIdsRef.current = [];
       setLoading(false);
       setRefreshing(false);
       return;
     }
+    setSearchError(null);
+
+    // Board 7.1: the last results stay until the next search, across app
+    // restarts. A new search (pending charge) or a pull-to-refresh goes to the
+    // server; anything else reads the cache.
+    if (!pendingAISearchCharge && !options.force && userId) {
+      const cached = await loadLastSearch(userId);
+      if (cached && cached.query === query && cached.matches.length > 0) {
+        const restored = (cached.matches as MatchCandidate[]).map((item) => ({ ...item, is_on_grid: true }));
+        setMatches(restored);
+        onGridIdsRef.current = restored.map((m) => m.id);
+        setLoading(false);
+        setRefreshing(false);
+        return;
+      }
+    }
+
     setLoading(true);
     setRefreshing(true);
     let reachedServer = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
     try {
       const response = await fetch(`${apiBaseUrl}/matches/search`, {
         method: 'POST',
@@ -248,10 +291,11 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         },
         body: JSON.stringify({
           is_on_grid: true,
-          search_query: filters?.keywords?.trim() || '',
+          search_query: query,
           charge_credits: pendingAISearchCharge,
           filters: buildBackendFilters(),
         }),
+        signal: controller.signal,
       });
       reachedServer = true;
 
@@ -259,22 +303,30 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         const data = await response.json();
         const newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: true }));
         setMatches(newProfiles);
+        onGridIdsRef.current = newProfiles.map((m: MatchCandidate) => m.id);
+        if (userId) void saveLastSearch(userId, { query, matches: newProfiles });
       } else {
         const body = await response.json().catch(() => ({}));
         if (response.status === 402) {
           Alert.alert('Not enough tokens', body.error || 'AI Search costs 1 token.');
+        } else {
+          setSearchError('failed');
         }
       }
-    } catch (error) {
+    } catch (error: any) {
+      // The server charges once per query and refunds on its own failures, so
+      // Retry is always safe to offer.
+      setSearchError(error?.name === 'AbortError' ? 'timeout' : 'failed');
       console.error('Failed to fetch on-grid profiles:', error);
     } finally {
+      clearTimeout(timer);
       if (pendingAISearchCharge && reachedServer) {
         onConsumeAISearchCharge?.();
       }
       setLoading(false);
       setRefreshing(false);
     }
-  }, [apiBaseUrl, token, filters?.keywords, buildBackendFilters, pendingAISearchCharge, onConsumeAISearchCharge]);
+  }, [apiBaseUrl, token, filters?.keywords, buildBackendFilters, pendingAISearchCharge, onConsumeAISearchCharge, userId]);
 
   const fetchWalletBalance = useCallback(async () => {
     try {
@@ -295,8 +347,8 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
       // For off-grid: fetch NEW profiles
       fetchNewOffGridProfiles();
     } else {
-      // For on-grid: just reload current matches
-      fetchOnGridMatches();
+      // For on-grid: ask the server again (free: same query, already paid)
+      fetchOnGridMatches({ force: true });
     }
   }, [activeTab, fetchNewOffGridProfiles, fetchOnGridMatches]);
 
@@ -512,10 +564,12 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
               disabled={!isPremium}
               activeOpacity={0.8}
             >
-              <Feather name="rotate-ccw" size={20} color="#FFD700" />
-              <View style={styles.rewindPremiumBadge}>
-                <Feather name="star" size={10} color={theme.colors.deepBlack} />
-              </View>
+              <Feather name="rotate-ccw" size={20} color={theme.colors.text} />
+              {!isPremium ? (
+                <View style={[styles.rewindPremiumBadge, { backgroundColor: theme.colors.neonGreen }]}>
+                  <Feather name="star" size={10} color={theme.colors.deepBlack} />
+                </View>
+              ) : null}
             </TouchableOpacity>
           )}
 
@@ -583,6 +637,29 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
             ))}
           </View>
         </ScrollView>
+      ) : activeTab === 'onGrid' && searchError ? (
+        <View style={styles.emptyContainer}>
+          <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(255, 107, 107, 0.12)' }]}>
+            <Feather name="wifi-off" size={36} color={theme.colors.error} />
+          </View>
+          <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 24, marginBottom: 12 }}>
+            {searchError === 'timeout' ? 'That took too long' : 'Search did not go through'}
+          </Typography>
+          <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', paddingHorizontal: 40 }}>
+            {searchError === 'timeout'
+              ? 'The AI did not answer in time. Your token is safe. Try again.'
+              : 'Something went wrong on our side. Nothing was charged. Try again.'}
+          </Typography>
+          <TouchableOpacity
+            style={[styles.emptyCta, { backgroundColor: theme.colors.neonGreen }]}
+            onPress={() => fetchOnGridMatches({ force: true })}
+            activeOpacity={0.85}
+          >
+            <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+              Retry
+            </Typography>
+          </TouchableOpacity>
+        </View>
       ) : visibleMatches.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(188, 246, 65, 0.1)' }]}>
@@ -758,7 +835,6 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFD700',
   },
   rewindIconDisabled: {
     opacity: 0.45,

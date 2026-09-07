@@ -22,7 +22,8 @@ import crypto from 'crypto';
 import pool from '../config/database';
 import { DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured } from '../services/sms.service';
-import { isEmailConfigured, normalizeEmail } from '../services/email.service';
+import { isEmailConfigured, normalizeEmail, isDisposableEmail } from '../services/email.service';
+import { deviceIdFromRequest } from '../services/accounts.service';
 import {
   checkOtp,
   issueOtp,
@@ -204,13 +205,16 @@ export const setRegistrationEmail = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Registration session not found or expired' });
     }
 
-    if (isPhoneStepRequired() && !pending.phone_verified) {
-      return res.status(409).json({ error: 'Verify your phone number first' });
-    }
-
     const email = normalizeEmail(req.body?.email);
     if (!email) {
       return res.status(400).json({ error: 'A valid email address is required' });
+    }
+    if (isDisposableEmail(email)) {
+      return res.status(400).json({ error: 'Temporary email addresses are not accepted. Use a real inbox.' });
+    }
+
+    if (isPhoneStepRequired() && !pending.phone_verified) {
+      return res.status(409).json({ error: 'Verify your phone number first' });
     }
 
     // Fail here rather than at the end, so nobody fills in a password for an
@@ -331,7 +335,7 @@ export const completeRegistration = async (req: Request, res: Response) => {
          email, password_hash, name, gender, interested_in, date_of_birth, city,
          cooldown_enabled, auth_provider, is_verified
        )
-       VALUES ($1, $2, $3, 'other', 'both', $4, $5, $6, 'password', TRUE)
+       VALUES ($1, $2, $3, 'other', 'both', $4, $5, $6, 'password', FALSE)
        RETURNING id, email, name, gender, interested_in, pronouns, city, is_verified,
                  is_premium, credit_balance, cooldown_enabled, is_admin, onboarding_completed_at`,
       [
@@ -347,6 +351,10 @@ export const completeRegistration = async (req: Request, res: Response) => {
 
     const user = userResult.rows[0];
     await initializeUserDefaults(client, user.id);
+    // Which phone this account was created on. Used to stop one device from
+    // face-verifying a stack of accounts.
+    const deviceId = deviceIdFromRequest(req);
+    if (deviceId) await client.query('UPDATE users SET device_id = $1 WHERE id = $2', [deviceId, user.id]);
 
     // Carry the verification work done in the funnel onto the new account.
     await client.query(

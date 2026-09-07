@@ -5,7 +5,8 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/database';
 import { JWT_CONFIG, DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
-import { normalizeEmail } from '../services/email.service';
+import { normalizeEmail, isDisposableEmail } from '../services/email.service';
+import { deviceIdFromRequest } from '../services/accounts.service';
 import {
   checkOtp,
   issueOtp,
@@ -136,6 +137,9 @@ export const signup = async (req: Request, res: Response) => {
     } = req.body;
 
     // Validation
+    if (email && isDisposableEmail(String(email))) {
+      return res.status(400).json({ error: 'Temporary email addresses are not accepted. Use a real inbox.' });
+    }
     if (!email || !password || !name || !gender || !interested_in || !date_of_birth || !city) {
       return res.status(400).json({ error: 'All fields are required' });
     }
@@ -169,6 +173,8 @@ export const signup = async (req: Request, res: Response) => {
     const user = userResult.rows[0];
 
     await initializeUserDefaults(client, user.id);
+    const signupDeviceId = deviceIdFromRequest(req);
+    if (signupDeviceId) await client.query('UPDATE users SET device_id = $1 WHERE id = $2', [signupDeviceId, user.id]);
 
     await client.query('COMMIT');
 

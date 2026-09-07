@@ -101,3 +101,60 @@ export const markSubscriptionNudgeShown = async (userId: number): Promise<void> 
     // Best-effort only.
   }
 };
+
+const ONBOARDING_DRAFT_PREFIX = 'greenflag.onboardingDraft.v1.';
+const LAST_SEARCH_PREFIX = 'greenflag.lastSearch.v1.';
+
+export type OnboardingDraft = { step: number; quizIndex: number; form: Record<string, unknown>; savedAt: number };
+
+/** Where the person was in onboarding, so an app kill does not send them to step 1. */
+export const loadOnboardingDraft = async (userId: number): Promise<OnboardingDraft | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(`${ONBOARDING_DRAFT_PREFIX}${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.form !== 'object') return null;
+    return parsed as OnboardingDraft;
+  } catch {
+    return null;
+  }
+};
+
+export const saveOnboardingDraft = async (userId: number, draft: Omit<OnboardingDraft, 'savedAt'>): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(`${ONBOARDING_DRAFT_PREFIX}${userId}`, JSON.stringify({ ...draft, savedAt: Date.now() }));
+  } catch {
+    // Best-effort only.
+  }
+};
+
+export const clearOnboardingDraft = async (userId: number): Promise<void> => {
+  try {
+    await AsyncStorage.removeItem(`${ONBOARDING_DRAFT_PREFIX}${userId}`);
+  } catch {
+    // Best-effort only.
+  }
+};
+
+export type LastSearch = { query: string; matches: unknown[]; savedAt: number };
+
+/** The latest AI Match results, kept until the next search (board item 7). */
+export const loadLastSearch = async (userId: number): Promise<LastSearch | null> => {
+  try {
+    const raw = await AsyncStorage.getItem(`${LAST_SEARCH_PREFIX}${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed.query !== 'string' || !Array.isArray(parsed.matches)) return null;
+    return parsed as LastSearch;
+  } catch {
+    return null;
+  }
+};
+
+export const saveLastSearch = async (userId: number, search: Omit<LastSearch, 'savedAt'>): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(`${LAST_SEARCH_PREFIX}${userId}`, JSON.stringify({ ...search, savedAt: Date.now() }));
+  } catch {
+    // Best-effort only.
+  }
+};
