@@ -3,8 +3,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 const DEFAULT_ALLOWED_MEDIA_HOSTS = ['res.cloudinary.com'];
-// GIFs picked in the chat composer come straight from Tenor's CDN.
-const ALWAYS_ALLOWED_MEDIA_HOSTS = ['media.tenor.com', 'c.tenor.com', 'media1.tenor.com', 'media2.tenor.com', 'media3.tenor.com', 'media4.tenor.com'];
+// GIFs picked in the chat composer come straight from the GIPHY CDN
+// (media0-4.giphy.com, i.giphy.com; matched by suffix). Tenor is gone.
+const ALWAYS_ALLOWED_MEDIA_HOSTS = ['giphy.com', 'media.tenor.com', 'c.tenor.com', 'media1.tenor.com', 'media2.tenor.com', 'media3.tenor.com', 'media4.tenor.com'];
 const BLOCKED_SCHEMES = ['data:', 'file:', 'content:', 'ph:'];
 
 type MediaConfig = {

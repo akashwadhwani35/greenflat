@@ -347,8 +347,10 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
       // For off-grid: fetch NEW profiles
       fetchNewOffGridProfiles();
     } else {
-      // For on-grid: ask the server again (free: same query, already paid)
-      fetchOnGridMatches({ force: true });
+      // Board 36/37: the last search's results stay exactly as they were until
+      // the next search. A pull only re-reads them; asking the server again
+      // re-ran the matching and swapped in whoever ranked that minute.
+      fetchOnGridMatches();
     }
   }, [activeTab, fetchNewOffGridProfiles, fetchOnGridMatches]);
 

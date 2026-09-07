@@ -159,7 +159,11 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
     // A real "same face, different photo" check needs a face-embedding service;
     // this stops the lazy cases without paying for that yet.
     const selfieHash = crypto.createHash('sha256').update(String(photo_url)).digest('hex');
-    const deviceId = deviceIdFromRequest(req);
+    // The header is the phone making this request; the stored one is the phone
+    // that signed the account up. Either is enough to tie two accounts together.
+    const headerDeviceId = deviceIdFromRequest(req);
+    const ownDevice = await pool.query('SELECT device_id FROM users WHERE id = $1', [userId]);
+    const deviceId = headerDeviceId || (ownDevice.rows[0]?.device_id as string | null) || null;
     const reuse = await pool.query(
       `SELECT u.id
          FROM users u

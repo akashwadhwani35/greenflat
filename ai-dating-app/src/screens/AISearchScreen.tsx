@@ -138,26 +138,47 @@ const TypingIndicator: React.FC = () => {
 const normalizeSpaces = (input: string) => input.replace(/\s+/g, ' ').trim();
 
 // Words that describe a person. One of these, or a sentence of three words or
-// more, is a search. "Arjun" or "Priya Sharma" on its own is a name lookup, and
-// the AI has nothing to work with.
+// more, is a search. "Arjun", "kabir singh" or "Priya Sharma" on its own is a
+// name lookup, and the AI has nothing to work with. Case does not matter:
+// people type names in lower case too (board 34).
 const DESCRIPTOR_WORDS = new Set([
+  // qualities
   'kind','funny','caring','loyal','honest','ambitious','calm','creative','adventurous','romantic','confident',
   'smart','intelligent','mature','emotional','deep','spiritual','religious','fit','tall','short','vegan',
-  'vegetarian','foodie','traveler','traveller','travel','music','gym','fitness','reading','books','movies',
-  'gaming','dog','cat','pet','family','serious','casual','long','term','marriage','relationship','friendship',
-  'someone','person','partner','girl','boy','man','woman','guy','girls','boys','men','women','who','with',
-  'loves','love','like','likes','into','enjoys','vibe','my','me','similar','same','type','looking','find',
-  'delhi','mumbai','bangalore','bengaluru','pune','hyderabad','chennai','kolkata','goa','city','near','nearby',
-  'hindu','muslim','sikh','christian','punjabi','bengali','tamil','gujarati','marathi','doctor','engineer',
-  'artist','musician','entrepreneur','student','teacher','lawyer','designer','writer','chef','nurse','pilot',
+  'vegetarian','foodie','traveler','traveller','travel','cute','hot','sweet','gentle','humble','witty','sarcastic',
+  'introvert','extrovert','ambivert','independent','open','minded','openminded','positive','happy','chill','fun',
+  'genuine','sincere','thoughtful','patient','bold','shy','quiet','loud','driven','focused','curious','warm',
+  'empathetic','supportive','understanding','respectful','faithful','committed','stable','settled','simple',
+  'rich','wealthy','successful','educated','cultured','classy','stylish','fashionable','healthy','active','sporty',
+  // interests
+  'music','gym','fitness','reading','books','movies','films','cinema','gaming','games','dog','cat','pet','pets',
+  'hiking','trekking','cricket','football','soccer','badminton','tennis','yoga','dance','dancing','singing','art',
+  'painting','photography','cooking','baking','coffee','tea','wine','beer','food','anime','netflix','series','tech',
+  'startup','startups','business','finance','crypto','cars','bikes','biking','cycling','running','swimming','chess',
+  'poetry','writing','writer','theatre','drama','comedy','standup','fashion','nature','beach','mountains','camping',
+  'sports','sport','fan','lover','enthusiast','nerd','geek','bookworm','fitness','wellness','meditation',
+  // relationship words
+  'family','serious','casual','long','term','marriage','relationship','friendship','dating','partner','soulmate',
+  'someone','person','girl','boy','man','woman','guy','girls','boys','men','women','lady','gentleman','who','with',
+  'loves','love','like','likes','into','enjoys','vibe','my','me','similar','same','type','looking','find','want',
+  'wants','need','near','nearby','close','around','local','age','older','younger','single','divorced','widowed',
+  // places
+  'delhi','mumbai','bangalore','bengaluru','pune','hyderabad','chennai','kolkata','goa','city','kerala','kochi',
+  'jaipur','lucknow','chandigarh','ahmedabad','surat','indore','bhopal','nagpur','noida','gurgaon','gurugram',
+  'kanpur','patna','bhubaneswar','trivandrum','mysore','mangalore','coimbatore','vizag','india','indian',
+  // background and work
+  'hindu','muslim','sikh','christian','jain','buddhist','punjabi','bengali','tamil','gujarati','marathi',
+  'malayali','telugu','kannada','doctor','engineer','artist','musician','entrepreneur','student','teacher',
+  'lawyer','designer','writer','chef','nurse','pilot','developer','coder','programmer','founder','ceo','mba',
+  'ca','banker','army','navy','airforce','professor','scientist','researcher','journalist','actor','model',
 ]);
 
 const looksLikePersonName = (input: string) => {
   const words = input.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0 || words.length > 2) return false;
-  // "Arjun", "Priya Sharma": capitalised proper nouns. "hiking" or "cricket fan"
-  // are lower-case and go through to the AI like any other search.
-  if (!words.every((w) => /^[A-Z][a-z'.-]+$/.test(w))) return false;
+  // Only letter-words qualify ("hiking", "Priya Sharma"); anything with digits
+  // or symbols is not a name and goes through to the AI like any other search.
+  if (!words.every((w) => /^[A-Za-z][A-Za-z'.-]*$/.test(w))) return false;
   return !words.some((w) => DESCRIPTOR_WORDS.has(w.toLowerCase()));
 };
 

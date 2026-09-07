@@ -338,6 +338,8 @@ export const googleAuth = async (req: Request, res: Response) => {
 
       user = userResult.rows[0];
       await initializeUserDefaults(client, user.id);
+      const googleDeviceId = deviceIdFromRequest(req);
+      if (googleDeviceId) await client.query('UPDATE users SET device_id = $1 WHERE id = $2', [googleDeviceId, user.id]);
     }
 
     // The signup funnel offers "connect with Google" on the same screen as

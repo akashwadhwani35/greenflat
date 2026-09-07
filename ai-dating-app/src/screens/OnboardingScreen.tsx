@@ -18,6 +18,7 @@ import {
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { getDeviceId } from '../utils/deviceId';
 import DateTimePicker, { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -442,7 +443,8 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       try {
         const faceRes = await fetch(`${apiBaseUrl}/verification/selfie`, {
           method: 'POST',
-          headers: userHeaders,
+          // Lets the server notice one phone verifying many accounts.
+          headers: { ...userHeaders, 'x-device-id': (await getDeviceId()) || '' },
           body: JSON.stringify({ photo_url: form.faceCheckPhoto }),
         });
         if (!faceRes.ok) {
