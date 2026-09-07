@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import pool from '../config/database';
+import { getIO } from '../socket';
 import { AuthRequest } from '../middleware/auth';
 
 const loadSettings = async (userId: number) => {
@@ -91,6 +92,61 @@ export const getBlockedUsers = async (req: AuthRequest, res: Response) => {
   }
 };
 
+/**
+ * Everything blocking means, inside the caller's transaction: the block row,
+ * both people's likes, the chat history. The match row stays so unblocking
+ * can restore chat access. Returns the ids of matches between the two so the
+ * caller can tell both phones to drop the conversation.
+ */
+type DbClient = Awaited<ReturnType<typeof pool.connect>>;
+
+export const applyBlock = async (client: DbClient, userId: number, targetUserId: number): Promise<number[]> => {
+  await client.query(
+    `INSERT INTO blocks (blocker_id, blocked_id)
+     VALUES ($1, $2)
+     ON CONFLICT (blocker_id, blocked_id) DO UPDATE SET unblocked_at = NULL, created_at = NOW()`,
+    [userId, targetUserId]
+  );
+  await client.query(
+    `DELETE FROM likes
+     WHERE (liker_id = $1 AND liked_id = $2) OR (liker_id = $2 AND liked_id = $1)`,
+    [userId, targetUserId]
+  );
+  const matches = await client.query(
+    `SELECT id FROM matches
+     WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)`,
+    [userId, targetUserId]
+  );
+  const matchIds: number[] = matches.rows.map((r: any) => Number(r.id));
+  // Subqueries rather than = ANY($1::int[]): the in-memory test database
+  // does not bind integer arrays.
+  await client.query(
+    `DELETE FROM messages
+     WHERE match_id IN (
+       SELECT id FROM matches
+       WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)
+     )`,
+    [userId, targetUserId]
+  );
+  await client.query(
+    `UPDATE matches SET last_message_at = NULL
+     WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)`,
+    [userId, targetUserId]
+  );
+  return matchIds;
+};
+
+export const announceBlock = (userId: number, targetUserId: number, matchIds: number[]) => {
+  const io = getIO();
+  if (!io) return;
+  for (const matchId of matchIds) {
+    io.to(`user:${userId}`).emit('conversation:removed', { matchId });
+    io.to(`user:${targetUserId}`).emit('conversation:removed', { matchId });
+  }
+  io.to(`user:${userId}`).emit('counts:changed', {});
+  io.to(`user:${targetUserId}`).emit('counts:changed', {});
+};
+
 export const blockUser = async (req: AuthRequest, res: Response) => {
   const client = await pool.connect();
   try {
@@ -102,37 +158,9 @@ export const blockUser = async (req: AuthRequest, res: Response) => {
     }
 
     await client.query('BEGIN');
-    await client.query(
-      `INSERT INTO blocks (blocker_id, blocked_id)
-       VALUES ($1, $2)
-       ON CONFLICT (blocker_id, blocked_id) DO UPDATE SET unblocked_at = NULL, created_at = NOW()`,
-      [userId, target_user_id]
-    );
-
-    // Ensure visibility/chat is removed both ways.
-    await client.query(
-      `DELETE FROM likes
-       WHERE (liker_id = $1 AND liked_id = $2) OR (liker_id = $2 AND liked_id = $1)`,
-      [userId, target_user_id]
-    );
-    // Clear chat history for this pair but keep the match row so unblocking can restore chat access.
-    await client.query(
-      `DELETE FROM messages
-       WHERE match_id IN (
-         SELECT id FROM matches
-         WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)
-       )`,
-      [userId, target_user_id]
-    );
-
-    await client.query(
-      `UPDATE matches
-       SET last_message_at = NULL
-       WHERE user1_id = LEAST($1::int, $2::int) AND user2_id = GREATEST($1::int, $2::int)`,
-      [userId, target_user_id]
-    );
-
+    const matchIds = await applyBlock(client, userId, target_user_id);
     await client.query('COMMIT');
+    announceBlock(userId, target_user_id, matchIds);
     return res.json({ message: 'User blocked' });
   } catch (error) {
     await client.query('ROLLBACK');

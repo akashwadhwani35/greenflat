@@ -1264,29 +1264,28 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                 </View>
               ) : null}
 
-              {/* Board 9: two buttons at the bottom of the step, no link in the middle. */}
-              <View style={styles.faceButtonRow}>
-                <TouchableOpacity
-                  onPress={skipFaceCheck}
-                  style={[styles.faceButton, { backgroundColor: theme.colors.surfaceLight, borderColor: theme.colors.border }]}
-                  accessibilityRole="button"
-                  disabled={loading}
-                  activeOpacity={0.85}
-                >
-                  <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Skip for now</Typography>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={form.faceCheckPhoto ? goToNextSlide : captureFaceCheck}
-                  style={[styles.faceButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
-                  accessibilityRole="button"
-                  disabled={loading}
-                  activeOpacity={0.85}
-                >
-                  <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
-                    {form.faceCheckPhoto ? 'Continue' : "Let's begin"}
+              {/* Board 21: the camera row lives in the middle of the card; the two
+                  buttons sit at the bottom of the screen (rendered by the footer). */}
+              <TouchableOpacity
+                onPress={captureFaceCheck}
+                style={[styles.selfieRow, { borderColor: theme.colors.border, backgroundColor: theme.colors.surfaceLight }]}
+                accessibilityRole="button"
+                disabled={loading}
+                activeOpacity={0.85}
+              >
+                <View style={[styles.selfieIcon, { backgroundColor: 'rgba(173, 255, 26, 0.12)' }]}>
+                  <Feather name="camera" size={20} color={theme.colors.neonGreen} />
+                </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
+                    {form.faceCheckPhoto ? 'Retake selfie' : 'Take a selfie'}
                   </Typography>
-                </TouchableOpacity>
-              </View>
+                  <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 2 }}>
+                    Front camera, good light, no sunglasses.
+                  </Typography>
+                </View>
+                <Feather name="chevron-right" size={20} color={theme.colors.muted} />
+              </TouchableOpacity>
 
               <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 12 }}>
                 You can do this any time from Verification. Verified profiles get shown more.
@@ -1377,6 +1376,30 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
 
       {/* Footer */}
       <View style={[styles.footer, { backgroundColor: theme.colors.background }]}>
+        {slides[step].key === 'safety' ? (
+          <View style={styles.faceButtonRow}>
+            <TouchableOpacity
+              onPress={skipFaceCheck}
+              style={[styles.faceButton, { backgroundColor: theme.colors.surfaceLight, borderColor: theme.colors.border }]}
+              accessibilityRole="button"
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Skip for now</Typography>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={form.faceCheckPhoto ? goToNextSlide : captureFaceCheck}
+              style={[styles.faceButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
+              accessibilityRole="button"
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+                {loading ? 'Please wait…' : form.faceCheckPhoto ? 'Continue' : "Let's begin"}
+              </Typography>
+            </TouchableOpacity>
+          </View>
+        ) : (
         <Button
           label={
             loading
@@ -1392,6 +1415,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           disabled={loading}
           loading={loading}
         />
+        )}
       </View>
     </View>
   );
@@ -1401,7 +1425,21 @@ const styles = StyleSheet.create({
   faceButtonRow: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 24,
+  },
+  selfieRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginTop: 20,
+  },
+  selfieIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   faceButton: {
     flex: 1,

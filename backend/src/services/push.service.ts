@@ -160,12 +160,29 @@ export const sendBulkPushNotifications = async (
 /**
  * Send notification when someone likes you
  */
-export const notifyLikeReceived = async (likedUserId: number, likerName: string): Promise<void> => {
+export const notifyLikeReceived = async (
+  likedUserId: number,
+  likerName: string,
+  options: { likerId?: number; isGreenFlag?: boolean } = {}
+): Promise<void> => {
+  // Screen names are the app's overlay keys (lower case). They used to be
+  // "LikesInbox" / "Conversations", which matched nothing, so every tap
+  // landed on Home.
+  if (options.isGreenFlag) {
+    await sendPushNotification(
+      likedUserId,
+      'Green Flag 🟢',
+      `${likerName} sent you a Green Flag.`,
+      { type: 'green_flag', screen: 'likes', liker_id: options.likerId ?? null },
+      'likes'
+    );
+    return;
+  }
   await sendPushNotification(
     likedUserId,
     'Someone likes you! 💚',
     `${likerName} liked your profile`,
-    { type: 'like_received', screen: 'LikesInbox' },
+    { type: 'like_received', screen: 'likes', liker_id: options.likerId ?? null },
     'likes'
   );
 };
@@ -178,7 +195,7 @@ export const notifyMatch = async (userId: number, matchName: string): Promise<vo
     userId,
     "It's a match! 🎉",
     `You and ${matchName} both liked each other`,
-    { type: 'match', screen: 'Matches' },
+    { type: 'match', screen: 'conversations' },
     'matches'
   );
 };
@@ -189,13 +206,20 @@ export const notifyMatch = async (userId: number, matchName: string): Promise<vo
 export const notifyNewMessage = async (
   recipientId: number,
   senderName: string,
-  messagePreview: string
+  messagePreview: string,
+  conversation: { matchId?: number; senderId?: number } = {}
 ): Promise<void> => {
   await sendPushNotification(
     recipientId,
     `${senderName} sent you a message`,
     messagePreview.substring(0, 100),
-    { type: 'message', screen: 'Conversations' },
+    {
+      type: 'message',
+      screen: 'conversations',
+      match_id: conversation.matchId ?? null,
+      sender_id: conversation.senderId ?? null,
+      sender_name: senderName,
+    },
     'messages'
   );
 };
@@ -235,12 +259,12 @@ export const unregisterPushToken = async (userId: number): Promise<boolean> => {
   }
 };
 
-export const notifyFirstMove = async (recipientId: number, senderName: string, preview: string): Promise<void> => {
+export const notifyFirstMove = async (recipientId: number, senderName: string, preview: string, conversation: { matchId?: number; senderId?: number } = {}): Promise<void> => {
   await sendPushNotification(
     recipientId,
     `${senderName} made a First Move`,
     preview.substring(0, 100),
-    { type: 'first_move', screen: 'Conversations' },
+    { type: 'first_move', screen: 'conversations', match_id: conversation.matchId ?? null, sender_id: conversation.senderId ?? null, sender_name: senderName },
     'messages'
   );
 };
@@ -249,13 +273,14 @@ export const notifyFirstMove = async (recipientId: number, senderName: string, p
 export const notifyAccepted = async (
   senderId: number,
   accepterName: string,
-  kind: 'green_flag' | 'first_move'
+  kind: 'green_flag' | 'first_move',
+  conversation?: { matchId?: number; senderId?: number }
 ): Promise<void> => {
   await sendPushNotification(
     senderId,
     kind === 'green_flag' ? `${accepterName} accepted your Green Flag` : `${accepterName} accepted your First Move`,
     'You can message each other now.',
-    { type: 'match', screen: 'Conversations' },
+    { type: 'match', screen: 'conversations', match_id: conversation?.matchId ?? null, sender_id: conversation?.senderId ?? null, sender_name: accepterName },
     'matches'
   );
 };

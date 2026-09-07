@@ -14,18 +14,36 @@ Notifications.setNotificationHandler({
   }),
 });
 
-type NavigationScreen = 'likes' | 'matches' | 'conversations' | null;
+export type PushNavigationScreen = 'likes' | 'matches' | 'conversations' | null;
+export type PushNavigationParams = {
+  type?: string;
+  match_id?: number | null;
+  sender_id?: number | null;
+  sender_name?: string;
+  liker_id?: number | null;
+};
+
+// Screen names used to arrive capitalised ("LikesInbox") and matched nothing.
+const normaliseScreen = (raw: unknown): PushNavigationScreen => {
+  const key = String(raw || '').toLowerCase();
+  if (key.startsWith('like')) return 'likes';
+  if (key.startsWith('match')) return 'matches';
+  if (key.startsWith('conversation') || key.startsWith('message') || key.startsWith('chat')) return 'conversations';
+  return null;
+};
 
 export const usePushNotifications = (
   token: string | null,
   apiBaseUrl: string,
-  onNavigate?: (screen: NavigationScreen, params?: Record<string, unknown>) => void,
+  onNavigate?: (screen: PushNavigationScreen, params?: PushNavigationParams) => void,
 ) => {
   const [expoPushToken, setExpoPushToken] = useState<string | null>(null);
   const [notification, setNotification] = useState<Notifications.Notification | null>(null);
   const notificationListener = useRef<Notifications.Subscription | null>(null);
   const responseListener = useRef<Notifications.Subscription | null>(null);
   const registeredRef = useRef(false);
+  // A tap is delivered once even if both the cold-start read and the listener see it.
+  const handledResponseIds = useRef<Set<string>>(new Set());
 
   const registerTokenWithBackend = useCallback(async (pushToken: string, authToken: string) => {
     const maxRetries = 3;
@@ -70,13 +88,27 @@ export const usePushNotifications = (
       setNotification(incoming);
     });
 
+    const handleResponse = (response: Notifications.NotificationResponse | null) => {
+      if (!response || !onNavigate) return;
+      const id = response.notification.request.identifier;
+      if (handledResponseIds.current.has(id)) return;
+      handledResponseIds.current.add(id);
+      const data = (response.notification.request.content.data || {}) as Record<string, unknown>;
+      const screen = normaliseScreen(data.screen);
+      if (!screen) return;
+      onNavigate(screen, {
+        type: typeof data.type === 'string' ? data.type : undefined,
+        match_id: data.match_id != null ? Number(data.match_id) : null,
+        sender_id: data.sender_id != null ? Number(data.sender_id) : null,
+        sender_name: typeof data.sender_name === 'string' ? data.sender_name : undefined,
+        liker_id: data.liker_id != null ? Number(data.liker_id) : null,
+      });
+    };
+
     // Listener for when user taps on notification
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      const data = response.notification.request.content.data as Record<string, unknown> | undefined;
-      if (data?.screen && onNavigate) {
-        onNavigate(data.screen as NavigationScreen, data);
-      }
-    });
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    // The tap that launched the app from cold never reaches the listener above.
+    Notifications.getLastNotificationResponseAsync().then(handleResponse).catch(() => {});
 
     return () => {
       notificationListener.current?.remove();

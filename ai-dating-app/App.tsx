@@ -3,7 +3,7 @@ import { StyleSheet, View, ActivityIndicator, Alert, Text, TextInput, Modal, Ima
 } from 'react-native';
 import { useFonts, RedHatDisplay_400Regular, RedHatDisplay_500Medium, RedHatDisplay_600SemiBold, RedHatDisplay_700Bold } from '@expo-google-fonts/red-hat-display';
 import { GreenflagThemeProvider, useTheme } from './src/theme/ThemeProvider';
-import { usePushNotifications } from './src/hooks/usePushNotifications';
+import { usePushNotifications, PushNavigationScreen, PushNavigationParams } from './src/hooks/usePushNotifications';
 import { useSocket } from './src/hooks/useSocket';
 import { useViewerProfile } from './src/hooks/useViewerProfile';
 import { WelcomeScreen } from './src/screens/WelcomeScreen';
@@ -233,11 +233,43 @@ const AppShell: React.FC = () => {
   };
 
   // Register for push notifications
-  const handlePushNavigate = useMemo(() => (screen: string | null) => {
-    if (!screen || stage !== 'matchboard') return;
-    if (screen === 'likes') setOverlay('likes');
-    else if (screen === 'matches') setOverlay('matches');
-    else if (screen === 'conversations') setOverlay('conversations');
+  // A tap on a notification opens the exact place it came from: the chat for
+  // a message, Likes for a like or Green Flag. If the tap launched the app from
+  // cold it is kept until the session has bootstrapped.
+  const pendingPushNav = useRef<{ screen: PushNavigationScreen; params?: PushNavigationParams } | null>(null);
+  const applyPushNavigate = (screen: PushNavigationScreen, params?: PushNavigationParams) => {
+    if (screen === 'likes') { setOverlay('likes'); return; }
+    if (screen === 'matches') { setOverlay('matches'); return; }
+    if (screen === 'conversations') {
+      const matchId = params?.match_id ?? null;
+      const senderId = params?.sender_id ?? null;
+      if (matchId && senderId) {
+        // A First Move is still a request: open it with Accept / Decline, not a composer.
+        const isRequest = params?.type === 'first_move';
+        setOverlay('conversations');
+        setCurrentConversation({
+          matchId,
+          matchName: params?.sender_name || 'Chat',
+          targetUserId: senderId,
+          status: isRequest ? 'pending' : 'active',
+          requestedBy: isRequest ? senderId : null,
+        });
+        setShowMessages(true);
+      } else {
+        setOverlay('conversations');
+      }
+    }
+  };
+  const handlePushNavigate = useMemo(() => (screen: PushNavigationScreen, params?: PushNavigationParams) => {
+    if (!screen) return;
+    if (stage !== 'matchboard') { pendingPushNav.current = { screen, params }; return; }
+    applyPushNavigate(screen, params);
+  }, [stage]);
+  useEffect(() => {
+    if (stage !== 'matchboard' || !pendingPushNav.current) return;
+    const { screen, params } = pendingPushNav.current;
+    pendingPushNav.current = null;
+    applyPushNavigate(screen, params);
   }, [stage]);
   usePushNotifications(authToken, API_BASE_URL, handlePushNavigate);
 
@@ -408,6 +440,7 @@ const AppShell: React.FC = () => {
     setOverlay(null);
     setActiveTab('explore');
     setPreferredDiscoverTab('onGrid');
+    pendingPushNav.current = null;
     setStage('welcome');
   };
 
@@ -700,6 +733,21 @@ const AppShell: React.FC = () => {
     }
   };
 
+  // Reported or blocked: gone from Explore, AI Match, Likes and any open chat
+  // right away, without waiting for the next fetch (the server also excludes
+  // them from every future query).
+  const hideUserEverywhere = (targetUserId: number) => {
+    setPassedProfileIds((prev) => new Set(prev).add(targetUserId));
+    setAnsweredLikeIds((prev) => new Set(prev).add(targetUserId));
+    setLikesRefreshKey((k) => k + 1);
+    setAiSearchKey((k) => k + 1);
+    if (currentConversation?.targetUserId === targetUserId) {
+      setShowMessages(false);
+      setCurrentConversation(null);
+    }
+    void fetchBadgeCounts();
+  };
+
   const handleBlockFromProfile = (targetUserId: number, name: string) => {
     Alert.alert(
       'Block user',
@@ -724,6 +772,7 @@ const AppShell: React.FC = () => {
                 throw new Error(body.error || 'Unable to block user.');
               }
               Alert.alert('Blocked', `${name} has been blocked.`);
+              hideUserEverywhere(targetUserId);
               handleCloseProfile();
             } catch (error: any) {
               Alert.alert('Block failed', error.message || 'Please try again.');
@@ -752,7 +801,8 @@ const AppShell: React.FC = () => {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || 'Unable to report user.');
       }
-      setNotice({ title: 'Report sent', message: `Thanks for flagging ${name}. Our team will review it.`, icon: 'flag' });
+      setNotice({ title: 'Report sent', message: `Thanks for flagging ${name}. They will not be shown to you again.`, icon: 'flag' });
+      hideUserEverywhere(targetUserId);
       handleCloseProfile();
     } catch (error: any) {
       setNotice({ title: 'Report failed', message: error.message || 'Please try again.', tone: 'error' });
@@ -1191,6 +1241,7 @@ const AppShell: React.FC = () => {
             {showMessages && currentConversation && userId && (
               <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100 }}>
                 <MessagesScreen
+                  key={currentConversation.matchId}
                   matchId={currentConversation.matchId}
                   matchName={currentConversation.matchName}
                   targetUserId={currentConversation.targetUserId}
@@ -1200,6 +1251,7 @@ const AppShell: React.FC = () => {
                   socket={socket}
                   status={currentConversation.status}
                   requestedBy={currentConversation.requestedBy}
+                  onUserHidden={hideUserEverywhere}
                   onRequestResolved={(matchId, outcome) => {
                     void fetchBadgeCounts();
                     if (outcome === 'declined') {

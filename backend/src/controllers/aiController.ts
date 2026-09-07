@@ -87,6 +87,9 @@ export const sidekick = async (req: AuthRequest, res: Response) => {
        WHERE u.id != $1
          AND u.gender = $2
          AND u.city = $3
+         AND u.onboarding_completed_at IS NOT NULL
+         AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $1 AND unblocked_at IS NULL)
+         AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = $1 AND unblocked_at IS NULL)
        ORDER BY u.created_at DESC
        LIMIT 20`,
       [userId, user.interested_in || 'male', user.city || '']

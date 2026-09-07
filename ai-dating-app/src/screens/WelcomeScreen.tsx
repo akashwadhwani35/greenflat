@@ -13,7 +13,8 @@ const glassLogo = require('../../assets/glass-logo.png');
 // Sized to the shorter of width and a share of height, so short or narrow
 // phones scale the flag down instead of cropping its top.
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-const LOGO_SIZE = Math.round(Math.min(SCREEN_WIDTH * 1.15, SCREEN_HEIGHT * 0.42, 620));
+// Board 22: the flag is the whole splash. Width-bound on phones, height-bound on short screens.
+const LOGO_SIZE = Math.round(Math.min(SCREEN_WIDTH * 1.5, SCREEN_HEIGHT * 0.52, 760));
 
 type WelcomeScreenProps = {
   onStart: () => void;

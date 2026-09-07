@@ -283,13 +283,14 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         const theyGreenFlagged = Boolean(theirLike.rows[0]?.is_superlike);
         notifyMatch(userId, targetName).catch(err => console.error('Failed to send match notification:', err));
         (theyGreenFlagged
-          ? notifyAccepted(target_user_id, likerName, 'green_flag')
+          ? notifyAccepted(target_user_id, likerName, 'green_flag', { matchId, senderId: userId })
           : notifyMatch(target_user_id, likerName)
         ).catch(err => console.error('Failed to send match notification:', err));
       }
     } else {
       // Not a match yet - notify the target user they received a like
-      notifyLikeReceived(target_user_id, likerName).catch(err => console.error('Failed to send like notification:', err));
+      // Board 30: a Green Flag says so ("Arjun sent you a Green Flag."), not "liked your profile".
+      notifyLikeReceived(target_user_id, likerName, { likerId: userId, isGreenFlag: Boolean(is_superlike) }).catch(err => console.error('Failed to send like notification:', err));
     }
     pokeCounts(target_user_id, userId);
 
@@ -583,7 +584,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
       io.to(`user:${userId}`).emit('conversation:updated', payload);
     }
     pokeCounts(target_user_id, userId);
-    notifyFirstMove(target_user_id, senderName, complimentText).catch((err) =>
+    notifyFirstMove(target_user_id, senderName, complimentText, { matchId, senderId: userId }).catch((err) =>
       console.error('Failed to send First Move notification:', err)
     );
     if (isMutual) {
@@ -693,7 +694,7 @@ export const acceptMatchRequest = async (req: AuthRequest, res: Response) => {
     await client.query('COMMIT');
 
     const nameOf = (id: number) => names.rows.find((r: any) => r.id === id)?.name || 'Someone';
-    notifyAccepted(otherId, nameOf(userId), 'first_move').catch(() => {});
+    notifyAccepted(otherId, nameOf(userId), 'first_move', { matchId, senderId: userId }).catch(() => {});
     const io = getIO();
     if (io) {
       const payload = { matchId, status: 'active' };

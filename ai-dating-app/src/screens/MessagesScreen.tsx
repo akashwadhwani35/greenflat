@@ -6,7 +6,6 @@ import {
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
-  Keyboard,
   Platform,
   StatusBar,
   ActivityIndicator,
@@ -55,6 +54,8 @@ type MessagesScreenProps = {
   apiBaseUrl: string;
   socket: Socket | null;
   onBack: () => void;
+  // Blocked or reported from inside the chat: the app drops them everywhere.
+  onUserHidden?: (targetUserId: number) => void;
   /** A compliment request: read-only until the receiver accepts. */
   status?: 'active' | 'pending';
   requestedBy?: number | null;
@@ -83,6 +84,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   apiBaseUrl,
   socket,
   onBack,
+  onUserHidden,
   status = 'active',
   requestedBy = null,
   onRequestResolved,
@@ -116,6 +118,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
   const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
+  // Board 29: a safety line sits above the composer until the first message goes out.
+  const hasSentAnything = messages.some((m) => m.sender_id === currentUserId);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -175,7 +179,6 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [targetUserId, apiBaseUrl, token]);
-  const [androidKeyboardOffset, setAndroidKeyboardOffset] = useState(0);
   const [mediaUploadProvider, setMediaUploadProvider] = useState<MediaUploadProvider>('local');
   const [peerTyping, setPeerTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -308,6 +311,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
                 throw new Error(body.error || 'Unable to block user');
               }
               Alert.alert('Blocked', `${matchName} has been blocked.`);
+              if (targetUserId) onUserHidden?.(targetUserId);
               onBack();
             } catch (error: any) {
               Alert.alert('Block failed', error?.message || 'Please try again.');
@@ -332,7 +336,10 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         }),
       });
       if (response.ok) {
-        Alert.alert('Report Submitted', 'Thank you for your report. We will review it shortly.');
+        // Board 31: a report also blocks, so this chat is gone.
+        Alert.alert('Report Submitted', `Thanks for flagging ${matchName}. They will not be shown to you again.`);
+        if (targetUserId) onUserHidden?.(targetUserId);
+        onBack();
       } else {
         const body = await response.json().catch(() => ({}));
         Alert.alert('Report Failed', body.error || 'Unable to submit your report. Please try again.');
@@ -396,30 +403,20 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     socket.on('message:deleted', handleMessageDeleted);
     socket.on('messages:read', handleMessagesRead);
     socket.on('typing', handleTyping);
+    // While this chat is on screen the server skips the push for its messages.
+    socket.emit('chat:open', { matchId });
+    const onReconnect = () => socket.emit('chat:open', { matchId });
+    socket.on('connect', onReconnect);
 
     return () => {
+      socket.emit('chat:close', { matchId });
+      socket.off('connect', onReconnect);
       socket.off('message:new', handleNewMessage);
       socket.off('message:deleted', handleMessageDeleted);
       socket.off('messages:read', handleMessagesRead);
       socket.off('typing', handleTyping);
     };
   }, [socket, matchId, currentUserId]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android') return;
-
-    const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
-      setAndroidKeyboardOffset(event.endCoordinates.height);
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      setAndroidKeyboardOffset(0);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   const fetchMessages = async () => {
     try {
@@ -883,7 +880,13 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+    // The whole screen shrinks with the keyboard. Padding only the composer
+    // left it under the keyboard on edge-to-edge Android (board 26).
+    <KeyboardAvoidingView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      behavior="padding"
+      keyboardVerticalOffset={0}
+    >
       <StatusBar barStyle="light-content" />
 
       {/* Header */}
@@ -1088,7 +1091,15 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       {/* Input Area. Edge-to-edge Android does not resize the window, so the old
           manual margin raced the keyboard; padding by the real overlap works on both. */}
       {requestStatus === 'pending' ? null : (
-      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0}>
+      <View>
+        {!hasSentAnything ? (
+          <View style={[styles.firstMessageWarning, { backgroundColor: theme.colors.charcoal, borderTopColor: theme.colors.border }]}>
+            <Feather name="shield" size={14} color={theme.colors.neonGreen} />
+            <Typography variant="tiny" style={{ color: theme.colors.muted, flex: 1, marginLeft: 8 }}>
+              Keep it respectful. Messages that break our guidelines can get your account removed.
+            </Typography>
+          </View>
+        ) : null}
         <View
           style={[
             styles.inputContainer,
@@ -1201,9 +1212,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
             )}
           </TouchableOpacity>
         </View>
-      </KeyboardAvoidingView>
+      </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -1385,6 +1396,13 @@ const styles = StyleSheet.create({
   typingContainer: {
     paddingHorizontal: 20,
     paddingVertical: 6,
+  },
+  firstMessageWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   inputContainer: {
     flexDirection: 'row',

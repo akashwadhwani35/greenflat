@@ -4,7 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { notifyNewMessage } from '../services/push.service';
 import { DAILY_LIMITS, LIKE_RESET_HOURS } from '../utils/constants';
 import { normalizeMediaMessageUrl, normalizeTextMessage } from '../services/media.service';
-import { getIO } from '../socket';
+import { getIO, isViewingChat } from '../socket';
 
 const checkAndResetLimits = async (userId: number, client: any) => {
   const result = await client.query(
@@ -195,9 +195,11 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       ? normalizedContent
       : (message_type === 'image' ? 'Sent an image' : 'Sent a voice note');
     const preview = previewBase.length > 50 ? previewBase.substring(0, 47) + '...' : previewBase;
-    notifyNewMessage(recipientId, senderName, preview).catch(err =>
-      console.error('Failed to send message notification:', err)
-    );
+    if (!isViewingChat(recipientId, Number(match_id))) {
+      notifyNewMessage(recipientId, senderName, preview, { matchId: match_id, senderId: userId }).catch(err =>
+        console.error('Failed to send message notification:', err)
+      );
+    }
 
     // Emit real-time socket events
     const io = getIO();

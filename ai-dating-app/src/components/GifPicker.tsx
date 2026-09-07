@@ -8,10 +8,11 @@ import { useTheme } from '../theme/ThemeProvider';
  * GIF search for the chat composer (board item 6). Keyboard GIF buttons
  * (Gboard, iOS) hand the image to the text field through a native channel
  * React Native does not implement, so the app offers its own picker instead.
- * Backed by Tenor; needs EXPO_PUBLIC_TENOR_API_KEY.
+ * Backed by GIPHY (Google shut the Tenor API down on 30 June 2026); needs
+ * EXPO_PUBLIC_GIPHY_API_KEY. Without a key the composer hides the GIF button.
  */
-export const TENOR_API_KEY = process.env.EXPO_PUBLIC_TENOR_API_KEY || '';
-export const isGifPickerAvailable = () => TENOR_API_KEY.length > 0;
+export const GIPHY_API_KEY = process.env.EXPO_PUBLIC_GIPHY_API_KEY || '';
+export const isGifPickerAvailable = () => GIPHY_API_KEY.length > 0;
 
 type Gif = { id: string; preview: string; url: string };
 
@@ -22,12 +23,13 @@ type Props = {
 };
 
 const parseResults = (body: any): Gif[] => {
-  const results = Array.isArray(body?.results) ? body.results : [];
+  const results = Array.isArray(body?.data) ? body.data : [];
   return results
     .map((item: any) => {
-      const formats = item?.media_formats || {};
-      const full = formats.gif?.url || formats.mediumgif?.url;
-      const preview = formats.tinygif?.url || formats.nanogif?.url || full;
+      const images = item?.images || {};
+      // "downsized" keeps sent GIFs under ~2 MB; the tiny preview fills the grid.
+      const full = images.downsized?.url || images.original?.url;
+      const preview = images.fixed_width_small?.url || images.preview_gif?.url || full;
       if (!full) return null;
       return { id: String(item.id), preview: String(preview), url: String(full) };
     })
@@ -44,16 +46,16 @@ export const GifPicker: React.FC<Props> = ({ visible, onClose, onPick }) => {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const search = async (term: string) => {
-    if (!TENOR_API_KEY) return;
+    if (!GIPHY_API_KEY) return;
     setLoading(true);
     setError(null);
     try {
       const endpoint = term.trim()
-        ? `https://tenor.googleapis.com/v2/search?q=${encodeURIComponent(term.trim())}&key=${TENOR_API_KEY}&client_key=greenflag&limit=30&media_filter=gif,tinygif,nanogif&contentfilter=medium`
-        : `https://tenor.googleapis.com/v2/featured?key=${TENOR_API_KEY}&client_key=greenflag&limit=30&media_filter=gif,tinygif,nanogif&contentfilter=medium`;
+        ? `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_API_KEY}&q=${encodeURIComponent(term.trim())}&limit=30&rating=pg-13&lang=en`
+        : `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_API_KEY}&limit=30&rating=pg-13`;
       const response = await fetch(endpoint);
       const body = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(body?.error?.message || 'GIF search failed');
+      if (!response.ok) throw new Error(body?.meta?.msg || body?.message || 'GIF search failed');
       setGifs(parseResults(body));
     } catch (err: any) {
       setError(err?.message || 'GIF search failed');
@@ -118,7 +120,7 @@ export const GifPicker: React.FC<Props> = ({ visible, onClose, onPick }) => {
             )}
             ListFooterComponent={
               <Typography variant="tiny" style={{ color: theme.colors.muted, textAlign: 'center', paddingVertical: 14 }}>
-                Powered by Tenor
+                Powered by GIPHY
               </Typography>
             }
           />

@@ -239,6 +239,20 @@ describe('GreenFlag backend core flow', () => {
     expect(reportResponse.body.report.reason).toBe('harassment');
     expect(reportResponse.body.report.reporter_id).toBe(userA.userId);
     expect(reportResponse.body.report.reported_id).toBe(userB.userId);
+
+    // Board 31: a report also blocks. The chat is gone for the reporter and
+    // the reported person cannot like them again.
+    expect(reportResponse.body.blocked).toBe(true);
+    const conversations = await agent
+      .get('/api/conversations')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(conversations.status).toBe(200);
+    expect(conversations.body.conversations.some((c: any) => c.match_id === matchId)).toBe(false);
+    const blocked = await agent
+      .get('/api/privacy/blocked')
+      .set('Authorization', `Bearer ${userA.token}`);
+    expect(blocked.status).toBe(200);
+    expect(JSON.stringify(blocked.body)).toContain(String(userB.userId));
   });
 
   it('refuses token purchases while payments are not configured', async () => {

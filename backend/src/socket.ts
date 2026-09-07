@@ -8,6 +8,18 @@ let io: Server | null = null;
 
 // Track connected users: userId -> Set of socketIds (supports multiple devices)
 const connectedUsers = new Map<number, Set<string>>();
+// Which chat each socket currently has on screen, so a message the person is
+// already looking at does not also ring as a push notification (board 25).
+const openChats = new Map<string, number>();
+
+export function isViewingChat(userId: number, matchId: number): boolean {
+  const sockets = connectedUsers.get(userId);
+  if (!sockets) return false;
+  for (const socketId of sockets) {
+    if (openChats.get(socketId) === matchId) return true;
+  }
+  return false;
+}
 
 export function initSocketServer(httpServer: HttpServer): Server {
   io = new Server(httpServer, {
@@ -64,8 +76,18 @@ export function initSocketServer(httpServer: HttpServer): Server {
       });
     });
 
+    // --- Chat presence ---
+    socket.on('chat:open', (data: { matchId: number }) => {
+      const matchId = Number(data?.matchId);
+      if (Number.isInteger(matchId)) openChats.set(socket.id, matchId);
+    });
+    socket.on('chat:close', () => {
+      openChats.delete(socket.id);
+    });
+
     // --- Disconnect ---
     socket.on('disconnect', () => {
+      openChats.delete(socket.id);
       const sockets = connectedUsers.get(userId);
       if (sockets) {
         sockets.delete(socket.id);

@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
+import { applyBlock, announceBlock } from './privacyController';
 
 export const createReport = async (req: AuthRequest, res: Response) => {
   try {
@@ -39,16 +40,34 @@ export const createReport = async (req: AuthRequest, res: Response) => {
     }
     const fullReason = details && details.trim() ? `${reason.trim()}: ${details.trim()}` : reason.trim();
 
-    const result = await pool.query(
-      `INSERT INTO reports (reporter_id, reported_id, reason, status, updated_at)
-       VALUES ($1, $2, $3, 'pending', NOW())
-       RETURNING id, reporter_id, reported_id, reason, status, created_at`,
-      [userId, reportedId, fullReason.slice(0, 500)]
-    );
+    // Board 31: reporting someone also removes them from Explore, AI Match,
+    // Likes, searches and chat, now and in future, the same way a block does.
+    const client = await pool.connect();
+    let matchIds: number[] = [];
+    let report: any;
+    try {
+      await client.query('BEGIN');
+      const result = await client.query(
+        `INSERT INTO reports (reporter_id, reported_id, reason, status, updated_at)
+         VALUES ($1, $2, $3, 'pending', NOW())
+         RETURNING id, reporter_id, reported_id, reason, status, created_at`,
+        [userId, reportedId, fullReason.slice(0, 500)]
+      );
+      report = result.rows[0];
+      matchIds = await applyBlock(client, userId, reportedId);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    announceBlock(userId, reportedId, matchIds);
 
     return res.status(201).json({
       message: 'Report submitted',
-      report: result.rows[0],
+      report,
+      blocked: true,
     });
   } catch (error) {
     console.error('Create report error:', error);
