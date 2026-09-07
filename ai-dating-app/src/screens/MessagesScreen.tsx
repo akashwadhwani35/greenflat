@@ -3,6 +3,7 @@ import {
   View,
   StyleSheet,
   FlatList,
+  Keyboard,
   TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -417,6 +418,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
       socket.off('typing', handleTyping);
     };
   }, [socket, matchId, currentUserId]);
+
+  // The list shrinks when the keyboard opens; keep the latest message in view.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 60);
+    });
+    return () => sub.remove();
+  }, []);
 
   const fetchMessages = async () => {
     try {
