@@ -141,6 +141,7 @@ const AppShell: React.FC = () => {
   // Remounts the Likes inbox after a like / reject from a card opened there,
   // so the answered card is gone when the person lands back on the list.
   const [likesRefreshKey, setLikesRefreshKey] = useState(0);
+  const [answeredLikeIds, setAnsweredLikeIds] = useState<Set<number>>(new Set());
   const [subscriptionTab, setSubscriptionTab] = useState<'pro' | 'premium'>('pro');
   const [walletRefreshKey, setWalletRefreshKey] = useState(0);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({});
@@ -169,6 +170,7 @@ const AppShell: React.FC = () => {
     setLikedProfileIds(new Set());
     setComplimentedProfileIds(new Set());
     setPassedProfileIds(new Set(id ? await loadPassedIds(id) : []));
+    setAnsweredLikeIds(new Set());
   };
 
   // The welcome popup is shown once, after the intro slides that follow
@@ -463,6 +465,7 @@ const AppShell: React.FC = () => {
         method: 'POST',
         headers: { Authorization: `Bearer ${authToken}` },
       }).then(() => { void fetchBadgeCounts(); setLikesRefreshKey((k) => k + 1); }).catch(() => {});
+      setAnsweredLikeIds((prev) => new Set(prev).add(selectedMatch.id));
     }
     if (selectedMatch) {
       const id = selectedMatch.id;
@@ -577,7 +580,7 @@ const AppShell: React.FC = () => {
 
       const data = await response.json();
       setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
-      if (answeredFromInbox) { setLikesRefreshKey((k) => k + 1); void fetchBadgeCounts(); }
+      if (answeredFromInbox) { setAnsweredLikeIds((prev) => new Set(prev).add(selectedMatch.id)); setLikesRefreshKey((k) => k + 1); void fetchBadgeCounts(); }
       if (data.is_match && data.match_id) {
         // Show match modal
         setMatchedUser({
@@ -634,7 +637,7 @@ const AppShell: React.FC = () => {
 
       const data = await response.json();
       setLikedProfileIds((prev) => new Set(prev).add(selectedMatch.id));
-      if (answeredFromInbox) { setLikesRefreshKey((k) => k + 1); void fetchBadgeCounts(); }
+      if (answeredFromInbox) { setAnsweredLikeIds((prev) => new Set(prev).add(selectedMatch.id)); setLikesRefreshKey((k) => k + 1); void fetchBadgeCounts(); }
       if (data.is_match && data.match_id) {
         setMatchedUser({
           matchId: data.match_id,
@@ -731,47 +734,28 @@ const AppShell: React.FC = () => {
     );
   };
 
-  const handleReportFromProfile = (targetUserId: number, name: string) => {
-    Alert.alert(
-      'Report user',
-      `Why are you reporting ${name}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Inappropriate behavior',
-          onPress: () => submitProfileReport(targetUserId, name, 'inappropriate_behavior'),
-        },
-        {
-          text: 'Fake profile',
-          onPress: () => submitProfileReport(targetUserId, name, 'fake_profile'),
-        },
-        {
-          text: 'Harassment',
-          style: 'destructive',
-          onPress: () => submitProfileReport(targetUserId, name, 'harassment'),
-        },
-      ]
-    );
+  const handleReportFromProfile = (targetUserId: number, name: string, reason: string) => {
+    void submitProfileReport(targetUserId, name, reason);
   };
 
   const submitProfileReport = async (targetUserId: number, name: string, reason: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/privacy/block`, {
+      const response = await fetch(`${API_BASE_URL}/report`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${authToken}`,
         },
-        body: JSON.stringify({ target_user_id: targetUserId }),
+        body: JSON.stringify({ target_user_id: targetUserId, reason }),
       });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || 'Unable to report user.');
       }
-      Alert.alert('Reported', `Thank you for reporting ${name}. We will review it shortly.`);
+      setNotice({ title: 'Report sent', message: `Thanks for flagging ${name}. Our team will review it.`, icon: 'flag' });
       handleCloseProfile();
     } catch (error: any) {
-      Alert.alert('Report failed', error.message || 'Please try again.');
+      setNotice({ title: 'Report failed', message: error.message || 'Please try again.', tone: 'error' });
     }
   };
 
@@ -858,7 +842,8 @@ const AppShell: React.FC = () => {
         ) : (
           <LikesInboxScreen
             {...overlayProps}
-            key={`likes-${likesRefreshKey}`}
+            refreshSignal={likesRefreshKey}
+            hiddenUserIds={Array.from(answeredLikeIds)}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
             onViewProfile={(user) => {

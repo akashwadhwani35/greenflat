@@ -462,8 +462,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   progressBlock: {
-    gap: 10,
-    paddingTop: 14,
+    gap: 22,
+    paddingTop: 16,
   },
   progressTrack: {
     height: 6,

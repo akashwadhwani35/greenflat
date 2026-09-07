@@ -137,9 +137,34 @@ const TypingIndicator: React.FC = () => {
 
 const normalizeSpaces = (input: string) => input.replace(/\s+/g, ' ').trim();
 
+// Words that describe a person. One of these, or a sentence of three words or
+// more, is a search. "Arjun" or "Priya Sharma" on its own is a name lookup, and
+// the AI has nothing to work with.
+const DESCRIPTOR_WORDS = new Set([
+  'kind','funny','caring','loyal','honest','ambitious','calm','creative','adventurous','romantic','confident',
+  'smart','intelligent','mature','emotional','deep','spiritual','religious','fit','tall','short','vegan',
+  'vegetarian','foodie','traveler','traveller','travel','music','gym','fitness','reading','books','movies',
+  'gaming','dog','cat','pet','family','serious','casual','long','term','marriage','relationship','friendship',
+  'someone','person','partner','girl','boy','man','woman','guy','girls','boys','men','women','who','with',
+  'loves','love','like','likes','into','enjoys','vibe','my','me','similar','same','type','looking','find',
+  'delhi','mumbai','bangalore','bengaluru','pune','hyderabad','chennai','kolkata','goa','city','near','nearby',
+  'hindu','muslim','sikh','christian','punjabi','bengali','tamil','gujarati','marathi','doctor','engineer',
+  'artist','musician','entrepreneur','student','teacher','lawyer','designer','writer','chef','nurse','pilot',
+]);
+
+const looksLikePersonName = (input: string) => {
+  const words = input.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 2) return false;
+  // "Arjun", "Priya Sharma": capitalised proper nouns. "hiking" or "cricket fan"
+  // are lower-case and go through to the AI like any other search.
+  if (!words.every((w) => /^[A-Z][a-z'.-]+$/.test(w))) return false;
+  return !words.some((w) => DESCRIPTOR_WORDS.has(w.toLowerCase()));
+};
+
 const hasMeaningfulKeyword = (input: string) => {
   // Require at least one real word token (2+ letters), not only punctuation/symbols.
-  return /[A-Za-z]{2,}/.test(input);
+  if (!/[A-Za-z]{2,}/.test(input)) return false;
+  return !looksLikePersonName(input);
 };
 
 const OFF_TOPIC_PATTERNS: RegExp[] = [

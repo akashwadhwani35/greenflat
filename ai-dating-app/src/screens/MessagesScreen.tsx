@@ -24,6 +24,8 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { NoticeModal, type Notice } from '../components/NoticeModal';
 import { PixelFlag } from '../components/PixelFlag';
+import { SafetySheet } from '../components/SafetySheet';
+import { GifPicker, isGifPickerAvailable } from '../components/GifPicker';
 import { hapticLight } from '../utils/haptics';
 import { toUploadableDataUrl } from '../utils/image';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
@@ -127,6 +129,9 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const soundRef = useRef<Audio.Sound | null>(null);
   const [playingUri, setPlayingUri] = useState<string | null>(null);
   const [showMenu, setShowMenu] = useState(false);
+  // Board 18/19: report reasons in the app's own sheet, not the OS alert.
+  const [reportOpen, setReportOpen] = useState(false);
+  const [gifOpen, setGifOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   // Drives the green shared-answer highlighting on the profile card.
   const viewerProfile = useViewerProfile(token, apiBaseUrl);
@@ -270,26 +275,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
 
   const handleReport = () => {
     setShowMenu(false);
-    Alert.alert(
-      'Report User',
-      `Why are you reporting ${matchName}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Inappropriate behavior',
-          onPress: () => submitReport('inappropriate_behavior'),
-        },
-        {
-          text: 'Fake profile',
-          onPress: () => submitReport('fake_profile'),
-        },
-        {
-          text: 'Harassment',
-          style: 'destructive',
-          onPress: () => submitReport('harassment'),
-        },
-      ]
-    );
+    setReportOpen(true);
   };
 
   const handleBlock = () => {
@@ -373,6 +359,14 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         return [...prev, data.message];
       });
       setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+      // The chat is open, so this message has been seen. Without this the
+      // inbox and the badge counted every socket-delivered message as unread.
+      if (data.message.sender_id !== currentUserId) {
+        void fetch(`${apiBaseUrl}/messages/${matchId}/read`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch(() => {});
+      }
     };
 
     const handleMessageDeleted = (data: { messageId: number; matchId: number }) => {
@@ -1074,23 +1068,45 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
         </View>
       ) : null}
       <NoticeModal notice={requestNotice} onClose={() => setRequestNotice(null)} />
+      <SafetySheet
+        visible={reportOpen}
+        name={matchName}
+        startAtReasons
+        onClose={() => setReportOpen(false)}
+        onReport={(reason) => { void submitReport(reason); }}
+      />
+      <GifPicker
+        visible={gifOpen}
+        onClose={() => setGifOpen(false)}
+        onPick={(url) => {
+          setGifOpen(false);
+          void sendMessage({ content: url, message_type: 'image' });
+        }}
+      />
 
-      {/* Input Area */}
+      {/* Input Area. Edge-to-edge Android does not resize the window, so the old
+          manual margin raced the keyboard; padding by the real overlap works on both. */}
       {requestStatus === 'pending' ? null : (
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
-      >
+      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={0}>
         <View
           style={[
             styles.inputContainer,
-            {
-              backgroundColor: theme.colors.charcoal,
-              marginBottom: Platform.OS === 'android' ? androidKeyboardOffset : 0,
-            },
+            { backgroundColor: theme.colors.charcoal },
           ]}
         >
           {/* Attachment buttons */}
+          {isGifPickerAvailable() ? (
+            <TouchableOpacity
+              style={styles.attachButton}
+              onPress={() => setGifOpen(true)}
+              disabled={sending}
+              accessibilityLabel="Send a GIF"
+            >
+              <View style={[styles.gifBadge, { borderColor: theme.colors.text }]}>
+                <Typography variant="tiny" style={{ color: theme.colors.text, fontFamily: 'RedHatDisplay_700Bold', fontSize: 10 }}>GIF</Typography>
+              </View>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.attachButton}
             onPress={async () => {
@@ -1376,6 +1392,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 12,
     gap: 8,
+  },
+  gifBadge: {
+    borderWidth: 1.5,
+    borderRadius: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
   },
   attachButton: {
     width: 40,

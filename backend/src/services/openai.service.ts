@@ -618,7 +618,7 @@ Return JSON: {"isAdult": true/false, "confidence": 0-1, "reasoning": "short reas
  * - selfie person matches profile primary photo person
  */
 /** Similarity at or above this counts as the same person. */
-const SELFIE_MATCH_THRESHOLD = 0.5;
+const SELFIE_MATCH_THRESHOLD = 0.45;
 
 export const analyzeSelfieAgainstProfile = async (
   selfieUrl: string,
@@ -648,9 +648,14 @@ Answer these:
 3) Is the person in image 1 the same person as in ANY of the other images? Allow for
    different lighting, angle, hairstyle, glasses, expression, and time between photos.
    Judge by stable facial structure, not styling.
-Give "similarity" as a number from 0 to 1 for the best-matching profile photo.
+Give "similarity" as a number from 0 to 1 for the best-matching profile photo, where
+0.7+ means clearly the same person, 0.4-0.7 means probably the same person, and below
+0.4 means a different person. A selfie taken indoors on a front camera against a posed,
+edited or older profile photo of the same person should still score 0.5 or above.
+If none of the profile photos contain a real human face (drawings, memes, objects, animals),
+set "profileHasFace" to false.
 Return strict JSON:
-{"isAdult": true/false, "singleFace": true/false, "similarity": 0-1, "reasoning": "one short sentence"}`;
+{"isAdult": true/false, "singleFace": true/false, "profileHasFace": true/false, "similarity": 0-1, "reasoning": "one short sentence"}`;
 
   try {
     const response = await openai.chat.completions.create({
@@ -677,13 +682,15 @@ Return strict JSON:
     const parsed = JSON.parse(content);
     const similarity = Math.max(0, Math.min(1, Number(parsed.similarity) || 0));
     const singleFace = parsed.singleFace === undefined ? true : Boolean(parsed.singleFace);
+    const profileHasFace = parsed.profileHasFace === undefined ? true : Boolean(parsed.profileHasFace);
+    const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : 'No reasoning provided';
     return {
       isAdult: Boolean(parsed.isAdult),
-      // 0.5 rather than the old 0.6-on-a-boolean: the score is now the model's
-      // own similarity estimate against the best of several photos.
-      isMatch: singleFace && similarity >= SELFIE_MATCH_THRESHOLD,
+      isMatch: singleFace && profileHasFace && similarity >= SELFIE_MATCH_THRESHOLD,
       confidence: similarity,
-      reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning : 'No reasoning provided',
+      reasoning: profileHasFace
+        ? reasoning
+        : 'Your profile photos do not show your face. Add a clear photo of yourself, then verify.',
     };
   } catch (error) {
     console.error('Vision selfie/profile match error:', error);

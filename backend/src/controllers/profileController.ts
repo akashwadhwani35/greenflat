@@ -581,6 +581,12 @@ export const deletePhoto = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
     const { photoId } = req.params;
 
+    // A profile always keeps at least one photo. Upload a new one first.
+    const count = await pool.query('SELECT COUNT(*)::int AS n FROM photos WHERE user_id = $1', [userId]);
+    if ((count.rows[0]?.n ?? 0) <= 1) {
+      return res.status(400).json({ error: 'Add another photo before removing this one. Your profile needs at least one.', last_photo: true });
+    }
+
     const result = await pool.query(
       'DELETE FROM photos WHERE id = $1 AND user_id = $2 RETURNING id',
       [photoId, userId]

@@ -130,8 +130,8 @@ export const SettingsScreen: React.FC<Props> = ({
               <Feather name={item.icon as any} size={18} color={theme.colors.brand} />
             </View>
             <View style={{ flex: 1 }}>
-              <Typography variant="bodyStrong">{item.title}</Typography>
-              <Typography variant="small" muted>
+              <Typography variant="bodyStrong" numberOfLines={1}>{item.title}</Typography>
+              <Typography variant="small" muted numberOfLines={1}>
                 {item.subtitle}
               </Typography>
             </View>
@@ -178,6 +178,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 14,
     padding: 14,
+    // Fixed so a wrapped subtitle on a narrow phone cannot stretch one row.
+    height: 76,
   },
   iconPill: {
     width: 36,

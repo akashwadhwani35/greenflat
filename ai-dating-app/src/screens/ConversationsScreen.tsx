@@ -82,6 +82,7 @@ export const ConversationsScreen: React.FC<Props> = ({
       lastMessage?: string;
       lastMessageTime?: string;
       status?: 'active' | 'pending';
+      senderId?: number;
     }) => {
       setConversations((prev) => {
         const idx = prev.findIndex((c) => c.match_id === data.matchId);
@@ -95,7 +96,7 @@ export const ConversationsScreen: React.FC<Props> = ({
           ...updated[idx],
           last_message: data.lastMessage ?? updated[idx].last_message,
           last_message_time: data.lastMessageTime ?? updated[idx].last_message_time,
-          unread_count: data.lastMessage ? updated[idx].unread_count + 1 : updated[idx].unread_count,
+          unread_count: data.lastMessage && data.senderId !== currentUserId ? updated[idx].unread_count + 1 : updated[idx].unread_count,
           status: data.status ?? updated[idx].status,
           requested_by: data.status === 'active' ? null : updated[idx].requested_by,
         };

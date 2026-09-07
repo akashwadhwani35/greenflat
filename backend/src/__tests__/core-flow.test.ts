@@ -657,35 +657,54 @@ describe('GreenFlag backend core flow', () => {
     expect(loginResponse.status).toBe(401);
   });
 
-  it('enforces non-premium message daily limits', async () => {
-    const female = await signupAndCompleteProfile({
-      email: `msg_f_${Date.now()}@example.com`,
-      name: 'Sara',
-      gender: 'female',
-      interested_in: 'male',
-    });
+  it('caps new conversations per day for non-premium men, but never replies', async () => {
     const male = await signupAndCompleteProfile({
       email: `msg_m_${Date.now()}@example.com`,
       name: 'Dev',
       gender: 'male',
       interested_in: 'female',
     });
-
-    const matchId = await createMutualMatch(female.token, female.userId, male.token, male.userId);
-
-    for (let i = 0; i < 3; i++) {
-      const messageResponse = await agent
-        .post('/api/messages')
-        .set('Authorization', `Bearer ${male.token}`)
-        .send({ match_id: matchId, content: `Message ${i + 1}` });
-      expect(messageResponse.status).toBe(200);
+    const matchIds: number[] = [];
+    for (let i = 0; i < 4; i += 1) {
+      const female = await signupAndCompleteProfile({
+        email: `msg_f${i}_${Date.now()}@example.com`,
+        name: `Sara ${i}`,
+        gender: 'female',
+        interested_in: 'male',
+      });
+      // Matches written directly: like quotas are not what this test is about.
+      const inserted = await pool.query(
+        `INSERT INTO matches (user1_id, user2_id, status) VALUES ($1, $2, 'active') RETURNING id`,
+        [Math.min(male.userId, female.userId), Math.max(male.userId, female.userId)]
+      );
+      matchIds.push(inserted.rows[0].id);
     }
 
-    const fourthMessage = await agent
+    // Three new conversations: fine.
+    for (let i = 0; i < 3; i += 1) {
+      const first = await agent
+        .post('/api/messages')
+        .set('Authorization', `Bearer ${male.token}`)
+        .send({ match_id: matchIds[i], content: `Hello ${i + 1}` });
+      expect(first.status).toBe(200);
+    }
+
+    // Replies inside a conversation already opened are unlimited.
+    for (let i = 0; i < 4; i += 1) {
+      const reply = await agent
+        .post('/api/messages')
+        .set('Authorization', `Bearer ${male.token}`)
+        .send({ match_id: matchIds[0], content: `Reply ${i + 1}` });
+      expect(reply.status).toBe(200);
+    }
+
+    // A fourth NEW conversation is the one that hits the cap.
+    const fourthThread = await agent
       .post('/api/messages')
       .set('Authorization', `Bearer ${male.token}`)
-      .send({ match_id: matchId, content: 'Message 4' });
-    expect(fourthMessage.status).toBe(429);
+      .send({ match_id: matchIds[3], content: 'Hello 4' });
+    expect(fourthThread.status).toBe(429);
+    expect(fourthThread.body.error).toMatch(/new conversations/i);
   });
 
   it('persists privacy settings and supports block/unblock', async () => {

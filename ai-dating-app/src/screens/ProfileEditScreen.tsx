@@ -1046,7 +1046,11 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const moreRows: MoreAboutField[] = ['height', 'exercise', 'educationLevel', 'drinking', 'smoking', 'lookingFor', 'kids', 'haveKids', 'starSign', 'politics', 'religion'];
 
     return (
-      <Modal visible={activeModal === 'moreAbout'} animationType="none" onRequestClose={() => setActiveModal(null)}>
+      <Modal
+        visible={activeModal === 'moreAbout' || activeModal === 'moreField'}
+        animationType="none"
+        onRequestClose={() => setActiveModal(activeModal === 'moreField' ? 'moreAbout' : null)}
+      >
         <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
           <PageHeader title="More about you" onBack={() => setActiveModal(null)} />
 
@@ -1107,6 +1111,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             ))}
             <View style={styles.moreAboutBottomSpacer} />
           </ScrollView>
+          {renderMoreFieldModal()}
         </View>
       </Modal>
     );
@@ -1121,7 +1126,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     const value = getFieldValue(field) === 'Add' ? '' : getFieldValue(field).replace(' cm', '');
 
     return (
-      <Modal visible animationType="none" onRequestClose={() => setActiveModal('moreAbout')}>
+      <View style={[styles.fieldPanel, { backgroundColor: theme.colors.background }]}>
         <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
           <PageHeader title={title} onBack={() => setActiveModal('moreAbout')} />
 
@@ -1203,7 +1208,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             </View>
           )}
         </View>
-      </Modal>
+      </View>
     );
   };
 
@@ -1393,7 +1398,6 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
       {renderCommunitiesModal()}
       {renderBioModal()}
       {renderMoreAboutModal()}
-      {renderMoreFieldModal()}
       <NoticeModal notice={limitNotice} onClose={() => setLimitNotice(null)} />
     </View>
   );
@@ -1539,6 +1543,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  fieldPanel: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 10,
   },
   suggestionBox: {
     borderWidth: 1,

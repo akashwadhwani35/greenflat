@@ -10,8 +10,10 @@ import { GoogleSignInButton } from '../components/GoogleSignInButton';
 WebBrowser.maybeCompleteAuthSession();
 
 const glassLogo = require('../../assets/glass-logo.png');
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const LOGO_SIZE = Math.min(SCREEN_WIDTH * 1.75, 740);
+// Sized to the shorter of width and a share of height, so short or narrow
+// phones scale the flag down instead of cropping its top.
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const LOGO_SIZE = Math.round(Math.min(SCREEN_WIDTH * 1.15, SCREEN_HEIGHT * 0.42, 620));
 
 type WelcomeScreenProps = {
   onStart: () => void;
@@ -352,8 +354,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: '100%',
-    overflow: 'hidden',
-    marginTop: 55,
+    marginTop: 16,
   },
   logoWrap: {
     width: '100%',

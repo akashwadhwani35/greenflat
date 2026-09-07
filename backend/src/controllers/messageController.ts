@@ -89,10 +89,20 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
     const limits = await checkAndResetLimits(userId, client);
     const dailyLimits = sender.gender === 'male' ? DAILY_LIMITS.male : DAILY_LIMITS.female;
 
-    if (!sender.is_premium && limits.messages_started_count >= dailyLimits.messages_per_day) {
+    // The spec caps how many NEW conversations a person can open per day
+    // (men 3, women 10); replies inside a conversation are unlimited. The
+    // count used to go up on every single message, so a new account hit the
+    // wall after three replies and saw "Failed to send message".
+    const priorInThread = await client.query(
+      'SELECT 1 FROM messages WHERE match_id = $1 AND sender_id = $2 LIMIT 1',
+      [match_id, userId]
+    );
+    const startsThread = priorInThread.rows.length === 0;
+
+    if (startsThread && !sender.is_premium && limits.messages_started_count >= dailyLimits.messages_per_day) {
       await client.query('ROLLBACK');
       return res.status(429).json({
-        error: 'Daily message limit reached',
+        error: `You can start ${dailyLimits.messages_per_day} new conversations a day. Replies are unlimited. Try again in a few hours.`,
         limit: dailyLimits.messages_per_day,
         reset_in_hours: LIKE_RESET_HOURS,
       });
@@ -168,13 +178,15 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       [match_id]
     );
 
-    await client.query(
-      `UPDATE user_activity_limits
-       SET messages_started_count = messages_started_count + 1,
-           updated_at = NOW()
-       WHERE user_id = $1`,
-      [userId]
-    );
+    if (startsThread) {
+      await client.query(
+        `UPDATE user_activity_limits
+         SET messages_started_count = messages_started_count + 1,
+             updated_at = NOW()
+         WHERE user_id = $1`,
+        [userId]
+      );
+    }
 
     await client.query('COMMIT');
 
@@ -206,6 +218,8 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
         matchId: match_id,
         lastMessage: preview,
         lastMessageTime: message.created_at,
+        // So the inbox does not count the sender's own message as unread.
+        senderId: userId,
       };
       io.to(`user:${recipientId}`).emit('conversation:updated', conversationUpdate);
       io.to(`user:${userId}`).emit('conversation:updated', conversationUpdate);

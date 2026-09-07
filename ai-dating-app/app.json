@@ -34,6 +34,7 @@
         "backgroundColor": "#101D13"
       },
       "edgeToEdgeEnabled": true,
+      "allowBackup": false,
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "ACCESS_COARSE_LOCATION",

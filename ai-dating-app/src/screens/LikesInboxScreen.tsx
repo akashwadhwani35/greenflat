@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, View, Image, ActivityIndicator, Linking, TouchableOpacity } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
@@ -21,9 +21,13 @@ type Props = {
     primary_photo?: string;
   }) => void;
   onOpenConversation?: (matchId: number, matchName: string, targetUserId: number) => void;
+  /** Bumped after a like / reject answered from here: refetch without a spinner. */
+  refreshSignal?: number;
+  /** Cards to drop immediately, before the server confirms. */
+  hiddenUserIds?: number[];
 };
 
-export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onViewProfile, onOpenConversation }) => {
+export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, onViewProfile, onOpenConversation, refreshSignal = 0, hiddenUserIds = [] }) => {
   const theme = useTheme();
   const [likes, setLikes] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,13 +40,18 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
       .then((d) => setAccepted(Array.isArray(d.accepted) ? d.accepted : []))
       .catch(() => {});
   }, [apiBaseUrl, token]);
-  const greenFlags = likes.filter((item) => Boolean(item?.is_superlike));
-  const regularLikes = likes.filter((item) => !item?.is_superlike);
+  const hidden = new Set(hiddenUserIds);
+  const visibleLikes = likes.filter((item) => !hidden.has(Number(item?.user?.id)));
+  const greenFlags = visibleLikes.filter((item) => Boolean(item?.is_superlike));
+  const regularLikes = visibleLikes.filter((item) => !item?.is_superlike);
 
+  const initialSignal = useRef(refreshSignal);
   useEffect(() => {
+    // Quiet only for bumps after this mount; a fresh open still shows the spinner.
+    const quiet = refreshSignal !== initialSignal.current;
     const fetchLikes = async () => {
       try {
-        setLoading(true);
+        if (!quiet) setLoading(true);
         setError(null);
         const response = await fetch(`${apiBaseUrl}/likes/incoming`, {
           headers: { Authorization: `Bearer ${token}` },
@@ -69,7 +78,7 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
     };
 
     fetchLikes().catch((err) => console.warn('Failed to load likes:', err));
-  }, [apiBaseUrl, token]);
+  }, [apiBaseUrl, token, refreshSignal]);
 
   useEffect(() => {
     const refreshNotificationStatus = async () => {
@@ -129,7 +138,7 @@ export const LikesInboxScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl, o
           </View>
         ) : null}
 
-        {!loading && !error && likes.length === 0 && accepted.length === 0 ? (
+        {!loading && !error && visibleLikes.length === 0 && accepted.length === 0 ? (
           <Typography variant="body" muted>
             Nobody yet. Likes and Green Flags you receive show up here.
           </Typography>

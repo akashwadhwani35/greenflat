@@ -215,10 +215,17 @@ export const PhotoManagerScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
                           styles.iconButtonSmall,
                           { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline },
                         ]}
-                        onPress={() => handleDelete(item.id)}
+                        onPress={() => {
+                          if (photos.length <= 1) {
+                            Alert.alert('Keep one photo', 'Your profile needs at least one photo. Add a new one first, then remove this one.');
+                            return;
+                          }
+                          handleDelete(item.id);
+                        }}
+                        accessibilityHint={photos.length <= 1 ? 'Add another photo before removing this one' : undefined}
                         accessibilityRole="button"
                       >
-                        <Feather name="trash" size={16} color={theme.colors.error} />
+                        <Feather name="trash" size={16} color={photos.length <= 1 ? theme.colors.muted : theme.colors.error} />
                       </TouchableOpacity>
                     </View>
                   </View>

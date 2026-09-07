@@ -3,6 +3,8 @@ import { promises as fs } from 'fs';
 import path from 'path';
 
 const DEFAULT_ALLOWED_MEDIA_HOSTS = ['res.cloudinary.com'];
+// GIFs picked in the chat composer come straight from Tenor's CDN.
+const ALWAYS_ALLOWED_MEDIA_HOSTS = ['media.tenor.com', 'c.tenor.com', 'media1.tenor.com', 'media2.tenor.com', 'media3.tenor.com', 'media4.tenor.com'];
 const BLOCKED_SCHEMES = ['data:', 'file:', 'content:', 'ph:'];
 
 type MediaConfig = {
@@ -38,7 +40,7 @@ const getMediaConfig = (): MediaConfig => {
     localMediaMaxBytes: parsePositiveInt(process.env.MEDIA_LOCAL_MAX_BYTES, 8 * 1024 * 1024),
     localMediaEnabled: process.env.MEDIA_LOCAL_UPLOADS !== 'false',
     maxTextMessageLength: parsePositiveInt(process.env.MAX_TEXT_MESSAGE_LENGTH, 2000),
-    allowedMediaHosts: configuredHosts.length > 0 ? configuredHosts : DEFAULT_ALLOWED_MEDIA_HOSTS,
+    allowedMediaHosts: Array.from(new Set([...(configuredHosts.length > 0 ? configuredHosts : DEFAULT_ALLOWED_MEDIA_HOSTS), ...ALWAYS_ALLOWED_MEDIA_HOSTS])),
   };
 };
 

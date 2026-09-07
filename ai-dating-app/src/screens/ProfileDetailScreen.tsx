@@ -7,6 +7,7 @@ import { MatchCandidate } from './MatchboardScreen';
 import { PixelFlag } from '../components/PixelFlag';
 import type { ViewerProfile } from '../hooks/useViewerProfile';
 import { NoticeModal, type Notice } from '../components/NoticeModal';
+import { SafetySheet } from '../components/SafetySheet';
 
 type ProfileDetailScreenProps = {
   match: MatchCandidate | null;
@@ -17,7 +18,7 @@ type ProfileDetailScreenProps = {
   onSuperlike?: () => void;
   onSendCompliment?: (targetUserId: number, content: string, photoUrl?: string | null) => Promise<boolean | void> | boolean | void;
   onBlock?: (targetUserId: number, name: string) => void;
-  onReport?: (targetUserId: number, name: string) => void;
+  onReport?: (targetUserId: number, name: string, reason: string) => void;
   onHeaderRightPress?: () => void;
   headerRightIcon?: React.ComponentProps<typeof Feather>['name'];
   headerRightAccessibilityLabel?: string;
@@ -157,6 +158,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   // only carried a name, age, city and one photo; this fills in the rest,
   // including how far away they are.
   const [details, setDetails] = useState<Record<string, unknown> | null>(null);
+  const [safetyOpen, setSafetyOpen] = useState(false);
   useEffect(() => {
     setDetails(null);
     if (!match || !token || !apiBaseUrl || embedded) return;
@@ -354,26 +356,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   };
 
   const handleSafetyMenu = () => {
-    if (!onBlock && !onReport) {
-      return;
-    }
-    const actions: Array<{ text: string; style?: 'default' | 'cancel' | 'destructive'; onPress?: () => void }> = [];
-    if (onBlock) {
-      actions.push({
-        text: 'Block',
-        style: 'destructive',
-        onPress: () => onBlock(match.id, name),
-      });
-    }
-    if (onReport) {
-      actions.push({
-        text: 'Report',
-        style: 'destructive',
-        onPress: () => onReport(match.id, name),
-      });
-    }
-    actions.push({ text: 'Cancel', style: 'cancel' });
-    Alert.alert('Safety', `Manage your interaction with ${name}.`, actions);
+    if (!onBlock && !onReport) return;
+    setSafetyOpen(true);
   };
 
   const showSafetyButton = !hideActionButtons && Boolean(onBlock || onReport);
@@ -775,6 +759,13 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             </View>
           </View>
         ) : null}
+        <SafetySheet
+          visible={safetyOpen}
+          name={name}
+          onClose={() => setSafetyOpen(false)}
+          onBlock={onBlock ? () => onBlock(match.id, name) : undefined}
+          onReport={onReport ? (reason) => onReport(match.id, name, reason) : undefined}
+        />
         <NoticeModal notice={notice} onClose={() => setNotice(null)} />
     </View>
   );

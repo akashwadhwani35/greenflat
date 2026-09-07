@@ -334,7 +334,8 @@ const styles = StyleSheet.create({
   },
   content: {
     paddingHorizontal: 20,
-    paddingBottom: 60,
+    // The bottom nav floats over the last 60px and phones add a gesture inset.
+    paddingBottom: 150,
     gap: 20,
     paddingTop: 20,
   },
