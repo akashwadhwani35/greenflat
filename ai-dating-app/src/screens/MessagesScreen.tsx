@@ -974,7 +974,8 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           setShowProfile(false);
           handleReport();
         }}
-      />
+        hideActionButtons
+        />
 
       {/* Messages List */}
       {loading ? (

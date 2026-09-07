@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "480247350372",
+    "project_id": "greenflag-app",
+    "storage_bucket": "greenflag-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:480247350372:android:86562f5b01e91bf9340b71",
+        "android_client_info": {
+          "package_name": "app.gflag.greenflag"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "480247350372-1850qbgefs61uhhgubg3pbkscorornm4.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBfayT3k2t-HgCbmyoldOINJQU5-k1pnY8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "480247350372-1850qbgefs61uhhgubg3pbkscorornm4.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "480247350372-v7ka79dqp9n4t0sfbvba9k3o2uqeunlj.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "app.gflag.greenflag"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

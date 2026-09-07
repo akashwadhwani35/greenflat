@@ -28,6 +28,7 @@
     },
     "android": {
       "package": "app.gflag.greenflag",
+      "googleServicesFile": "./google-services.json",
       "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
