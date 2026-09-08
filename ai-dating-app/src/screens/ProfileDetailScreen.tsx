@@ -19,6 +19,8 @@ type ProfileDetailScreenProps = {
   onSendCompliment?: (targetUserId: number, content: string, photoUrl?: string | null) => Promise<boolean | void> | boolean | void;
   onBlock?: (targetUserId: number, name: string) => void;
   onReport?: (targetUserId: number, name: string, reason: string) => void;
+  /** Save for later (Bookmarks). Always visible so people can find it; the server gates it to paid plans. */
+  onBookmark?: (targetUserId: number, name: string) => void;
   onHeaderRightPress?: () => void;
   headerRightIcon?: React.ComponentProps<typeof Feather>['name'];
   headerRightAccessibilityLabel?: string;
@@ -105,6 +107,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   onSuperlike,
   onBlock,
   onReport,
+  onBookmark,
   onHeaderRightPress,
   headerRightIcon,
   headerRightAccessibilityLabel,
@@ -376,6 +379,17 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           <Feather name="arrow-left" size={20} color={theme.colors.text} />
         </TouchableOpacity>
         <View style={{ flex: 1 }} />
+        {onBookmark && !hideActionButtons ? (
+          <TouchableOpacity
+            style={[styles.headerIconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline, marginRight: 8 }]}
+            activeOpacity={0.75}
+            onPress={() => onBookmark(match.id, match.name)}
+            accessibilityRole="button"
+            accessibilityLabel="Save profile for later"
+          >
+            <Feather name="bookmark" size={18} color={theme.colors.text} />
+          </TouchableOpacity>
+        ) : null}
         {showCustomRightButton ? (
           <TouchableOpacity
             style={[styles.headerIconButton, { backgroundColor: theme.colors.secondaryHighlight, borderColor: theme.colors.secondaryHairline }]}

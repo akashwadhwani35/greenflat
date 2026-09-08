@@ -518,6 +518,31 @@ const AppShell: React.FC = () => {
    * which is the cue to offer saving them instead. Cooldown blocks everyone,
    * paid or not; a bookmark is what paying buys.
    */
+  /** Bookmarks: paid plans save a profile to like later; free accounts see the upsell. */
+  const saveBookmark = async (targetUserId: number, name?: string) => {
+    if (!authToken) return;
+    try {
+      const bookmarkResponse = await fetch(`${API_BASE_URL}/bookmarks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify({ target_user_id: targetUserId }),
+      });
+      const body = await bookmarkResponse.json().catch(() => ({}));
+      if (bookmarkResponse.ok) {
+        setNotice({ title: 'Saved', message: `${name || 'They'} will be under Saved in your profile. Like them whenever you are ready.`, icon: 'bookmark' });
+      } else if (body.upgrade_required) {
+        Alert.alert('Paid feature', 'Saving profiles for later is part of Pro and Premium.', [
+          { text: 'Not now', style: 'cancel' },
+          { text: 'See plans', onPress: () => setOverlay('subscription') },
+        ]);
+      } else {
+        Alert.alert('Could not save', body.error || 'Please try again.');
+      }
+    } catch (error: any) {
+      Alert.alert('Could not save', error?.message || 'Please try again.');
+    }
+  };
+
   const likeFromList = async (targetUserId: number, isOnGrid = false) => {
     if (!authToken) return;
     hapticLight();
@@ -541,25 +566,7 @@ const AppShell: React.FC = () => {
               { text: 'Not now', style: 'cancel' },
               {
                 text: 'Save',
-                onPress: () => {
-                  void fetch(`${API_BASE_URL}/bookmarks`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      Authorization: `Bearer ${authToken}`,
-                    },
-                    body: JSON.stringify({ target_user_id: targetUserId }),
-                  }).then(async (bookmarkResponse) => {
-                    const body = await bookmarkResponse.json().catch(() => ({}));
-                    if (bookmarkResponse.ok) {
-                      Alert.alert('Saved', 'You will find them under Saved.');
-                    } else if (body.upgrade_required) {
-                      Alert.alert('Paid feature', 'Saving profiles is available on paid plans.');
-                    } else {
-                      Alert.alert('Could not save', body.error || 'Please try again.');
-                    }
-                  });
-                },
+                onPress: () => { void saveBookmark(targetUserId); },
               },
             ]
           );
@@ -1154,6 +1161,7 @@ const AppShell: React.FC = () => {
               onSendCompliment={handleSendCompliment}
               onBlock={handleBlockFromProfile}
               onReport={handleReportFromProfile}
+              onBookmark={(id, name) => { void saveBookmark(id, name); }}
               viewer={viewerProfile}
               alreadyLiked={selectedMatch ? likedProfileIds.has(selectedMatch.id) : false}
               alreadyComplimented={selectedMatch ? complimentedProfileIds.has(selectedMatch.id) : false}
