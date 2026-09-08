@@ -68,6 +68,11 @@ const rcGet = async (path: string): Promise<any> => {
       'Content-Type': 'application/json',
     },
   });
+  // A customer RevenueCat has never seen (the app's SDK creates them on first
+  // launch) is simply someone who bought nothing, not a broken lookup.
+  if (response.status === 404 && path.includes('/customers/')) {
+    return { items: [], next_page: null };
+  }
   if (!response.ok) {
     const detail = await response.text().catch(() => '');
     throw new Error(`REVENUECAT_LOOKUP_FAILED (${response.status}): ${detail.slice(0, 200)}`);
