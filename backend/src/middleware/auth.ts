@@ -28,7 +28,7 @@ export const authenticate = async (
     // Tokens live for 7 days, so a ban has to be enforced per request. Checking
     // only at login left a banned user with up to a week of continued access.
     const result = await pool.query(
-      'SELECT is_banned, last_active FROM users WHERE id = $1',
+      'SELECT is_banned, last_active, is_premium, premium_expires_at FROM users WHERE id = $1',
       [decoded.userId]
     );
 
@@ -38,6 +38,23 @@ export const authenticate = async (
 
     if (result.rows[0].is_banned) {
       return res.status(403).json({ error: 'This account has been suspended.' });
+    }
+
+    // A plan whose paid period has ended drops back to free right here, so
+    // every quota and feature check downstream already sees a free account.
+    // The app re-claims from the store on launch if the subscription renewed.
+    const expiresAt = result.rows[0].premium_expires_at ? new Date(result.rows[0].premium_expires_at).getTime() : null;
+    if (result.rows[0].is_premium && expiresAt !== null && expiresAt <= Date.now()) {
+      await pool.query(
+        `UPDATE users SET is_premium = FALSE, updated_at = NOW()
+          WHERE id = $1 AND is_premium = TRUE AND premium_expires_at IS NOT NULL AND premium_expires_at <= NOW()`,
+        [decoded.userId]
+      );
+      await pool.query(
+        `UPDATE subscriptions SET status = 'expired', updated_at = NOW()
+          WHERE user_id = $1 AND status = 'active' AND expires_at IS NOT NULL AND expires_at <= NOW()`,
+        [decoded.userId]
+      ).catch(() => {});
     }
 
     req.userId = decoded.userId;

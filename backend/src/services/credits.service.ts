@@ -9,6 +9,42 @@ export type AllowanceResult = {
   credit_balance: number;
   granted: number;
   next_refill_at: string | null;
+  /** Unspent weekly free tokens and when they lapse. Bought tokens never expire. */
+  weekly_tokens_balance: number;
+  weekly_tokens_expire_at: string | null;
+  expired: number;
+};
+
+const WEEKLY_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Drops whatever is left of a weekly grant once its week is over. Runs inside
+ * the caller's row lock. Bought tokens are untouched: the weekly counter never
+ * exceeds the grant, and spending draws it down first.
+ */
+const expireWeeklyTokens = async (client: Queryable, userId: number, row: any): Promise<number> => {
+  const remaining = Number(row.weekly_tokens_balance || 0);
+  const expiresAt = row.weekly_tokens_expire_at ? new Date(row.weekly_tokens_expire_at).getTime() : null;
+  if (remaining <= 0 || !expiresAt || expiresAt > Date.now()) return 0;
+  const balance = Number(row.credit_balance || 0);
+  const toRemove = Math.min(remaining, balance);
+  await client.query(
+    `UPDATE users
+        SET credit_balance = credit_balance - $2::int,
+            weekly_tokens_balance = 0,
+            weekly_tokens_expire_at = NULL,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [userId, toRemove]
+  );
+  if (toRemove > 0) {
+    await client.query(
+      `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
+       VALUES ($1, $2, 'debit', 'weekly_expired', $3)`,
+      [userId, toRemove, JSON.stringify({ expired_at: new Date(expiresAt).toISOString() })]
+    );
+  }
+  return toRemove;
 };
 
 /**
@@ -26,6 +62,9 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
       credit_balance: Number(current.rows[0]?.credit_balance || 0),
       granted: 0,
       next_refill_at: null,
+      weekly_tokens_balance: 0,
+      weekly_tokens_expire_at: null,
+      expired: 0,
     };
   }
 
@@ -34,7 +73,7 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
     await client.query('BEGIN');
 
     const existing = await client.query(
-      'SELECT credit_balance, last_token_refill_at, created_at FROM users WHERE id = $1 FOR UPDATE',
+      'SELECT credit_balance, last_token_refill_at, created_at, weekly_tokens_balance, weekly_tokens_expire_at FROM users WHERE id = $1 FOR UPDATE',
       [userId]
     );
 
@@ -43,7 +82,11 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
       throw new Error('User not found');
     }
 
-    const balance = Number(existing.rows[0].credit_balance || 0);
+    // Last week's leftovers lapse before anything else is counted.
+    const expired = await expireWeeklyTokens(client, userId, existing.rows[0]);
+    const weeklyLeft = expired > 0 ? 0 : Number(existing.rows[0].weekly_tokens_balance || 0);
+    const weeklyExpiresAt = expired > 0 ? null : existing.rows[0].weekly_tokens_expire_at;
+    const balance = Number(existing.rows[0].credit_balance || 0) - expired;
     // A brand new account's first weekly grant is a week after signup, not
     // immediately: the signup tokens are the first week's allowance.
     const lastRefillAt = existing.rows[0].last_token_refill_at || existing.rows[0].created_at;
@@ -53,23 +96,43 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
 
     if (!dueForRefill) {
       await client.query('COMMIT');
-      return { credit_balance: balance, granted: 0, next_refill_at: nextRefillAt(lastRefillAt) };
+      return {
+        credit_balance: balance,
+        granted: 0,
+        next_refill_at: nextRefillAt(lastRefillAt),
+        weekly_tokens_balance: weeklyLeft,
+        weekly_tokens_expire_at: weeklyExpiresAt ? new Date(weeklyExpiresAt).toISOString() : null,
+        expired,
+      };
     }
 
+    // A fresh grant replaces any unspent weekly tokens rather than stacking on
+    // them: the free five are use-it-or-lose-it.
+    const stale = weeklyLeft;
+    const expiresAt = new Date(Date.now() + WEEKLY_TOKEN_TTL_MS);
     const updated = await client.query(
       `UPDATE users
-       SET credit_balance = credit_balance + $2::int,
+       SET credit_balance = credit_balance - $3::int + $2::int,
+           weekly_tokens_balance = $2::int,
+           weekly_tokens_expire_at = $4,
            last_token_refill_at = NOW(),
            updated_at = NOW()
        WHERE id = $1
        RETURNING credit_balance, last_token_refill_at`,
-      [userId, WEEKLY_FREE_TOKENS]
+      [userId, WEEKLY_FREE_TOKENS, stale, expiresAt]
     );
+    if (stale > 0) {
+      await client.query(
+        `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
+         VALUES ($1, $2, 'debit', 'weekly_expired', $3)`,
+        [userId, stale, JSON.stringify({ replaced_by_new_grant: true })]
+      );
+    }
 
     await client.query(
       `INSERT INTO credit_transactions (user_id, amount, direction, reason, metadata)
        VALUES ($1, $2, 'credit', 'weekly_allowance', $3)`,
-      [userId, WEEKLY_FREE_TOKENS, JSON.stringify({ from: balance })]
+      [userId, WEEKLY_FREE_TOKENS, JSON.stringify({ from: balance, expires_at: expiresAt.toISOString() })]
     );
 
     await client.query('COMMIT');
@@ -78,6 +141,9 @@ export const ensureDailyAllowance = async (userId: number): Promise<AllowanceRes
       credit_balance: Number(updated.rows[0].credit_balance),
       granted: WEEKLY_FREE_TOKENS,
       next_refill_at: nextRefillAt(updated.rows[0].last_token_refill_at),
+      weekly_tokens_balance: WEEKLY_FREE_TOKENS,
+      weekly_tokens_expire_at: expiresAt.toISOString(),
+      expired: expired + stale,
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -116,6 +182,7 @@ export const consumeCredits = async (
   const updateResult = await executor.query(
     `UPDATE users
      SET credit_balance = credit_balance - $1::int,
+         weekly_tokens_balance = GREATEST(0, weekly_tokens_balance - $1::int),
          updated_at = NOW()
      WHERE id = $2 AND credit_balance >= $1::int
      RETURNING credit_balance`,

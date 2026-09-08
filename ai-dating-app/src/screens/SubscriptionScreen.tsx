@@ -260,6 +260,13 @@ export const SubscriptionScreen: React.FC<Props> = ({
                 ]}
                 onPress={() => setSelectedDuration(option.duration)}
               >
+                {option.duration === '3month' ? (
+                  <View style={[styles.popularPill, { backgroundColor: isSelected ? '#000' : theme.colors.neonGreen }]}>
+                    <Typography variant="tiny" style={{ color: isSelected ? theme.colors.neonGreen : '#000', fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 0.3 }}>
+                      MOST POPULAR
+                    </Typography>
+                  </View>
+                ) : null}
                 <Typography
                   variant="small"
                   numberOfLines={1}
@@ -399,6 +406,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+    paddingTop: 10,
   },
   priceCard: {
     width: '48%',
@@ -408,6 +416,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'center',
     gap: 4,
+    overflow: 'visible',
+  },
+  popularPill: {
+    position: 'absolute',
+    top: -10,
+    alignSelf: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 999,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

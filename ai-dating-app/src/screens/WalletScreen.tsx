@@ -18,6 +18,7 @@ type Transaction = {
 
 // Server reasons are snake_case identifiers; these are the words a person sees.
 const REASON_LABELS: Record<string, string> = {
+  weekly_expired: 'Free tokens expired',
   signup_bonus: 'Welcome tokens',
   weekly_allowance: 'Weekly free tokens',
   daily_allowance: 'Free tokens',
@@ -61,6 +62,8 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
   const [paymentsEnabled, setPaymentsEnabled] = useState(false);
   const [freeAllowance, setFreeAllowance] = useState<number | null>(null);
   const [nextRefillAt, setNextRefillAt] = useState<string | null>(null);
+  const [weeklyLeft, setWeeklyLeft] = useState(0);
+  const [weeklyExpiresAt, setWeeklyExpiresAt] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
 
   useEffect(() => {
@@ -78,6 +81,8 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
         setPaymentsEnabled(Boolean(data.payments_enabled));
         setFreeAllowance(data.free_allowance ?? null);
         setNextRefillAt(data.next_refill_at ?? null);
+        setWeeklyLeft(Number(data.weekly_tokens_balance || 0));
+        setWeeklyExpiresAt(data.weekly_tokens_expire_at ?? null);
         setTransactions(Array.isArray(data.transactions) ? data.transactions : []);
       } finally {
         setLoading(false);
@@ -174,6 +179,19 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
             </Typography>
           </Pressable>
         </View>
+
+        {/* Free weekly tokens are use-it-or-lose-it; bought ones never expire. */}
+        {weeklyLeft > 0 && weeklyExpiresAt ? (
+          <View style={[styles.refillNote, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+            <Feather name="clock" size={16} color={theme.colors.neonGreen} />
+            <Typography variant="small" style={{ color: theme.colors.mutedLight, flex: 1 }}>
+              {weeklyLeft} free {weeklyLeft === 1 ? 'token expires' : 'tokens expire'} {(() => {
+                const days = Math.max(0, Math.ceil((new Date(weeklyExpiresAt).getTime() - Date.now()) / 86400000));
+                return days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`;
+              })()}. Bought tokens never expire.
+            </Typography>
+          </View>
+        ) : null}
 
         {/* Where tokens come from while packs are not on sale. */}
         {!paymentsEnabled ? (
@@ -309,7 +327,7 @@ export const WalletScreen: React.FC<Props> = ({ onBack, onOpenCheckout, onOpenSu
                       <Typography variant="small" style={{ color: theme.colors.text }}>{reasonLabel(tx.reason)}</Typography>
                       <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 2 }}>{historyDate(tx.created_at)}</Typography>
                     </View>
-                    <Typography variant="bodyStrong" style={{ color: credit ? theme.colors.neonGreen : theme.colors.text }}>
+                    <Typography variant="bodyStrong" style={{ color: credit ? theme.colors.neonGreen : theme.colors.text, marginRight: 16 }}>
                       {credit ? '+' : '-'}{Math.abs(Number(tx.amount) || 0)}
                     </Typography>
                   </View>

@@ -44,7 +44,7 @@ import { SubscriptionScreen } from './src/screens/SubscriptionScreen';
 import { PausedBanner } from './src/components/PausedBanner';
 import { clearSession, loadFirstSearchDone, loadSession, saveFirstSearchDone, saveSession, hasWelcomeBeenShown, markWelcomeShown, loadPassedIds, savePassedIds, loadSubscriptionNudgeShownAt, markSubscriptionNudgeShown, loadLastSearch } from './src/utils/session';
 import { hapticLight, hapticStrong } from './src/utils/haptics';
-import { configurePurchases, logOutPurchases } from './src/services/purchases';
+import { configurePurchases, logOutPurchases, getActiveSubscription } from './src/services/purchases';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL ?? 'https://greenflag-api-480247350372.us-central1.run.app/api';
 
@@ -375,6 +375,23 @@ const AppShell: React.FC = () => {
               const body = await me.json().catch(() => ({}));
               if (me.ok && body?.user?.onboarding_completed === false) onboardingDone = false;
               if (me.ok && typeof body?.user?.name === 'string' && body.user.name) setUserName(body.user.name);
+              // A plan that renewed in the store while the app was closed, or a
+              // reinstall, is claimed again here so the server-side plan follows
+              // the store. The server re-checks with RevenueCat before granting.
+              if (me.ok) {
+                const expiresAt = body?.user?.premium_expires_at ? new Date(body.user.premium_expires_at).getTime() : null;
+                const paying = Boolean(body?.user?.is_premium) && (expiresAt === null || expiresAt > Date.now());
+                if (!paying) {
+                  void getActiveSubscription().then((active) => {
+                    if (!active) return;
+                    return fetch(`${API_BASE_URL}/wallet/subscribe`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}` },
+                      body: JSON.stringify({ plan: active.plan, duration: active.duration, receipt: active.productId }),
+                    }).then(() => undefined);
+                  }).catch(() => {});
+                }
+              }
             } catch {
               // Offline: fall through to the main screen as before.
             }

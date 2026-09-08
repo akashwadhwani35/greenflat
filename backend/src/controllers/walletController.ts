@@ -58,6 +58,9 @@ export const getWalletSummary = async (req: AuthRequest, res: Response) => {
       // Lets the client explain where tokens come from while packs are unavailable.
       free_allowance: WEEKLY_FREE_TOKENS,
       next_refill_at: allowance.next_refill_at,
+      // The unspent part of this week's free tokens, and when it lapses.
+      weekly_tokens_balance: allowance.weekly_tokens_balance,
+      weekly_tokens_expire_at: allowance.weekly_tokens_expire_at,
     });
   } catch (error) {
     console.error('Get wallet summary error:', error);

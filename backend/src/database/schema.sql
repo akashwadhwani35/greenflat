@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_verified BOOLEAN DEFAULT FALSE,
     is_premium BOOLEAN DEFAULT FALSE,
     premium_expires_at TIMESTAMP,
+    weekly_tokens_balance INTEGER NOT NULL DEFAULT 0,
+    weekly_tokens_expire_at TIMESTAMP,
     boost_expires_at TIMESTAMP,
     credit_balance INTEGER NOT NULL DEFAULT 19,
     last_token_refill_at TIMESTAMP,
