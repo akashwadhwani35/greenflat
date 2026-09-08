@@ -12,6 +12,7 @@ import { Platform } from 'react-native';
 import {
   TOKEN_PACK_PRODUCT_IDS,
   subscriptionProductId,
+  ALL_PRODUCT_IDS,
   type PackId,
   type PlanTier,
   type PlanDuration,
@@ -121,5 +122,68 @@ export const fetchLocalisedPrices = async (
     }, {});
   } catch {
     return {};
+  }
+};
+
+/** Our subscription product ids are `${plan}_${duration}`. */
+const parseSubscriptionProductId = (productId: string): { plan: PlanTier; duration: PlanDuration } | null => {
+  const match = /^(pro|premium)_(1week|1month|3month|6month)$/.exec(productId);
+  if (!match) return null;
+  return { plan: match[1] as PlanTier, duration: match[2] as PlanDuration };
+};
+
+export type ActiveSubscription = { plan: PlanTier; duration: PlanDuration; productId: string };
+
+/**
+ * What the store says this person currently holds. The server stays the source
+ * of truth for is_premium (it re-checks with RevenueCat before granting), so
+ * this is for restore flows and quick UI decisions, never for gating features.
+ */
+export const getActiveSubscription = async (): Promise<ActiveSubscription | null> => {
+  const mod = loadModule();
+  if (!mod || !purchasesApiKey() || !configured) return null;
+  try {
+    const info = await mod.getCustomerInfo();
+    const active: string[] = Array.isArray(info?.activeSubscriptions) ? info.activeSubscriptions : [];
+    // Store ids can carry a base-plan suffix on Android ("pro_1month:monthly").
+    for (const raw of active) {
+      const productId = String(raw).split(':')[0];
+      if (!ALL_PRODUCT_IDS.includes(productId)) continue;
+      const parsed = parseSubscriptionProductId(productId);
+      if (parsed) return { ...parsed, productId };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+};
+
+/** Active entitlement ids as configured in the RevenueCat dashboard. */
+export const getActiveEntitlements = async (): Promise<string[]> => {
+  const mod = loadModule();
+  if (!mod || !purchasesApiKey() || !configured) return [];
+  try {
+    const info = await mod.getCustomerInfo();
+    return Object.keys(info?.entitlements?.active || {});
+  } catch {
+    return [];
+  }
+};
+
+/**
+ * Restore: asks the store for everything this Apple/Google account bought, then
+ * reports the current subscription so the caller can re-claim it server-side.
+ * Apple rejects apps whose paywall has no restore path.
+ */
+export const restorePurchases = async (): Promise<
+  { status: 'restored'; subscription: ActiveSubscription | null } | { status: 'unavailable' } | { status: 'error'; message: string }
+> => {
+  const mod = loadModule();
+  if (!mod || !purchasesApiKey() || !configured) return { status: 'unavailable' };
+  try {
+    await mod.restorePurchases();
+    return { status: 'restored', subscription: await getActiveSubscription() };
+  } catch (error: any) {
+    return { status: 'error', message: error?.message || 'Could not restore purchases.' };
   }
 };

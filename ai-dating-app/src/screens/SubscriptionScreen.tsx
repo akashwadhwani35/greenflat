@@ -4,7 +4,7 @@ import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PixelFlag } from '../components/PixelFlag';
 import { Feather } from '@expo/vector-icons';
-import { purchaseSubscription } from '../services/purchases';
+import { purchaseSubscription, restorePurchases } from '../services/purchases';
 import type { PlanDuration } from '../services/productIds';
 
 type PlanTier = 'pro' | 'premium';
@@ -161,6 +161,43 @@ export const SubscriptionScreen: React.FC<Props> = ({
     }
   };
 
+  const handleRestore = async () => {
+    setLoading(true);
+    try {
+      const outcome = await restorePurchases();
+      if (outcome.status === 'unavailable') {
+        Alert.alert('Not available yet', 'Subscriptions are not set up on this build.');
+        return;
+      }
+      if (outcome.status === 'error') {
+        Alert.alert('Restore failed', outcome.message);
+        return;
+      }
+      if (!outcome.subscription) {
+        Alert.alert('Nothing to restore', 'No active subscription was found for this store account.');
+        return;
+      }
+      // Re-claim it server-side; the server checks with RevenueCat before granting.
+      const response = await fetch(`${apiBaseUrl}/wallet/subscribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          plan: outcome.subscription.plan,
+          duration: outcome.subscription.duration,
+          receipt: outcome.subscription.productId,
+        }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || 'Could not restore your plan.');
+      Alert.alert('Restored', `Your ${outcome.subscription.plan === 'pro' ? 'Pro' : 'Premium'} plan is back.`);
+      onPurchased?.();
+    } catch (error: any) {
+      Alert.alert('Restore failed', error?.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
       {/* Header with X */}
@@ -276,6 +313,13 @@ export const SubscriptionScreen: React.FC<Props> = ({
           >
             Terms.
           </Typography>
+        </Typography>
+        <Typography
+          variant="small"
+          style={[styles.termsText, { textDecorationLine: 'underline', marginTop: 8 }]}
+          onPress={loading ? undefined : handleRestore}
+        >
+          Restore purchases
         </Typography>
 
         {/* CTA */}
