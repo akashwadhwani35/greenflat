@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
@@ -13,6 +13,29 @@ export const TermsScreen: React.FC<Props> = ({ onBack }) => {
       <PageHeader title="Terms & privacy" onBack={onBack} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* The signed, current versions live on gflag.app; this screen is the
+            offline summary. */}
+        <View style={[styles.card, { borderColor: theme.colors.neonGreen }]}>
+          <Typography variant="bodyStrong">Full documents</Typography>
+          <Typography variant="small" muted>The complete, current Terms of Service and Privacy Policy are published on gflag.app.</Typography>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10 }}>
+            <TouchableOpacity
+              onPress={() => { void Linking.openURL('https://gflag.app/terms'); }}
+              style={[styles.linkButton, { backgroundColor: theme.colors.neonGreen }]}
+              accessibilityRole="link"
+            >
+              <Typography variant="small" style={{ color: theme.colors.deepBlack, fontFamily: 'RedHatDisplay_700Bold' }}>Terms of Service</Typography>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => { void Linking.openURL('https://gflag.app/privacy'); }}
+              style={[styles.linkButton, { borderWidth: 1, borderColor: theme.colors.border }]}
+              accessibilityRole="link"
+            >
+              <Typography variant="small" style={{ fontFamily: 'RedHatDisplay_700Bold' }}>Privacy Policy</Typography>
+            </TouchableOpacity>
+          </View>
+        </View>
+
         {/* ---------- TERMS OF SERVICE ---------- */}
         <Typography variant="h2">Terms of Service</Typography>
         <Typography variant="small" muted>Last updated: February 2026</Typography>
@@ -152,6 +175,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 120,
     gap: 12,
+  },
+  linkButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
   card: {
     borderWidth: 1,

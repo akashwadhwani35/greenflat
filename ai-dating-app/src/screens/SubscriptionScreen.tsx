@@ -262,6 +262,7 @@ export const SubscriptionScreen: React.FC<Props> = ({
               >
                 <Typography
                   variant="small"
+                  numberOfLines={1}
                   style={{
                     color: isSelected ? '#000' : theme.colors.neonGreen,
                     fontFamily: 'RedHatDisplay_600SemiBold',
@@ -269,8 +270,12 @@ export const SubscriptionScreen: React.FC<Props> = ({
                 >
                   {option.label}
                 </Typography>
+                {/* One line on every phone: the price shrinks before it wraps. */}
                 <Typography
                   variant="h2"
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
                   style={{
                     color: isSelected ? '#000' : theme.colors.text,
                     fontFamily: 'RedHatDisplay_700Bold',
