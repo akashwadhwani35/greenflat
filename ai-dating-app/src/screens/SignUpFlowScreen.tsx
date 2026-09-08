@@ -100,7 +100,6 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
           webClientId: googleWebClientId,
           androidClientId: googleAndroidClientId,
           iosClientId: googleIosClientId,
-          responseType: 'id_token',
           selectAccount: true,
           scopes: ['openid', 'profile', 'email'],
         }

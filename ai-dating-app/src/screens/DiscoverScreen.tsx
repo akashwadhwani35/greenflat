@@ -419,7 +419,7 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
       // Offline or the server could not answer. Fall back to whatever this
       // session still holds rather than doing nothing.
       if (offGridHistory.length === 0) {
-        Alert.alert('Nothing to rewind', 'No previous off-grid set available.');
+        Alert.alert('Nothing to rewind', 'No previous Explore set available.');
         return;
       }
       const previous = offGridHistory[offGridHistory.length - 1];

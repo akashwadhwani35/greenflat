@@ -44,7 +44,6 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
           webClientId: googleWebClientId,
           androidClientId: googleAndroidClientId,
           iosClientId: googleIosClientId,
-          responseType: 'id_token',
           selectAccount: true,
           scopes: ['openid', 'profile', 'email'],
         }

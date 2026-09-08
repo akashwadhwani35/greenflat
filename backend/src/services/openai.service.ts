@@ -190,13 +190,15 @@ Their compatibility score is ${matchPercentage}%.
 
 Write to the reader in second person ("you"), and refer to the other person as ${them}. Never use placeholder labels such as "User A", "User B", "User 1", or "the reader" in your output.
 
-Return JSON with keys summary (2 sentences max), highlights (array of 2-3 bullet points describing alignment), and suggested_openers (array of 2 gentle conversation starters tied to their common ground). Keep language warm, human, and specific.`;
+Return JSON with keys summary (2 sentences max), highlights (array of 2-3 bullet points describing alignment), and suggested_openers (array of 2 gentle conversation starters tied to their common ground).
+
+How to write the summary. Sound like a friend who knows both of them, not a report. Open with one concrete, specific thing from ${them}'s persona (a habit, an interest, a way they talk about life), not with a generalisation. Never begin with "You both", "You share", "Both of you" or "${them} is". Do not use the words "complement", "balance", "connection", "journey", "spark", "dynamic", "meaningful", or "supportive". No two summaries should read alike: vary the sentence shapes, and let the second sentence say one honest thing about how the two of them might actually get on, including a small tension if there is one.`;
 
   try {
     const response = await openai.chat.completions.create({
       model: OPENAI_MODEL,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.6,
+      temperature: 0.9,
       response_format: { type: 'json_object' },
     });
 

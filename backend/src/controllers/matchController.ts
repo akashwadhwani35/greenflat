@@ -918,7 +918,7 @@ export const refreshOffGrid = async (req: AuthRequest, res: Response) => {
     return searchMatches(req, res);
   } catch (error) {
     console.error('Refresh off-grid error:', error);
-    res.status(500).json({ error: 'Failed to refresh off-grid matches' });
+    res.status(500).json({ error: 'Failed to refresh Explore' });
   }
 };
 
@@ -961,7 +961,7 @@ export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
     );
 
     if (history.rows.length < 2) {
-      return res.status(404).json({ error: 'No previous off-grid set to go back to' });
+      return res.status(404).json({ error: 'No previous Explore set to go back to' });
     }
 
     const current = history.rows[0];
@@ -975,7 +975,7 @@ export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
       .filter((value: number) => Number.isInteger(value) && value > 0);
 
     if (ids.length === 0) {
-      return res.status(404).json({ error: 'No previous off-grid set to go back to' });
+      return res.status(404).json({ error: 'No previous Explore set to go back to' });
     }
 
     // An IN list of placeholders rather than = ANY($n::int[]): the array form

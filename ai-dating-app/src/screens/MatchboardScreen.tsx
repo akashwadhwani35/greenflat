@@ -370,7 +370,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
                 activeTab === 'onGrid' && styles.switchLabelActive,
               ]}
             >
-              On-grid
+              AI Match
             </Typography>
           </TouchableOpacity>
           <TouchableOpacity
@@ -388,7 +388,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
                 activeTab === 'offGrid' && styles.switchLabelActive,
               ]}
             >
-              Off-grid
+              Explore
             </Typography>
           </TouchableOpacity>
         </LinearGradient>

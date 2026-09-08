@@ -189,7 +189,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       if (limits.on_grid_likes_count >= dailyLimits.on_grid_likes && !user.is_premium) {
         await client.query('ROLLBACK');
         return res.status(429).json({
-          error: 'Daily on-grid like limit reached',
+          error: 'Daily AI Match like limit reached',
           limit: dailyLimits.on_grid_likes,
           reset_in_hours: LIKE_RESET_HOURS,
         });
@@ -198,7 +198,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       if (limits.off_grid_likes_count >= dailyLimits.off_grid_likes && !user.is_premium) {
         await client.query('ROLLBACK');
         return res.status(429).json({
-          error: 'Daily off-grid like limit reached',
+          error: 'Daily Explore like limit reached',
           limit: dailyLimits.off_grid_likes,
           reset_in_hours: LIKE_RESET_HOURS,
         });

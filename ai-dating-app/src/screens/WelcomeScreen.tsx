@@ -49,7 +49,6 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
           webClientId: googleWebClientId,
           androidClientId: googleAndroidClientId,
           iosClientId: googleIosClientId,
-          responseType: 'id_token',
           selectAccount: true,
           scopes: ['openid', 'profile', 'email'],
         }

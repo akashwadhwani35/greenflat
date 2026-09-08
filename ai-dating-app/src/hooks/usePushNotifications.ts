@@ -2,16 +2,23 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { getActiveChat } from '../utils/activeChat';
 
 // Configure how notifications are handled when app is in foreground
 Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
+  handleNotification: async (notification) => {
+    // A message for the chat that is open right now is already on screen.
+    const data = (notification.request.content.data || {}) as Record<string, unknown>;
+    const matchId = data.match_id != null ? Number(data.match_id) : null;
+    const quiet = matchId != null && getActiveChat() === matchId;
+    return {
+      shouldShowAlert: !quiet,
+      shouldShowBanner: !quiet,
+      shouldShowList: !quiet,
+      shouldPlaySound: !quiet,
+      shouldSetBadge: true,
+    };
+  },
 });
 
 export type PushNavigationScreen = 'likes' | 'matches' | 'conversations' | null;

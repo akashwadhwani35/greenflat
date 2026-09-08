@@ -195,7 +195,7 @@ export const sendMessage = async (req: AuthRequest, res: Response) => {
       ? normalizedContent
       : (message_type === 'image' ? 'Sent an image' : 'Sent a voice note');
     const preview = previewBase.length > 50 ? previewBase.substring(0, 47) + '...' : previewBase;
-    if (!isViewingChat(recipientId, Number(match_id))) {
+    if (!(await isViewingChat(recipientId, Number(match_id)))) {
       notifyNewMessage(recipientId, senderName, preview, { matchId: match_id, senderId: userId }).catch(err =>
         console.error('Failed to send message notification:', err)
       );

@@ -26,6 +26,7 @@ import { NoticeModal, type Notice } from '../components/NoticeModal';
 import { PixelFlag } from '../components/PixelFlag';
 import { SafetySheet } from '../components/SafetySheet';
 import { GifPicker, isGifPickerAvailable } from '../components/GifPicker';
+import { setActiveChat } from '../utils/activeChat';
 import { hapticLight } from '../utils/haptics';
 import { toUploadableDataUrl } from '../utils/image';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
@@ -120,7 +121,11 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   const theme = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
   // Board 29: a safety line sits above the composer until the first message goes out.
-  const hasSentAnything = messages.some((m) => m.sender_id === currentUserId);
+  // A First Move is the opener, not a reply, so the sender keeps the warning
+  // until they write their next message (board 42).
+  const hasSentAnything = messages.some(
+    (m) => m.sender_id === currentUserId && m.kind !== 'first_move' && m.kind !== 'first_move_photo'
+  );
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -405,11 +410,16 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
     socket.on('messages:read', handleMessagesRead);
     socket.on('typing', handleTyping);
     // While this chat is on screen the server skips the push for its messages.
+    // The heartbeat keeps the server-side record fresh across its instances.
+    setActiveChat(matchId);
     socket.emit('chat:open', { matchId });
     const onReconnect = () => socket.emit('chat:open', { matchId });
     socket.on('connect', onReconnect);
+    const heartbeat = setInterval(() => socket.emit('chat:open', { matchId }), 45 * 1000);
 
     return () => {
+      clearInterval(heartbeat);
+      setActiveChat(null);
       socket.emit('chat:close', { matchId });
       socket.off('connect', onReconnect);
       socket.off('message:new', handleNewMessage);

@@ -3,6 +3,7 @@ import { Server, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { JWT_CONFIG } from './utils/constants';
 import { corsAllowedOrigins } from './index';
+import pool from './config/database';
 
 let io: Server | null = null;
 
@@ -12,14 +13,35 @@ const connectedUsers = new Map<number, Set<string>>();
 // already looking at does not also ring as a push notification (board 25).
 const openChats = new Map<string, number>();
 
-export function isViewingChat(userId: number, matchId: number): boolean {
+const PRESENCE_FRESH_MS = 2 * 60 * 1000;
+
+export async function isViewingChat(userId: number, matchId: number): Promise<boolean> {
+  // Fast path: this instance holds the socket.
   const sockets = connectedUsers.get(userId);
-  if (!sockets) return false;
-  for (const socketId of sockets) {
-    if (openChats.get(socketId) === matchId) return true;
+  if (sockets) {
+    for (const socketId of sockets) {
+      if (openChats.get(socketId) === matchId) return true;
+    }
   }
-  return false;
+  // Another Cloud Run instance may hold it: the app writes presence through.
+  try {
+    const row = await pool.query(
+      `SELECT 1 FROM users
+        WHERE id = $1 AND active_chat_match_id = $2
+          AND active_chat_at > NOW() - ($3 || ' milliseconds')::interval`,
+      [userId, matchId, String(PRESENCE_FRESH_MS)]
+    );
+    return row.rows.length > 0;
+  } catch {
+    return false;
+  }
 }
+
+const persistPresence = (userId: number, matchId: number | null) => {
+  pool
+    .query('UPDATE users SET active_chat_match_id = $2, active_chat_at = CASE WHEN $2::int IS NULL THEN NULL ELSE NOW() END WHERE id = $1', [userId, matchId])
+    .catch(() => {});
+};
 
 export function initSocketServer(httpServer: HttpServer): Server {
   io = new Server(httpServer, {
@@ -79,14 +101,18 @@ export function initSocketServer(httpServer: HttpServer): Server {
     // --- Chat presence ---
     socket.on('chat:open', (data: { matchId: number }) => {
       const matchId = Number(data?.matchId);
-      if (Number.isInteger(matchId)) openChats.set(socket.id, matchId);
+      if (!Number.isInteger(matchId)) return;
+      openChats.set(socket.id, matchId);
+      persistPresence(userId, matchId);
     });
     socket.on('chat:close', () => {
       openChats.delete(socket.id);
+      persistPresence(userId, null);
     });
 
     // --- Disconnect ---
     socket.on('disconnect', () => {
+      if (openChats.has(socket.id)) persistPresence(userId, null);
       openChats.delete(socket.id);
       const sockets = connectedUsers.get(userId);
       if (sockets) {
