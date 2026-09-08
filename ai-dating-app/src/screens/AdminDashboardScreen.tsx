@@ -96,7 +96,19 @@ const gro = (g: GrowthRaw | null) => ({
   newByDay: (g?.new_users_by_day || []) as { date: string; count: number }[],
 });
 
-type AdminTab = 'overview' | 'tokens' | 'engagement' | 'users' | 'reports' | 'safety';
+type AdminTab = 'overview' | 'tokens' | 'engagement' | 'users' | 'reports' | 'support' | 'safety';
+
+type SupportMessage = {
+  id: number;
+  user_id: number | null;
+  user_email: string | null;
+  user_name: string | null;
+  message: string;
+  status: 'open' | 'resolved';
+  admin_notes: string | null;
+  email_delivery_status: 'pending' | 'sent' | 'failed';
+  created_at: string;
+};
 
 const TAB_ITEMS: { id: AdminTab; label: string; icon: string }[] = [
   { id: 'overview', label: 'Revenue', icon: 'trending-up' },
@@ -104,6 +116,7 @@ const TAB_ITEMS: { id: AdminTab; label: string; icon: string }[] = [
   { id: 'engagement', label: 'Performance', icon: 'bar-chart-2' },
   { id: 'users', label: 'Users', icon: 'users' },
   { id: 'reports', label: 'Reports', icon: 'flag' },
+  { id: 'support', label: 'Support', icon: 'life-buoy' },
   { id: 'safety', label: 'Safety', icon: 'shield' },
 ];
 
@@ -132,6 +145,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
   // Core data
   const [stats, setStats] = useState<Stats | null>(null);
   const [reports, setReports] = useState<Report[]>([]);
+  const [supportMessages, setSupportMessages] = useState<SupportMessage[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [userSearch, setUserSearch] = useState('');
 
@@ -161,7 +175,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
 
   const fetchAll = useCallback(async () => {
     setLoading(true);
-    const [s, rev, tok, eng, gr, rep, usr] = await Promise.all([
+    const [s, rev, tok, eng, gr, rep, usr, sup] = await Promise.all([
       safeFetch<Stats | null>(`${apiBaseUrl}/admin/stats`, null),
       safeFetch<RevenueRaw | null>(`${apiBaseUrl}/admin/analytics/revenue`, null),
       safeFetch<TokenRaw | null>(`${apiBaseUrl}/admin/analytics/tokens`, null),
@@ -169,6 +183,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
       safeFetch<GrowthRaw | null>(`${apiBaseUrl}/admin/analytics/growth`, null),
       safeFetch<{ reports: Report[] }>(`${apiBaseUrl}/admin/reports?limit=20`, { reports: [] }),
       safeFetch<{ users: User[] }>(`${apiBaseUrl}/admin/users?limit=20`, { users: [] }),
+      safeFetch<{ messages: SupportMessage[] }>(`${apiBaseUrl}/admin/support?limit=50`, { messages: [] }),
     ]);
     setStats(s);
     setRevenue(rev);
@@ -177,6 +192,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
     setGrowth(gr);
     setReports(rep.reports);
     setUsers(usr.users);
+    setSupportMessages(sup.messages);
     setLoading(false);
   }, [apiBaseUrl]);
 
@@ -202,6 +218,21 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
       setReports(rep.reports);
     } catch {
       Alert.alert('Error', 'Could not update report.');
+    }
+  };
+
+  const updateSupportMessage = async (id: number, status: 'open' | 'resolved') => {
+    try {
+      const res = await fetch(`${apiBaseUrl}/admin/support/${id}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      const sup = await safeFetch<{ messages: SupportMessage[] }>(`${apiBaseUrl}/admin/support?limit=50`, { messages: [] });
+      setSupportMessages(sup.messages);
+    } catch {
+      Alert.alert('Error', 'Could not update the support message.');
     }
   };
 
@@ -573,6 +604,50 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
     </View>
   );
 
+  const renderSupportTab = () => {
+    const open = supportMessages.filter((m) => m.status === 'open');
+    const resolved = supportMessages.filter((m) => m.status !== 'open');
+    const card = (m: SupportMessage) => (
+      <View key={m.id} style={[styles.card, { borderColor: m.status === 'open' ? theme.colors.neonGreen : theme.colors.border }]}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+          <View style={{ flex: 1 }}>
+            <Typography variant="bodyStrong">{m.user_name || 'Unknown user'}{m.user_id ? ` (#${m.user_id})` : ''}</Typography>
+            <Typography variant="tiny" muted>{m.user_email || 'no email'} · {new Date(m.created_at).toLocaleString()}</Typography>
+          </View>
+          <View style={[styles.badge, { backgroundColor: m.status === 'open' ? '#E8A838' : '#22C55E' }]}>
+            <Typography variant="tiny" style={{ color: '#fff' }}>{m.status}</Typography>
+          </View>
+        </View>
+        <Typography variant="body" style={{ marginTop: 8, lineHeight: 21 }}>{m.message}</Typography>
+        {m.email_delivery_status === 'failed' ? (
+          <Typography variant="tiny" style={{ color: '#EF4444', marginTop: 4 }}>Email copy to support@ failed; only visible here.</Typography>
+        ) : null}
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+          {m.status === 'open' ? (
+            <Button label="Mark resolved" onPress={() => updateSupportMessage(m.id, 'resolved')} />
+          ) : (
+            <Button label="Reopen" variant="secondary" onPress={() => updateSupportMessage(m.id, 'open')} />
+          )}
+        </View>
+      </View>
+    );
+    return (
+      <View style={styles.section}>
+        <Typography variant="h1" style={{ marginBottom: 4 }}>Support inbox</Typography>
+        <Typography variant="small" muted style={{ marginBottom: 12 }}>
+          Everything sent from the app's Support screen. A copy also goes to support@gflag.app.
+        </Typography>
+        <Typography variant="bodyStrong" style={{ marginBottom: 8 }}>Open ({open.length})</Typography>
+        {open.length === 0 && <Typography variant="small" muted>Nothing waiting.</Typography>}
+        {open.map(card)}
+        {resolved.length > 0 && (
+          <Typography variant="bodyStrong" style={{ marginTop: 16, marginBottom: 8 }}>Resolved ({resolved.length})</Typography>
+        )}
+        {resolved.map(card)}
+      </View>
+    );
+  };
+
   const renderSafetyTab = () => (
     <View style={styles.section}>
       <Typography variant="h1" style={{ marginBottom: 12 }}>Safety & Abuse Monitoring</Typography>
@@ -629,6 +704,7 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
       case 'engagement': return renderEngagementTab();
       case 'users': return renderUsersTab();
       case 'reports': return renderReportsTab();
+      case 'support': return renderSupportTab();
       case 'safety': return renderSafetyTab();
     }
   };

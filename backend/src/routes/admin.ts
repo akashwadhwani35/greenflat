@@ -5,6 +5,8 @@ import {
   getStats, getReports, updateReport, getUsers, toggleBan,
   getRevenueAnalytics, getTokenAnalytics, getEngagementAnalytics, getGrowthAnalytics,
   grantRemoveTokens, grantSubscription, toggleShadowBan,
+  getSupportMessages,
+  updateSupportMessage,
 } from '../controllers/adminController';
 
 const router = express.Router();
@@ -15,6 +17,8 @@ router.use(authenticate, requireAdmin);
 router.get('/stats', getStats);
 router.get('/reports', getReports);
 router.patch('/reports/:reportId', updateReport);
+router.get('/support', getSupportMessages);
+router.patch('/support/:messageId', updateSupportMessage);
 router.get('/users', getUsers);
 router.post('/users/:userId/ban', toggleBan);
 

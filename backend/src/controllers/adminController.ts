@@ -632,3 +632,62 @@ export const toggleShadowBan = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to toggle shadow ban' });
   }
 };
+
+/**
+ * Support inbox for the dashboard. Every message the app's Support screen
+ * sends lands in support_messages (and is emailed to support@); this is the
+ * same list, newest first, with an open/resolved state the admin can flip.
+ */
+export const getSupportMessages = async (req: AuthRequest, res: Response) => {
+  try {
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+    const status = req.query.status as string | undefined;
+    const offset = (page - 1) * limit;
+
+    let where = '';
+    const params: any[] = [];
+    if (status && ['open', 'resolved'].includes(status)) {
+      params.push(status);
+      where = `WHERE s.status = $${params.length}`;
+    }
+    params.push(limit, offset);
+    const result = await pool.query(
+      `SELECT s.id, s.user_id, s.user_email, s.user_name, s.message, s.status, s.admin_notes,
+              s.email_delivery_status, s.created_at, s.updated_at
+       FROM support_messages s
+       ${where}
+       ORDER BY s.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+    const open = await pool.query(`SELECT COUNT(*)::int AS count FROM support_messages WHERE status = 'open'`);
+    res.json({ page, limit, open_count: open.rows[0]?.count ?? 0, messages: result.rows });
+  } catch (error) {
+    console.error('Admin getSupportMessages error:', error);
+    res.status(500).json({ error: 'Failed to load support messages' });
+  }
+};
+
+export const updateSupportMessage = async (req: AuthRequest, res: Response) => {
+  try {
+    const id = Number(req.params.messageId);
+    const { status, admin_notes } = req.body as { status?: string; admin_notes?: string };
+    if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid message id' });
+    if (status && !['open', 'resolved'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
+    const result = await pool.query(
+      `UPDATE support_messages
+          SET status = COALESCE($2, status),
+              admin_notes = COALESCE($3, admin_notes),
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, status, admin_notes, updated_at`,
+      [id, status ?? null, admin_notes ?? null]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Message not found' });
+    res.json({ message: result.rows[0] });
+  } catch (error) {
+    console.error('Admin updateSupportMessage error:', error);
+    res.status(500).json({ error: 'Failed to update support message' });
+  }
+};
