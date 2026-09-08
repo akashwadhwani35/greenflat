@@ -698,7 +698,7 @@ const AppShell: React.FC = () => {
     }
   };
 
-  const handleSendCompliment = async (targetUserId: number, content: string, photoUrl?: string | null): Promise<boolean> => {
+  const handleSendCompliment = async (targetUserId: number, content: string, photoUrl?: string | null, prompt?: { question: string; answer: string } | null): Promise<boolean> => {
     if (!authToken) {
       Alert.alert('Sign in required', 'Please restart onboarding to continue.');
       return false;
@@ -717,6 +717,7 @@ const AppShell: React.FC = () => {
           target_user_id: targetUserId,
           content,
           photo_url: photoUrl || undefined,
+          prompt: prompt || undefined,
         }),
       });
 

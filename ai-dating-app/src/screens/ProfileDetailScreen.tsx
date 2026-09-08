@@ -8,6 +8,7 @@ import { PixelFlag } from '../components/PixelFlag';
 import type { ViewerProfile } from '../hooks/useViewerProfile';
 import { NoticeModal, type Notice } from '../components/NoticeModal';
 import { SafetySheet } from '../components/SafetySheet';
+import { parsePrompts, type ProfilePrompt } from '../services/prompts';
 
 type ProfileDetailScreenProps = {
   match: MatchCandidate | null;
@@ -16,7 +17,7 @@ type ProfileDetailScreenProps = {
   onSwipeLeft: () => void;
   onSwipeRight: () => void;
   onSuperlike?: () => void;
-  onSendCompliment?: (targetUserId: number, content: string, photoUrl?: string | null) => Promise<boolean | void> | boolean | void;
+  onSendCompliment?: (targetUserId: number, content: string, photoUrl?: string | null, prompt?: ProfilePrompt | null) => Promise<boolean | void> | boolean | void;
   onBlock?: (targetUserId: number, name: string) => void;
   onReport?: (targetUserId: number, name: string, reason: string) => void;
   /** Save for later (Bookmarks). Always visible so people can find it; the server gates it to paid plans. */
@@ -126,6 +127,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const [composerText, setComposerText] = useState('');
   // The photo the First Move is being sent from, shown in the popup and sent along.
   const [composerPhoto, setComposerPhoto] = useState<string | null>(null);
+  // The prompt the First Move is being sent from (board: prompts), shown in the popup and sent along.
+  const [composerPrompt, setComposerPrompt] = useState<ProfilePrompt | null>(null);
   const [briefing, setBriefing] = useState<string | null>(null);
   const [briefingFailed, setBriefingFailed] = useState(false);
   const [sendingCompliment, setSendingCompliment] = useState(false);
@@ -247,6 +250,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
   const interests = toTextArray(matchData.interests);
   const matchHighlights = toTextArray(matchData.match_highlights);
   const highlights = interests.length > 0 ? interests : matchHighlights;
+  const prompts = parsePrompts((matchData as any).prompts);
   // Top traits first, then everything else the ten answers resolved to.
   // Three chips said very little about a person.
   const personalityTopTraits = Array.from(
@@ -324,7 +328,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
 
   // Nothing is sent until the person has written something. The First Move
   // button used to fire a canned line straight away.
-  const openComposer = (seed = '', photoUrl: string | null = null) => {
+  const openComposer = (seed = '', photoUrl: string | null = null, prompt: ProfilePrompt | null = null) => {
     if (!onSendCompliment || sendingCompliment) return;
     if (complimentDone) {
       setNotice({ title: 'Already made', message: `You have already made your First Move with ${name}.`, icon: 'message-circle' });
@@ -332,6 +336,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     }
     setComposerText(seed);
     setComposerPhoto(photoUrl);
+    setComposerPrompt(prompt);
     setComposerOpen(true);
   };
 
@@ -346,12 +351,13 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
     }
     setSendingCompliment(true);
     try {
-      const result = await onSendCompliment(match.id, text.slice(0, 300), composerPhoto);
+      const result = await onSendCompliment(match.id, text.slice(0, 300), composerPhoto, composerPrompt);
       if (result !== false) {
         setSentThisSession(true);
         setComposerOpen(false);
         setComposerText('');
         setComposerPhoto(null);
+        setComposerPrompt(null);
       }
     } finally {
       setSendingCompliment(false);
@@ -365,6 +371,36 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
 
   const showSafetyButton = !hideActionButtons && Boolean(onBlock || onReport);
   const showCustomRightButton = Boolean(onHeaderRightPress && headerRightIcon);
+
+  // Prompt answers sit between the sections rather than in one block, each
+  // a little larger than body text, each with its own First Move button.
+  const renderPromptCard = (index: number) => {
+    const item = prompts[index];
+    if (!item) return null;
+    const canMove = !hideActionButtons && actionMode === 'full' && Boolean(onSendCompliment);
+    return (
+      <View key={`prompt-${index}`} style={[styles.promptSection, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
+        <Typography variant="small" style={{ color: theme.colors.neonGreen, fontFamily: 'RedHatDisplay_600SemiBold' }}>
+          {item.question}
+        </Typography>
+        <Typography style={[styles.promptSectionAnswer, { color: theme.colors.text }]}>
+          {item.answer}
+        </Typography>
+        {canMove ? (
+          <Pressable
+            style={({ pressed }) => [styles.promptMoveButton, { backgroundColor: complimentDone ? theme.colors.secondaryHighlight : theme.colors.neonGreen }, pressed && { opacity: 0.85 }]}
+            onPress={() => openComposer('', null, item)}
+            accessibilityLabel="First Move on this prompt"
+          >
+            <Feather name="message-circle" size={15} color={complimentDone ? theme.colors.muted : theme.colors.deepBlack} />
+            <Typography variant="bodyStrong" style={{ color: complimentDone ? theme.colors.muted : theme.colors.deepBlack }}>
+              {complimentDone ? 'First Move sent' : 'First Move'}
+            </Typography>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  };
 
   const content = (
     <View style={[styles.container, { backgroundColor: theme.colors.background }, embedded ? null : { height: windowHeight }]}>
@@ -555,6 +591,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
           </View>
         ) : null}
 
+        {renderPromptCard(0)}
+
         {/* 3 — interests */}
         {highlights.length > 0 ? (
           <View style={[styles.sectionCard, { borderColor: theme.colors.border, backgroundColor: theme.colors.charcoal }]}>
@@ -575,6 +613,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             </View>
           </View>
         ) : null}
+
+        {renderPromptCard(1)}
 
         {/* 4 — personality snapshot: keyword bubbles only, no generated prose */}
         {personalityTopTraits.length > 0 ? (
@@ -599,6 +639,8 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
             </View>
           </View>
         ) : null}
+
+        {renderPromptCard(2)}
 
         {/* 5 — the rest */}
         {extras.length > 0 ? (
@@ -728,6 +770,12 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
               <Typography variant="h2" style={[styles.composerTitle, { color: theme.colors.text }]}>
                 First Move
               </Typography>
+              {composerPrompt ? (
+                <View style={[styles.composerPromptBox, { borderColor: theme.colors.neonGreen, backgroundColor: theme.colors.background }]}>
+                  <Typography variant="tiny" style={{ color: theme.colors.neonGreen, fontFamily: 'RedHatDisplay_600SemiBold' }}>{composerPrompt.question}</Typography>
+                  <Typography variant="body" style={{ color: theme.colors.text, marginTop: 4 }}>{composerPrompt.answer}</Typography>
+                </View>
+              ) : null}
               {composerPhoto ? (
                 <View style={[styles.composerPhotoRow, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.background }]}>
                   <Image source={{ uri: composerPhoto }} style={styles.composerPhoto} />
@@ -746,7 +794,7 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 ]}
                 value={composerText}
                 onChangeText={(t) => setComposerText(t.slice(0, 300))}
-                placeholder={composerPhoto ? 'Say something about this photo...' : `What caught your attention about ${name}?`}
+                placeholder={composerPrompt ? 'Reply to what they wrote...' : composerPhoto ? 'Say something about this photo...' : `What caught your attention about ${name}?`}
                 placeholderTextColor={theme.colors.muted}
                 multiline
                 maxLength={300}
@@ -913,6 +961,34 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 8,
     elevation: 6,
+  },
+  promptSection: {
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 10,
+  },
+  promptSectionAnswer: {
+    fontSize: 20,
+    lineHeight: 28,
+    fontFamily: 'RedHatDisplay_500Medium',
+  },
+  promptMoveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingVertical: 11,
+    marginTop: 4,
+  },
+  composerPromptBox: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    width: '100%',
   },
   composerPhotoRow: {
     flexDirection: 'row',

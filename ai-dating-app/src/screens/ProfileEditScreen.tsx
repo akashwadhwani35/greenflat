@@ -13,6 +13,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import { MAX_PROMPTS, MAX_PROMPT_ANSWER, PROMPT_QUESTIONS, parsePrompts, type ProfilePrompt } from '../services/prompts';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Typography } from '../components/Typography';
 import { useTheme } from '../theme/ThemeProvider';
@@ -185,6 +186,7 @@ type FormState = {
   prompt1: string;
   prompt2: string;
   prompt3: string;
+  prompts: ProfilePrompt[];
 };
 
 const GENDER_OPTIONS = ['Man', 'Woman', 'Non-binary', 'Other'];
@@ -322,6 +324,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
   const [saving, setSaving] = useState(false);
   const [saveNotice, setSaveNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
+  const [promptPickerOpen, setPromptPickerOpen] = useState(false);
   // City suggestions for the Location field (board 11.1), same lookup as onboarding.
   const [citySuggestions, setCitySuggestions] = useState<{ city: string; label?: string }[]>([]);
   const [cityLookupPending, setCityLookupPending] = useState(false);
@@ -356,6 +359,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
     prompt1: '',
     prompt2: '',
     prompt3: '',
+    prompts: [],
   });
 
   const selectedInterests = useMemo(
@@ -407,6 +411,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             prompt1: profile.prompt1 || '',
             prompt2: profile.prompt2 || '',
             prompt3: profile.prompt3 || '',
+            prompts: parsePrompts(profile.prompts),
           });
         }
       } catch (err) {
@@ -629,6 +634,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
         prompt1: form.prompt1 || null,
         prompt2: form.prompt2 || null,
         prompt3: form.prompt3 || null,
+        prompts: form.prompts,
         smoker: form.smoking ? form.smoking.toLowerCase() : (snapshotProfile.smoking_habit || snapshotProfile.smoker),
         drinker: form.drinking ? form.drinking.toLowerCase() : snapshotProfile.drinker || null,
         diet: snapshotProfile.diet || 'balanced',
@@ -1001,42 +1007,88 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             {form.bio.length}/500
           </Typography>
 
-          <TextInput
-            style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 16 }]}
-            placeholder="Prompt 1: My ideal date is..."
-            placeholderTextColor={theme.colors.muted}
-            value={form.prompt1}
-            onChangeText={(t) => setForm((prev) => ({ ...prev, prompt1: t }))}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={240}
-          />
-
-          <TextInput
-            style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 12 }]}
-            placeholder="Prompt 2: I'm known for..."
-            placeholderTextColor={theme.colors.muted}
-            value={form.prompt2}
-            onChangeText={(t) => setForm((prev) => ({ ...prev, prompt2: t }))}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={240}
-          />
-
-          <TextInput
-            style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text, marginTop: 12 }]}
-            placeholder="Prompt 3: My perfect weekend..."
-            placeholderTextColor={theme.colors.muted}
-            value={form.prompt3}
-            onChangeText={(t) => setForm((prev) => ({ ...prev, prompt3: t }))}
-            multiline
-            numberOfLines={3}
-            textAlignVertical="top"
-            maxLength={240}
-          />
+          {/* Prompts: pick up to three from the list, answer each. They show
+              between the sections of the profile, and a First Move can be sent
+              from any of them. */}
+          <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 28 }}>
+            Prompts
+          </Typography>
+          <Typography variant="body" style={{ color: theme.colors.muted, marginTop: 6 }}>
+            Pick up to {MAX_PROMPTS}. Short, specific answers get the most First Moves.
+          </Typography>
+          {form.prompts.map((item, index) => (
+            <View key={item.question} style={[styles.promptCard, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border }]}>
+              <View style={styles.promptHeader}>
+                <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen, flex: 1 }}>{item.question}</Typography>
+                <TouchableOpacity
+                  onPress={() => setForm((prev) => ({ ...prev, prompts: prev.prompts.filter((_, i) => i !== index) }))}
+                  hitSlop={10}
+                  accessibilityLabel="Remove this prompt"
+                >
+                  <Feather name="x" size={18} color={theme.colors.muted} />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={[styles.promptInput, { color: theme.colors.text, borderColor: theme.colors.border, backgroundColor: theme.colors.background }]}
+                placeholder="Your answer…"
+                placeholderTextColor={theme.colors.muted}
+                value={item.answer}
+                onChangeText={(t) => setForm((prev) => ({
+                  ...prev,
+                  prompts: prev.prompts.map((p, i) => (i === index ? { ...p, answer: t.slice(0, MAX_PROMPT_ANSWER) } : p)),
+                }))}
+                multiline
+                maxLength={MAX_PROMPT_ANSWER}
+                textAlignVertical="top"
+              />
+              <Typography variant="tiny" style={{ color: theme.colors.muted, textAlign: 'right' }}>
+                {item.answer.length}/{MAX_PROMPT_ANSWER}
+              </Typography>
+            </View>
+          ))}
+          {form.prompts.length < MAX_PROMPTS ? (
+            <TouchableOpacity
+              style={[styles.addPromptButton, { borderColor: theme.colors.neonGreen }]}
+              onPress={() => setPromptPickerOpen(true)}
+              activeOpacity={0.85}
+            >
+              <Feather name="plus" size={18} color={theme.colors.neonGreen} />
+              <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen, marginLeft: 8 }}>
+                {form.prompts.length === 0 ? 'Add a prompt' : 'Add another prompt'}
+              </Typography>
+            </TouchableOpacity>
+          ) : null}
         </ScrollView>
+
+        {promptPickerOpen ? (
+          <View style={[styles.promptPicker, { backgroundColor: theme.colors.background }]}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setPromptPickerOpen(false)} style={styles.modalHeaderBtn}>
+                <Feather name="arrow-left" size={24} color={theme.colors.text} />
+              </TouchableOpacity>
+              <Typography variant="h2" style={{ color: theme.colors.text, flex: 1, textAlign: 'center' }}>
+                Choose a prompt
+              </Typography>
+              <View style={styles.modalHeaderBtn} />
+            </View>
+            <ScrollView contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 60 }} showsVerticalScrollIndicator={false}>
+              {PROMPT_QUESTIONS.filter((q) => !form.prompts.some((p) => p.question === q)).map((q) => (
+                <TouchableOpacity
+                  key={q}
+                  style={[styles.promptOption, { borderBottomColor: theme.colors.border }]}
+                  onPress={() => {
+                    setForm((prev) => (prev.prompts.length >= MAX_PROMPTS ? prev : { ...prev, prompts: [...prev.prompts, { question: q, answer: '' }] }));
+                    setPromptPickerOpen(false);
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Typography variant="body" style={{ color: theme.colors.text, flex: 1 }}>{q}</Typography>
+                  <Feather name="plus-circle" size={20} color={theme.colors.neonGreen} />
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        ) : null}
       </View>
     </Modal>
   );
@@ -1499,6 +1551,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
   },
+  promptCard: { borderWidth: 1, borderRadius: 16, padding: 14, marginTop: 14, gap: 10 },
+  promptHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  promptInput: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, minHeight: 72, fontSize: 16, fontFamily: 'RedHatDisplay_400Regular' },
+  addPromptButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderStyle: 'dashed', borderRadius: 14, paddingVertical: 14, marginTop: 14 },
+  promptPicker: { ...StyleSheet.absoluteFillObject },
+  promptOption: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16, borderBottomWidth: StyleSheet.hairlineWidth },
   bioInput: {
     borderWidth: 1,
     borderRadius: 12,

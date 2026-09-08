@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import pool from '../config/database';
+import { normalizePrompt } from '../utils/prompts';
 import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
 import { notifyLikeReceived, notifyMatch, notifyFirstMove, notifyAccepted } from '../services/push.service';
@@ -451,13 +452,16 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
 
   try {
     const userId = req.userId!;
-    const { target_user_id, content, photo_url } = req.body as {
+    const { target_user_id, content, photo_url, prompt } = req.body as {
       target_user_id?: number;
       content?: string;
       /** The photo the First Move was sent from, shown small in the chat. */
       photo_url?: string;
+      /** The profile prompt the First Move was sent from, shown as a card in the chat. */
+      prompt?: { question?: string; answer?: string };
     };
     const photoUrl = typeof photo_url === 'string' && /^https?:\/\//.test(photo_url.trim()) ? photo_url.trim().slice(0, 1000) : null;
+    const promptCard = normalizePrompt(prompt);
 
     // Compliments cost tokens, so settle the free allowance first.
     await ensureDailyAllowance(userId);
@@ -553,6 +557,15 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     // No automatic greeting: the First Move is the photo it was sent from
     // (if any) and the person's own words, nothing else.
     const inserted: any[] = [];
+    if (promptCard) {
+      const row = await client.query(
+        `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type, kind)
+         VALUES ($1, $2, $3, $4, 'text', 'first_move_prompt')
+         RETURNING *`,
+        [matchId, userId, target_user_id, JSON.stringify(promptCard)]
+      );
+      inserted.push(row.rows[0]);
+    }
     if (photoUrl) {
       const row = await client.query(
         `INSERT INTO messages (match_id, sender_id, recipient_id, content, message_type, kind)

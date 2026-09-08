@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     prompt1 TEXT,
     prompt2 TEXT,
     prompt3 TEXT,
+    prompts JSONB NOT NULL DEFAULT '[]'::jsonb,
     smoker BOOLEAN,
     smoking_habit VARCHAR(50),
     marijuana VARCHAR(50),

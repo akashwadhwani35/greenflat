@@ -18,6 +18,8 @@ export type MatchCandidate = {
   primary_photo?: string;
   is_verified?: boolean;
   is_on_grid?: boolean;
+  /** Up to three answered profile prompts, [{question, answer}]. */
+  prompts?: { question: string; answer: string }[] | string | null;
 };
 
 type MatchboardScreenProps = {

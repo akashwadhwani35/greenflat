@@ -356,7 +356,7 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       let baseQuery = `
         SELECT
           u.id, u.name, u.gender, u.orientation, u.pronouns, u.date_of_birth, u.city, u.is_verified, u.latitude, u.longitude, u.boost_expires_at,
-          p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
+          p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3, p.prompts,
           p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.relationship_goal,
           pr.personality_traits, pr.personality_summary, pr.compatibility_tips, pr.top_traits,
           privacy.hide_distance, privacy.hide_city, privacy.incognito_mode, privacy.show_online_status,
@@ -985,7 +985,7 @@ export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
     const profiles = await pool.query(
       `SELECT
          u.id, u.name, u.gender, u.pronouns, u.date_of_birth, u.city, u.is_verified,
-         p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
+         p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3, p.prompts,
          p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level,
          p.relationship_goal,
          pr.personality_traits, pr.top_traits,
@@ -1046,7 +1046,7 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
         u.latitude, u.longitude,
         COALESCE(priv.hide_distance, FALSE) AS hide_distance,
         COALESCE(priv.hide_city, FALSE) AS hide_city,
-        p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3,
+        p.height, p.body_type, p.interests, p.bio, p.prompt1, p.prompt2, p.prompt3, p.prompts,
         p.smoker, p.smoking_habit, p.drinker, p.drugs, p.diet, p.fitness_level, p.education, p.occupation,
         p.relationship_goal, p.family_oriented, p.spiritual, p.open_minded, p.career_focused,
         pr.personality_traits,

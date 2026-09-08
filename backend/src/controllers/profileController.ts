@@ -1,5 +1,6 @@
 import { Response } from 'express';
 import pool from '../config/database';
+import { normalizePrompts, promptsToText } from '../utils/prompts';
 import { AuthRequest } from '../middleware/auth';
 import { TOKEN_COSTS } from '../utils/constants';
 import { PLACEHOLDER_CITY, PLACEHOLDER_NAME } from '../services/accounts.service';
@@ -42,6 +43,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       prompt1,
       prompt2,
       prompt3,
+      prompts: promptsInput,
       smoker,
       drinker,
       diet,
@@ -98,6 +100,10 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
           ? smokingHabit !== 'never'
           : null;
 
+    // Prompts: an array replaces the set; absent (older client) leaves it alone.
+    const prompts = normalizePrompts(promptsInput);
+    const promptsJson = prompts === null ? null : JSON.stringify(prompts);
+
     // Create or update user profile
     const profileResult = await client.query(
       `INSERT INTO user_profiles (
@@ -105,8 +111,8 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         smoker, smoking_habit, drinker, diet, fitness_level, education, education_level, occupation, hometown,
         relationship_goal, have_kids, star_sign, politics, religion,
         family_oriented, spiritual, open_minded, career_focused,
-        updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, NOW())
+        prompts, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, COALESCE($27::jsonb, '[]'::jsonb), NOW())
       ON CONFLICT (user_id)
       DO UPDATE SET
         height = $2, body_type = $3, interests = $4, bio = $5,
@@ -115,6 +121,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         occupation = $16, hometown = $17, relationship_goal = $18, have_kids = $19, star_sign = $20,
         politics = $21, religion = $22, family_oriented = $23,
         spiritual = $24, open_minded = $25, career_focused = $26,
+        prompts = COALESCE($27::jsonb, user_profiles.prompts),
         updated_at = NOW()
       RETURNING *`,
       [
@@ -122,6 +129,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
         smokerBoolean, smokingHabit, drinker, diet, fitness_level, education, education_level, occupation, hometown,
         relationship_goal, have_kids, star_sign, politics, religion,
         family_oriented, spiritual, open_minded, career_focused,
+        promptsJson,
       ]
     );
 
@@ -169,7 +177,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
     );
 
     const answerSummary = describeAnswers(answers);
-    const aboutYouText = [bio, prompt1, prompt2, prompt3]
+    const aboutYouText = [bio, prompt1, prompt2, prompt3, promptsToText(profileResult.rows[0]?.prompts)]
       .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
       .join('\n');
     let aiPersonalityInsights = {
@@ -305,6 +313,7 @@ export const completeProfile = async (req: AuthRequest, res: Response) => {
       prompt1,
       prompt2,
       prompt3,
+      promptsToText(profileResult.rows[0]?.prompts),
       self_summary,
       ideal_partner_prompt,
       connection_preferences,

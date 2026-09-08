@@ -27,6 +27,7 @@ import { PixelFlag } from '../components/PixelFlag';
 import { SafetySheet } from '../components/SafetySheet';
 import { GifPicker, isGifPickerAvailable } from '../components/GifPicker';
 import { setActiveChat } from '../utils/activeChat';
+import { parsePromptCard } from '../services/prompts';
 import { hapticLight } from '../utils/haptics';
 import { toUploadableDataUrl } from '../utils/image';
 import { ProfileDetailScreen } from './ProfileDetailScreen';
@@ -124,7 +125,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
   // A First Move is the opener, not a reply, so the sender keeps the warning
   // until they write their next message (board 42).
   const hasSentAnything = messages.some(
-    (m) => m.sender_id === currentUserId && m.kind !== 'first_move' && m.kind !== 'first_move_photo'
+    (m) => m.sender_id === currentUserId && m.kind !== 'first_move' && m.kind !== 'first_move_photo' && m.kind !== 'first_move_prompt'
   );
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -797,7 +798,17 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
               {isMyMessage ? 'YOUR FIRST MOVE' : 'FIRST MOVE'}
             </Typography>
           ) : null}
-          {item.message_type === 'image' ? (
+          {item.kind === 'first_move_prompt' && parsePromptCard(item.content) ? (
+            // The prompt the First Move was made on, boxed the way the photo is.
+            <View style={[styles.promptCardBubble, { borderColor: isMyMessage ? 'rgba(16,29,19,0.35)' : theme.colors.neonGreen }]}>
+              <Typography variant="tiny" style={{ color: isMyMessage ? 'rgba(16,29,19,0.7)' : theme.colors.neonGreen, fontFamily: 'RedHatDisplay_600SemiBold' }}>
+                {parsePromptCard(item.content)!.question}
+              </Typography>
+              <Typography variant="body" style={{ color: isMyMessage ? theme.colors.deepBlack : theme.colors.text, marginTop: 4, lineHeight: 22 }}>
+                {parsePromptCard(item.content)!.answer}
+              </Typography>
+            </View>
+          ) : item.message_type === 'image' ? (
             <TouchableOpacity
               activeOpacity={0.85}
               onPress={() => {
@@ -1371,6 +1382,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f0f0f',
   },
   // The photo a First Move was sent from: a small reference, not a full photo.
+  promptCardBubble: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    minWidth: 200,
+  },
   messageImageSmall: {
     width: 96,
     height: 96,
