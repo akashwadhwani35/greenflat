@@ -36,7 +36,20 @@ const loadModule = (): any => {
   }
 };
 
-export const purchasesApiKey = () => (Platform.OS === 'ios' ? IOS_KEY : ANDROID_KEY);
+const rawApiKey = () => (Platform.OS === 'ios' ? IOS_KEY : ANDROID_KEY);
+
+/**
+ * A RevenueCat Test Store key ("test_…") only works in debug builds: in a
+ * release build the SDK shows "Wrong API Key" and closes the app. Android test
+ * APKs are built debuggable so the key is honoured there; on an iOS release
+ * build (TestFlight) the key is dropped instead, so the app runs with
+ * purchases marked unavailable until the real App Store key is in place.
+ */
+export const purchasesApiKey = () => {
+  const key = rawApiKey();
+  if (key.startsWith('test_') && Platform.OS === 'ios' && !__DEV__) return '';
+  return key;
+};
 
 export const isPurchasesAvailable = () => Boolean(loadModule()) && Boolean(purchasesApiKey());
 
