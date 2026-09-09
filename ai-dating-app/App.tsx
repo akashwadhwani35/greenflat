@@ -952,6 +952,19 @@ const AppShell: React.FC = () => {
             onLike={async (targetUserId) => {
               await likeFromList(targetUserId, false);
             }}
+            onOpenProfile={async (targetUserId) => {
+              // Open the full profile over the list; the card fills in from the server.
+              try {
+                const response = await fetch(`${API_BASE_URL}/matches/user/${targetUserId}`, { headers: { Authorization: `Bearer ${authToken}` } });
+                const body = await response.json().catch(() => ({}));
+                const user = body?.user || body;
+                if (!response.ok || !user?.id) throw new Error(body?.error || 'Could not open this profile.');
+                setSelectedMatch({ ...user, match_percentage: user.match_percentage || 0, is_on_grid: false });
+                setShowProfileModal(true);
+              } catch (error: any) {
+                Alert.alert('Could not open profile', error?.message || 'Please try again.');
+              }
+            }}
           />
         );
       case 'matches':

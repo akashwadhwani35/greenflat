@@ -152,61 +152,6 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   const [searchError, setSearchError] = useState<'timeout' | 'failed' | null>(null);
   const SEARCH_TIMEOUT_MS = 30000;
 
-  const fetchNewOffGridProfiles = useCallback(async () => {
-    setLoading(true);
-    setRefreshing(true);
-    try {
-      // Fetch new off-grid profiles excluding already viewed ones
-      const response = await fetch(`${apiBaseUrl}/matches/search`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          is_on_grid: false,
-          // Already seen here, plus whoever AI Match is showing right now.
-          exclude_ids: Array.from(new Set([...viewedProfileIds, ...onGridIdsRef.current])),
-          limit: 4,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        let newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
-        if (newProfiles.length === 0 && onGridIdsRef.current.length > 0) {
-          // Small community: nobody left outside AI Match. Overlap beats an empty grid.
-          const retry = await fetch(`${apiBaseUrl}/matches/search`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-            body: JSON.stringify({ is_on_grid: false, exclude_ids: viewedProfileIds, limit: 4 }),
-          });
-          if (retry.ok) {
-            const retryData = await retry.json();
-            newProfiles = (retryData.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
-          }
-        }
-        if (matches.length > 0) {
-          setOffGridHistory((prev) => [...prev.slice(-9), matches]);
-        }
-        setMatches(newProfiles);
-        offGridCacheRef.current = newProfiles;
-        if (newProfiles.length < 4) {
-          // The pool of unseen people is used up. Start over next time rather
-          // than shrinking to an empty grid; Rewind still has the history.
-          setViewedProfileIds(newProfiles.map((m: MatchCandidate) => m.id));
-        } else {
-          setViewedProfileIds((prev) => [...prev, ...newProfiles.map((m: MatchCandidate) => m.id)]);
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch new off-grid profiles:', error);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [apiBaseUrl, token, viewedProfileIds, matches]);
-
   const buildBackendFilters = useCallback(() => {
     const parsed: Record<string, any> = {};
     if (!filters) return parsed;
@@ -246,6 +191,66 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
     return parsed;
   }, [filters]);
+
+  const fetchNewOffGridProfiles = useCallback(async () => {
+    setLoading(true);
+    setRefreshing(true);
+    try {
+      // Fetch new off-grid profiles excluding already viewed ones
+      const response = await fetch(`${apiBaseUrl}/matches/search`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          is_on_grid: false,
+          // Already seen here, plus whoever AI Match is showing right now.
+          exclude_ids: Array.from(new Set([...viewedProfileIds, ...onGridIdsRef.current])),
+          limit: 4,
+          // Explore honours the same filters as AI Match (gender, age, city...).
+          // Without this the feed fell back to the profile preference, so
+          // picking "Men" in the filters still showed women here.
+          filters: buildBackendFilters(),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        let newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
+        if (newProfiles.length === 0 && onGridIdsRef.current.length > 0) {
+          // Small community: nobody left outside AI Match. Overlap beats an empty grid.
+          const retry = await fetch(`${apiBaseUrl}/matches/search`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ is_on_grid: false, exclude_ids: viewedProfileIds, limit: 4, filters: buildBackendFilters() }),
+          });
+          if (retry.ok) {
+            const retryData = await retry.json();
+            newProfiles = (retryData.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
+          }
+        }
+        if (matches.length > 0) {
+          setOffGridHistory((prev) => [...prev.slice(-9), matches]);
+        }
+        setMatches(newProfiles);
+        offGridCacheRef.current = newProfiles;
+        if (newProfiles.length < 4) {
+          // The pool of unseen people is used up. Start over next time rather
+          // than shrinking to an empty grid; Rewind still has the history.
+          setViewedProfileIds(newProfiles.map((m: MatchCandidate) => m.id));
+        } else {
+          setViewedProfileIds((prev) => [...prev, ...newProfiles.map((m: MatchCandidate) => m.id)]);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch new off-grid profiles:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [apiBaseUrl, token, viewedProfileIds, matches, buildBackendFilters]);
+
 
   // Nothing typed yet: AI Match stays empty. Explore is the browsing tab;
   // AI Match only ever shows what a search asked for.

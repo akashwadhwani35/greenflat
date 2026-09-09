@@ -1,15 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, ScrollView, StatusBar, StyleSheet, TouchableOpacity, View } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
 import { Typography } from '../components/Typography';
 import { UnderlineInput } from '../components/UnderlineInput';
 import { Button } from '../components/Button';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
 import { useTheme } from '../theme/ThemeProvider';
 
-WebBrowser.maybeCompleteAuthSession();
 
 type Props = {
   apiBaseUrl: string;
@@ -37,18 +35,6 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
     googleWebClientId || googleAndroidClientId || googleIosClientId || googleClientId
   );
 
-  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest(
-    googleClientConfigured
-      ? {
-          clientId: googleClientId,
-          webClientId: googleWebClientId,
-          androidClientId: googleAndroidClientId,
-          iosClientId: googleIosClientId,
-          selectAccount: true,
-          scopes: ['openid', 'profile', 'email'],
-        }
-      : { clientId: '_disabled_' },
-  );
 
   const canSubmit = useMemo(() => email.trim().length > 3 && password.length >= 3, [email, password]);
 
@@ -80,24 +66,6 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
     }
   };
 
-  useEffect(() => {
-    if (!googleResponse) return;
-    if (googleResponse.type !== 'success') {
-      if (googleResponse.type === 'error') {
-        Alert.alert('Google sign-in failed', 'Unable to authorize with Google. Please try again.');
-      }
-      return;
-    }
-
-    const responseParams = googleResponse.params as Record<string, string> | undefined;
-    const idToken = googleResponse.authentication?.idToken || responseParams?.id_token;
-    if (!idToken) {
-      Alert.alert('Google sign-in failed', 'Google did not return an ID token.');
-      return;
-    }
-
-    void signInWithGoogleToken(idToken);
-  }, [googleResponse]);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -129,17 +97,14 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
 
   const startGoogleAuth = async () => {
     if (googleLoading || loading) return;
-    if (!googleClientConfigured) {
-      Alert.alert('Google sign-in unavailable', 'Google client IDs are not configured in this app build.');
+    if (!isGoogleSignInConfigured()) {
+      Alert.alert('Google sign-in unavailable', 'Google client IDs are not configured in this build.');
       return;
     }
-    if (!googleRequest) {
-      Alert.alert('Google sign-in unavailable', 'Google auth request is not ready yet. Please try again.');
-      return;
-    }
-
     try {
-      await promptGoogleAuth();
+      const idToken = await signInWithGoogleNative();
+      if (!idToken) return; // backed out of the chooser
+      await signInWithGoogleToken(idToken);
     } catch (error: any) {
       Alert.alert('Google sign-in failed', error?.message || 'Please try again.');
     }

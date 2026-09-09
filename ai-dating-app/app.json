@@ -2,7 +2,10 @@
   "expo": {
     "name": "Greenflag",
     "slug": "greenflag",
-    "scheme": ["greenflag", "app.gflag.greenflag"],
+    "scheme": [
+      "greenflag",
+      "app.gflag.greenflag"
+    ],
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -59,6 +62,12 @@
         "expo-location",
         {
           "locationWhenInUsePermission": "GreenFlag needs your location to suggest nearby matches."
+        }
+      ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.480247350372-v7ka79dqp9n4t0sfbvba9k3o2uqeunlj"
         }
       ]
     ],

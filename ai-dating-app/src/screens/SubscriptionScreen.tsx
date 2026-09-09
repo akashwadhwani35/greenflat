@@ -406,7 +406,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    paddingTop: 10,
   },
   priceCard: {
     width: '48%',
@@ -416,15 +415,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     alignItems: 'center',
     gap: 4,
-    overflow: 'visible',
   },
   popularPill: {
-    position: 'absolute',
-    top: -10,
     alignSelf: 'center',
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 999,
+    marginBottom: 6,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

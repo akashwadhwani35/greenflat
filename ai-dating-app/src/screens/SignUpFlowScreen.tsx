@@ -11,16 +11,14 @@ import {
   View,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import * as Google from 'expo-auth-session/providers/google';
-import * as WebBrowser from 'expo-web-browser';
 import { Typography } from '../components/Typography';
 import { UnderlineInput } from '../components/UnderlineInput';
 import { Button } from '../components/Button';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
+import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
 import { getDeviceId } from '../utils/deviceId';
 import { useTheme } from '../theme/ThemeProvider';
 
-WebBrowser.maybeCompleteAuthSession();
 
 /**
  * Account creation, one thing per screen: phone → code → email → code → password.
@@ -93,18 +91,6 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
     googleWebClientId || googleAndroidClientId || googleIosClientId || googleClientId
   );
 
-  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useAuthRequest(
-    googleClientConfigured
-      ? {
-          clientId: googleClientId,
-          webClientId: googleWebClientId,
-          androidClientId: googleAndroidClientId,
-          iosClientId: googleIosClientId,
-          selectAccount: true,
-          scopes: ['openid', 'profile', 'email'],
-        }
-      : { clientId: '_disabled_' }
-  );
 
   // Held in a ref so the response effect below always sees the current token
   // without needing it in its dependency list.
@@ -147,35 +133,17 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
     [apiBaseUrl, onComplete]
   );
 
-  useEffect(() => {
-    if (!googleResponse) return;
-    if (googleResponse.type !== 'success') {
-      if (googleResponse.type === 'error') {
-        Alert.alert('Google sign-in failed', 'Unable to authorize with Google. Please try again.');
-      }
-      return;
-    }
-    const params = googleResponse.params as Record<string, string> | undefined;
-    const idToken = googleResponse.authentication?.idToken || params?.id_token;
-    if (!idToken) {
-      Alert.alert('Google sign-in failed', 'Google did not return an ID token.');
-      return;
-    }
-    void signInWithGoogleToken(idToken);
-  }, [googleResponse, signInWithGoogleToken]);
 
   const startGoogleAuth = async () => {
     if (googleLoading) return;
-    if (!googleClientConfigured) {
-      Alert.alert('Google sign-in unavailable', 'Google client IDs are not configured.');
-      return;
-    }
-    if (!googleRequest) {
-      Alert.alert('Google sign-in unavailable', 'Not ready yet. Please try again.');
+    if (!isGoogleSignInConfigured()) {
+      Alert.alert('Google sign-in unavailable', 'Google client IDs are not configured in this build.');
       return;
     }
     try {
-      await promptGoogleAuth();
+      const idToken = await signInWithGoogleNative();
+      if (!idToken) return; // backed out of the chooser
+      await signInWithGoogleToken(idToken);
     } catch (error: any) {
       Alert.alert('Google sign-in failed', error?.message || 'Please try again.');
     }

@@ -139,7 +139,7 @@ export const MatchboardScreen: React.FC<MatchboardScreenProps> = ({
     let score = 0;
     if (photos.length > 0) score++;
     if (user.city) score++;
-    if (prof.bio || prof.prompt1 || prof.prompt2) score++;
+    if (prof.bio || prof.prompt1 || prof.prompt2 || (Array.isArray(prof.prompts) && prof.prompts.length > 0)) score++;
     if (user.is_verified) score++;
     return Math.round((score / total) * 100);
   }, [profile]);

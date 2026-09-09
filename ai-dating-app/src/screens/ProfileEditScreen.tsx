@@ -1,17 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import {
-  ScrollView,
-  StyleSheet,
-  View,
-  TouchableOpacity,
-  TextInput,
-  ActivityIndicator,
-  Alert,
-  Platform,
-  StatusBar,
-  Modal,
-  useWindowDimensions,
-} from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ScrollView, StyleSheet, View, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, StatusBar, Modal, useWindowDimensions, KeyboardAvoidingView } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { MAX_PROMPTS, MAX_PROMPT_ANSWER, PROMPT_QUESTIONS, parsePrompts, type ProfilePrompt } from '../services/prompts';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -325,6 +313,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
   const [saveNotice, setSaveNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [promptPickerOpen, setPromptPickerOpen] = useState(false);
+  const bioScrollRef = useRef<ScrollView>(null);
   // City suggestions for the Location field (board 11.1), same lookup as onboarding.
   const [citySuggestions, setCitySuggestions] = useState<{ city: string; label?: string }[]>([]);
   const [cityLookupPending, setCityLookupPending] = useState(false);
@@ -968,7 +957,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
 
   // Bio Modal
   const renderBioModal = () => (
-    <Modal visible={activeModal === 'bio'} animationType="none" onRequestClose={() => setActiveModal(null)}>
+    <Modal visible={activeModal === 'bio'} animationType="none" onRequestClose={() => (promptPickerOpen ? setPromptPickerOpen(false) : setActiveModal(null))}>
       <View style={[styles.modalContainer, { backgroundColor: theme.colors.background, height: windowHeight }]}> 
         <View style={[styles.modalHeader, { borderBottomColor: theme.colors.border }]}> 
           <TouchableOpacity onPress={() => setActiveModal(null)} style={styles.modalHeaderBtn}> 
@@ -991,7 +980,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
           </Typography>
         </View>
 
-        <ScrollView style={styles.modalContent} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView style={{ flex: 1 }} behavior="padding" keyboardVerticalOffset={0}>
+        <ScrollView ref={bioScrollRef} style={styles.modalContent} contentContainerStyle={{ paddingBottom: 220 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
           <TextInput
             style={[styles.bioInput, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, color: theme.colors.text }]}
             placeholder="Write a fun and punchy intro..."
@@ -1059,6 +1049,7 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
             </TouchableOpacity>
           ) : null}
         </ScrollView>
+        </KeyboardAvoidingView>
 
         {promptPickerOpen ? (
           <View style={[styles.promptPicker, { backgroundColor: theme.colors.background }]}>
@@ -1079,6 +1070,8 @@ export const ProfileEditScreen: React.FC<Props> = ({ onBack, onOpenPhotos, token
                   onPress={() => {
                     setForm((prev) => (prev.prompts.length >= MAX_PROMPTS ? prev : { ...prev, prompts: [...prev.prompts, { question: q, answer: '' }] }));
                     setPromptPickerOpen(false);
+                    // The new answer box sits below the fold; bring it up.
+                    setTimeout(() => bioScrollRef.current?.scrollToEnd({ animated: true }), 250);
                   }}
                   activeOpacity={0.8}
                 >
