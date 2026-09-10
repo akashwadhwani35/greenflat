@@ -260,13 +260,17 @@ export const SubscriptionScreen: React.FC<Props> = ({
                 ]}
                 onPress={() => setSelectedDuration(option.duration)}
               >
-                {option.duration === '3month' ? (
-                  <View style={[styles.popularPill, { backgroundColor: isSelected ? '#000' : theme.colors.neonGreen }]}>
-                    <Typography variant="tiny" style={{ color: isSelected ? theme.colors.neonGreen : '#000', fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 0.3 }}>
-                      MOST POPULAR
-                    </Typography>
-                  </View>
-                ) : null}
+                {/* Every tile reserves the pill's row, so the label and price
+                    sit on the same line across all four. */}
+                <View style={styles.pillSlot}>
+                  {option.duration === '3month' ? (
+                    <View style={[styles.popularPill, { backgroundColor: isSelected ? '#000' : theme.colors.neonGreen }]}>
+                      <Typography variant="tiny" style={{ color: isSelected ? theme.colors.neonGreen : '#000', fontFamily: 'RedHatDisplay_700Bold', letterSpacing: 0.3 }}>
+                        MOST POPULAR
+                      </Typography>
+                    </View>
+                  ) : null}
+                </View>
                 <Typography
                   variant="small"
                   numberOfLines={1}
@@ -416,12 +420,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
   },
+  // 18 line-height + 3 padding top and bottom; held even when the pill is absent.
+  pillSlot: {
+    height: 24,
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
   popularPill: {
     alignSelf: 'center',
     paddingHorizontal: 10,
     paddingVertical: 3,
     borderRadius: 999,
-    marginBottom: 6,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

@@ -5,6 +5,7 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Typography } from '../components/Typography';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
+import { getDeviceId } from '../utils/deviceId';
 
 
 const glassLogo = require('../../assets/glass-logo.png');
@@ -47,7 +48,8 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
     try {
       const response = await fetch(`${apiBaseUrl}/auth/google`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // The install id is what enforces one account per phone.
+        headers: { 'Content-Type': 'application/json', 'x-device-id': (await getDeviceId()) || '' },
         body: JSON.stringify({ id_token: idToken }),
       });
       const data = await response.json().catch(() => ({}));

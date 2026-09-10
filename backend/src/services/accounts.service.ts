@@ -97,3 +97,28 @@ export const deviceIdFromRequest = (req: { headers: Record<string, unknown> }): 
   if (!/^[A-Za-z0-9._:-]{8,128}$/.test(trimmed)) return null;
   return trimmed;
 };
+
+/**
+ * One account per phone, softly.
+ *
+ * A resettable device id is a speed bump, not a wall — a factory reset or a
+ * second Android profile defeats it — but it costs nothing and stops the lazy
+ * case of one person farming accounts. Deliberately recoverable: shared and
+ * hand-me-down phones are real, and until SMS verification lands there is no
+ * other way back in, so the caller turns this into "contact support", never a
+ * dead end.
+ *
+ * Banned and deleted accounts still count; letting a ban be shed by making a
+ * new account is the hole this is here to close.
+ */
+export const deviceHasAccount = async (
+  deviceId: string | null,
+  db: { query: (text: string, params?: any[]) => Promise<{ rows: any[] }> }
+): Promise<boolean> => {
+  if (!deviceId) return false;
+  const existing = await db.query(
+    'SELECT 1 FROM users WHERE device_id = $1 LIMIT 1',
+    [deviceId]
+  );
+  return existing.rows.length > 0;
+};

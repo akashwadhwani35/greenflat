@@ -284,3 +284,28 @@ export const notifyAccepted = async (
     'matches'
   );
 };
+
+/**
+ * Your daily like limit has rolled over. Sent once per window, by the sweep in
+ * limitResets.service, not on the request that happens to notice the reset.
+ */
+export const notifyLikesBack = async (userId: number): Promise<void> => {
+  await sendPushNotification(
+    userId,
+    'Your likes are back 💚',
+    'Your daily limit just reset. Go find someone.',
+    { type: 'likes_reset', screen: 'explore' },
+    'likes'
+  );
+};
+
+/** A fresh six-hour Explore window has opened for someone on an unlimited plan. */
+export const notifyExploreRefreshed = async (userId: number): Promise<void> => {
+  await sendPushNotification(
+    userId,
+    'New profiles for you ✨',
+    'We put together a fresh set of people. Come take a look.',
+    { type: 'explore_refreshed', screen: 'explore' },
+    'likes'
+  );
+};

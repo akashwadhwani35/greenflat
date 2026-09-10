@@ -139,7 +139,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     useCurrentCity: false,
     // True once the city came from GPS or was picked from the suggestions.
     cityConfirmed: false,
-    distanceRadius: 50,
+    // Country-wide until the person narrows it in filters. 20000 km is the
+    // existing stand-in for "no distance limit".
+    distanceRadius: 20000,
 
     // Physical
     height: '',
@@ -352,6 +354,9 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
     return Object.keys(nextErrors).length === 0;
   };
 
+  /** null means the selfie passed, or none was taken. */
+  type FaceCheckOutcome = { message: string; nearMiss: boolean; duplicate: boolean } | null;
+
   const submitToBackend = async (options: { skipFaceCheck?: boolean } = {}) => {
     // Onboarding always runs signed in: the account was created either by the
     // signup funnel or by Google before we ever got here.
@@ -437,8 +442,11 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       }
     }
 
-    // Face check, if they took one. Failure here must not fail onboarding: the
-    // step is optional by design and can be redone from Verification.
+    // Face check, if they took one. A failure still must not *block* onboarding
+    // — the step is optional — but it used to be swallowed here, so a selfie
+    // that did not match sailed through as if it had. The outcome now travels
+    // back to the caller, which asks whether to retry or skip.
+    let faceCheck: FaceCheckOutcome = null;
     if (form.faceCheckPhoto && !options.skipFaceCheck) {
       try {
         const faceRes = await fetch(`${apiBaseUrl}/verification/selfie`, {
@@ -448,10 +456,16 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
           body: JSON.stringify({ photo_url: form.faceCheckPhoto }),
         });
         if (!faceRes.ok) {
-          console.warn(`Face check failed: HTTP ${faceRes.status}`);
+          const body = await faceRes.json().catch(() => ({} as any));
+          faceCheck = {
+            message: body?.error || 'We could not confirm that selfie against your photos.',
+            nearMiss: Boolean(body?.near_miss),
+            duplicate: Boolean(body?.duplicate_account),
+          };
         }
       } catch (err) {
         console.warn('Face check error:', err);
+        faceCheck = { message: 'We could not reach the verification service.', nearMiss: true, duplicate: false };
       }
     }
 
@@ -471,7 +485,77 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       }
     }
 
-    return { token, userId };
+    return { token, userId, faceCheck };
+  };
+
+  /**
+   * The selfie did not match. Onboarding is already saved at this point, so the
+   * choice is only about the green flag: take another selfie, or carry on
+   * unverified and do it later from Settings → Verification.
+   */
+  const promptFaceCheckRetry = (outcome: NonNullable<FaceCheckOutcome>, token: string, finish: () => void) => {
+    const retake = async () => {
+      try {
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+          finish();
+          return;
+        }
+        const shot = await ImagePicker.launchCameraAsync({
+          cameraType: ImagePicker.CameraType.front,
+          allowsEditing: true,
+          aspect: [1, 1],
+          quality: 1,
+        });
+        if (shot.canceled || !shot.assets?.length) {
+          finish();
+          return;
+        }
+        setLoading(true);
+        const dataUrl = await toUploadableDataUrl(shot.assets[0].uri);
+        const res = await fetch(`${apiBaseUrl}/verification/selfie`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            'x-device-id': (await getDeviceId()) || '',
+          },
+          body: JSON.stringify({ photo_url: dataUrl }),
+        });
+        if (res.ok) {
+          finish();
+          return;
+        }
+        const body = await res.json().catch(() => ({} as any));
+        promptFaceCheckRetry(
+          {
+            message: body?.error || 'That one did not match either.',
+            nearMiss: Boolean(body?.near_miss),
+            duplicate: Boolean(body?.duplicate_account),
+          },
+          token,
+          finish
+        );
+      } catch {
+        finish();
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    // A duplicate face/device is not something a better selfie fixes.
+    const buttons = outcome.duplicate
+      ? [{ text: 'Continue', onPress: finish }]
+      : [
+          { text: 'Skip for now', style: 'cancel' as const, onPress: finish },
+          { text: 'Try again', onPress: () => { void retake(); } },
+        ];
+
+    Alert.alert(
+      'Selfie not verified',
+      `${outcome.message}${outcome.nearMiss ? ' Good light and a straight-on shot usually fixes it.' : ''}\n\nYou can finish setting up either way — verification can be done later from Settings.`,
+      buttons
+    );
   };
 
   const handleContinue = async () => {
@@ -489,7 +573,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
       try {
         const result = await submitToBackend();
         if (existingUserId) void clearOnboardingDraft(existingUserId);
-        onComplete({ token: result.token, name: form.name.trim(), userId: result.userId });
+        const finish = () => onComplete({ token: result.token, name: form.name.trim(), userId: result.userId });
+        if (result.faceCheck) {
+          promptFaceCheckRetry(result.faceCheck, result.token, finish);
+        } else {
+          finish();
+        }
       } catch (error: any) {
         Alert.alert('Error', error.message || 'Something went wrong finishing setup.');
       } finally {
@@ -1020,26 +1109,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onComplete, 
                 </>
               )}
             </View>
-            <View style={[styles.card, { backgroundColor: '#101D13', marginTop: 16 }]}>
-              <Typography variant="small" style={{ color: theme.colors.muted }}>
-                How far are you willing to travel?
-              </Typography>
-              {renderChipRow(
-                distanceOptions.map((option) => option.label),
-                [
-                  (distanceOptions.find((option) => option.value === form.distanceRadius) ||
-                    distanceOptions[2]).label,
-                ],
-                (label) => {
-                  const picked = distanceOptions.find((option) => option.label === label);
-                  if (picked) setForm((prev) => ({ ...prev, distanceRadius: picked.value }));
-                },
-                false
-              )}
-              <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 8 }}>
-                You can change this later in search filters.
-              </Typography>
-            </View>
+            {/* Distance moved to the filter sheet. A new account starts open to
+                its whole country, and narrows only when the person asks for it. */}
+            <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 16, textAlign: 'center' }}>
+              You will see people from across your country to start. Narrow it to a
+              distance whenever you like, in search filters.
+            </Typography>
           </View>
         );
 

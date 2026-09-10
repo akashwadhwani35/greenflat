@@ -6,6 +6,7 @@ import { UnderlineInput } from '../components/UnderlineInput';
 import { Button } from '../components/Button';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
+import { getDeviceId } from '../utils/deviceId';
 import { useTheme } from '../theme/ThemeProvider';
 
 
@@ -43,7 +44,8 @@ export const LoginScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onSuccess, on
     try {
       const response = await fetch(`${apiBaseUrl}/auth/google`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        // The install id is what enforces one account per phone.
+        headers: { 'Content-Type': 'application/json', 'x-device-id': (await getDeviceId()) || '' },
         body: JSON.stringify({ id_token: idToken }),
       });
       const data = await response.json().catch(() => ({}));

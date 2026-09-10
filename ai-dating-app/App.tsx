@@ -19,6 +19,7 @@ import { MessagesScreen } from './src/screens/MessagesScreen';
 import { Typography } from './src/components/Typography';
 import { BottomNav, TabId } from './src/components/BottomNav';
 import { NoticeModal, type Notice } from './src/components/NoticeModal';
+import { LimitModal, type LimitNotice } from './src/components/LimitModal';
 import { MatchModal } from './src/components/MatchModal';
 import { SettingsScreen } from './src/screens/SettingsScreen';
 import { NotificationsScreen } from './src/screens/NotificationsScreen';
@@ -32,6 +33,7 @@ import { ProfileEditScreen } from './src/screens/ProfileEditScreen';
 import { PhotoManagerScreen } from './src/screens/PhotoManagerScreen';
 import { VerificationScreen } from './src/screens/VerificationScreen';
 import { PrivacySafetyScreen } from './src/screens/PrivacySafetyScreen';
+import { BoundariesScreen } from './src/screens/BoundariesScreen';
 import { HelpCenterScreen } from './src/screens/HelpCenterScreen';
 import { TermsScreen } from './src/screens/TermsScreen';
 import { AdminDashboardScreen } from './src/screens/AdminDashboardScreen';
@@ -64,6 +66,7 @@ type Overlay =
   | 'photos'
   | 'verification'
   | 'privacySafety'
+  | 'boundaries'
   | 'helpCenter'
   | 'terms'
   | 'checkout'
@@ -145,6 +148,7 @@ const AppShell: React.FC = () => {
   const [subscriptionTab, setSubscriptionTab] = useState<'pro' | 'premium'>('pro');
   const [walletRefreshKey, setWalletRefreshKey] = useState(0);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>({});
+  const [limitNotice, setLimitNotice] = useState<LimitNotice | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('explore');
   const [preferredDiscoverTab, setPreferredDiscoverTab] = useState<'onGrid' | 'offGrid'>('onGrid');
   const [hasCompletedFirstSearch, setHasCompletedFirstSearch] = useState(false);
@@ -304,6 +308,17 @@ const AppShell: React.FC = () => {
   }, [socket, authToken]);
   // Drives the green "you both said this" highlighting on profile cards.
   const viewerProfile = useViewerProfile(authToken, API_BASE_URL);
+
+  // The gender picked during onboarding is what the server already searches on,
+  // but the filter sheet opened with nothing selected, so it read as unset.
+  // Seed it once, and only while the person has not chosen for themselves.
+  const seededGenderRef = useRef(false);
+  useEffect(() => {
+    if (seededGenderRef.current) return;
+    if (!viewerProfile?.interested_in) return;
+    seededGenderRef.current = true;
+    setAdvancedFilters((prev) => (prev.interested_in ? prev : { ...prev, interested_in: viewerProfile.interested_in }));
+  }, [viewerProfile]);
 
   // The bottom nav highlight follows what is actually on screen. Likes and
   // Chats can be opened from places other than the nav (profile menu, a match
@@ -550,7 +565,16 @@ const AppShell: React.FC = () => {
       } else if (body.upgrade_required) {
         Alert.alert('Paid feature', 'Saving profiles for later is part of Pro and Premium.', [
           { text: 'Not now', style: 'cancel' },
-          { text: 'See plans', onPress: () => setOverlay('subscription') },
+          {
+            text: 'See plans',
+            // The profile sheet is a Modal rendered above the overlay switch, so
+            // it has to close first or the plans screen opens out of sight
+            // behind it.
+            onPress: () => {
+              handleCloseProfile();
+              setTimeout(() => setOverlay('subscription'), 320);
+            },
+          },
         ]);
       } else {
         Alert.alert('Could not save', body.error || 'Please try again.');
@@ -575,6 +599,8 @@ const AppShell: React.FC = () => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
+        // Liking from a list is nearly always answering the Likes inbox.
+        if (showLimitIfAny(data, isOnGrid, true)) return;
         if (data.can_bookmark) {
           Alert.alert(
             'Not available right now',
@@ -606,6 +632,31 @@ const AppShell: React.FC = () => {
     }
   };
 
+  /**
+   * Turns a refused like into the right limit popup, or returns false when the
+   * refusal was something else and the caller should report it normally.
+   *
+   * Green Flag is deliberately absent: the board exempts it from this system.
+   */
+  const showLimitIfAny = (body: any, isOnGrid: boolean, fromInbox = false): boolean => {
+    if (!body) return false;
+    // body.incoming_limit means the *other* person is full, which is a cooldown
+    // and offers a bookmark. It is not this popup.
+    if (typeof body.error === 'string' && /like limit reached/i.test(body.error)) {
+      setLimitNotice({
+        // Answering someone from the inbox is still a like against the same
+        // daily allowance, but the reader is thinking "I cannot like back",
+        // so it gets its own wording. Never the word "incoming".
+        kind: fromInbox ? 'incoming' : isOnGrid ? 'aiMatch' : 'explore',
+        // The server answers in hours; the popup wants a moment in time.
+        availableAt: body.available_at
+          || new Date(Date.now() + (Number(body.reset_in_hours) || 12) * 3600 * 1000).toISOString(),
+      });
+      return true;
+    }
+    return false;
+  };
+
   const handleSwipeRight = async () => {
     if (!selectedMatch) return;
     if (!authToken) {
@@ -632,6 +683,10 @@ const AppShell: React.FC = () => {
 
       if (!response.ok) {
         const errorBody = await response.json().catch(() => ({}));
+        if (showLimitIfAny(errorBody, selectedMatch.is_on_grid ?? true, answeredFromInbox)) {
+          setTimeout(() => setSelectedMatch(null), 300);
+          return;
+        }
         throw new Error(errorBody.error || 'Unable to like profile right now.');
       }
 
@@ -878,6 +933,7 @@ const AppShell: React.FC = () => {
             onOpenPhotos={() => setOverlay('photos')}
             onOpenVerification={() => setOverlay('verification')}
             onOpenPrivacy={() => setOverlay('privacySafety')}
+            onOpenBoundaries={() => setOverlay('boundaries')}
             onOpenNotifications={() => setOverlay('notifications')}
             onOpenHelp={() => setOverlay('helpCenter')}
             onOpenTerms={() => setOverlay('terms')}
@@ -1018,6 +1074,8 @@ const AppShell: React.FC = () => {
         return <PhotoManagerScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'verification':
         return <VerificationScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
+      case 'boundaries':
+        return <BoundariesScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} />;
       case 'privacySafety':
         return <PrivacySafetyScreen {...overlayProps} token={authToken!} apiBaseUrl={API_BASE_URL} onAccountDeleted={logout} onOpenDeleteAccount={() => setOverlay('deleteAccount')} />;
       case 'deleteAccount':
@@ -1334,6 +1392,16 @@ const AppShell: React.FC = () => {
     <View style={styles.container}>
       {renderStage()}
       <NoticeModal notice={notice} onClose={() => setNotice(null)} />
+      <LimitModal
+        notice={limitNotice}
+        onClose={() => setLimitNotice(null)}
+        onSeePlans={() => {
+          // Same rule as the bookmark upsell: the profile sheet is a Modal
+          // above the overlay switch and has to close first.
+          handleCloseProfile();
+          setTimeout(() => setOverlay('subscription'), 320);
+        }}
+      />
       <Modal visible={showWelcomePopup} transparent animationType="fade" onRequestClose={() => setShowWelcomePopup(false)}>
         <View style={styles.welcomeBackdrop}>
           <View style={[styles.welcomeCard, { backgroundColor: theme.colors.surface }]}>

@@ -6,7 +6,7 @@ import pool from '../config/database';
 import { JWT_CONFIG, DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
 import { normalizeEmail, isDisposableEmail } from '../services/email.service';
-import { deviceIdFromRequest } from '../services/accounts.service';
+import { deviceIdFromRequest, deviceHasAccount } from '../services/accounts.service';
 import {
   checkOtp,
   issueOtp,
@@ -152,6 +152,15 @@ export const signup = async (req: Request, res: Response) => {
 
     if (existingUser.rows.length > 0) {
       return res.status(400).json({ error: 'Email already registered' });
+    }
+
+    // One account per phone. Soft: the app turns this into a "contact support"
+    // screen, because shared phones are real and there is no SMS recovery yet.
+    if (await deviceHasAccount(deviceIdFromRequest(req), pool)) {
+      return res.status(409).json({
+        error: 'This device already has a GreenFlag account.',
+        device_limit: true,
+      });
     }
 
     // Hash password
@@ -321,6 +330,16 @@ export const googleAuth = async (req: Request, res: Response) => {
         user = linkResult.rows[0];
       }
     } else {
+      // Signing in to an existing account from a shared phone is fine; only
+      // creating a second one on the same device is not.
+      if (await deviceHasAccount(deviceIdFromRequest(req), client)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This device already has a GreenFlag account.',
+          device_limit: true,
+        });
+      }
+
       isNewUser = true;
       const randomPassword = crypto.randomBytes(32).toString('hex');
       const passwordHash = await bcrypt.hash(randomPassword, 10);

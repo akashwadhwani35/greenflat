@@ -23,6 +23,7 @@ type ProfileDetailCandidate = MatchCandidate & {
   personality_summary?: string;
   top_traits?: string[];
   personality_traits?: string[];
+  prompts?: unknown;
 };
 
 const calculateAge = (dateOfBirth?: string): number | undefined => {
@@ -64,6 +65,9 @@ const parseProfileData = (data: any): ProfileDetailCandidate => {
     bio: typeof profile?.bio === 'string' ? profile.bio : '',
     relationship_goal: typeof profile?.relationship_goal === 'string' ? profile.relationship_goal : undefined,
     interests,
+    // ProfileDetailScreen renders these; without carrying them through, your own
+    // saved prompts were invisible on your own profile.
+    prompts: profile?.prompts ?? null,
     personality_summary: typeof personality?.personality_summary === 'string'
       ? personality.personality_summary
       : '',

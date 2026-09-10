@@ -563,11 +563,14 @@ export const ProfileDetailScreen: React.FC<ProfileDetailScreenProps> = ({
                 </View>
               );
             })}
-            <View style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
-              <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
-                {isVerified ? 'Verified' : 'Member'}
-              </Typography>
-            </View>
+            {/* Verified is worth saying; "Member" told the reader nothing. */}
+            {isVerified ? (
+              <View style={[styles.chip, { borderColor: theme.colors.secondaryHairline, backgroundColor: theme.colors.secondaryHighlight }]}>
+                <Typography variant="small" style={[styles.chipText, { color: theme.colors.textDark }]}>
+                  Verified
+                </Typography>
+              </View>
+            ) : null}
           </View>
         </View>
 

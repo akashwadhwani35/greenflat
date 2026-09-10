@@ -23,7 +23,7 @@ import pool from '../config/database';
 import { DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured } from '../services/sms.service';
 import { isEmailConfigured, normalizeEmail, isDisposableEmail } from '../services/email.service';
-import { deviceIdFromRequest } from '../services/accounts.service';
+import { deviceIdFromRequest, deviceHasAccount } from '../services/accounts.service';
 import {
   checkOtp,
   issueOtp,
@@ -324,6 +324,14 @@ export const completeRegistration = async (req: Request, res: Response) => {
     // code, which was minutes ago.
     if (await emailTaken(pending.email)) {
       return res.status(409).json({ error: 'Email already registered' });
+    }
+
+    // One account per phone, recoverable through support. See deviceHasAccount.
+    if (await deviceHasAccount(deviceIdFromRequest(req), pool)) {
+      return res.status(409).json({
+        error: 'This device already has a GreenFlag account.',
+        device_limit: true,
+      });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);

@@ -1126,7 +1126,7 @@ export const MessagesScreen: React.FC<MessagesScreenProps> = ({
           <View style={[styles.firstMessageWarning, { backgroundColor: theme.colors.charcoal, borderTopColor: theme.colors.border }]}>
             <Feather name="shield" size={14} color={theme.colors.neonGreen} />
             <Typography variant="tiny" style={{ color: theme.colors.muted, flex: 1, marginLeft: 8 }}>
-              Keep it respectful. Messages that break our guidelines can get your account removed.
+              Stay safe, keep chats on GreenFlag, and report anyone suspicious.
             </Typography>
           </View>
         ) : null}

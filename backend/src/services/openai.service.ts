@@ -619,8 +619,15 @@ Return JSON: {"isAdult": true/false, "confidence": 0-1, "reasoning": "short reas
  * - selfie appears 18+
  * - selfie person matches profile primary photo person
  */
-/** Similarity at or above this counts as the same person. */
-const SELFIE_MATCH_THRESHOLD = 0.45;
+/**
+ * Similarity at or above this counts as the same person.
+ *
+ * 0.45 sat inside the band the prompt itself calls "probably the same person",
+ * so a different face scoring 0.5 verified. The bar now sits in the "clearly"
+ * band. Honest users who fall short are no longer stuck: the app offers a retry
+ * and a skip instead of only a retry.
+ */
+const SELFIE_MATCH_THRESHOLD = 0.62;
 
 export const analyzeSelfieAgainstProfile = async (
   selfieUrl: string,

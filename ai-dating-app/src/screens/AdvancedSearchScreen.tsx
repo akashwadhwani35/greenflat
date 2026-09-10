@@ -62,6 +62,19 @@ type Option = {
   icon?: string;
 };
 
+/**
+ * Moved here from onboarding. Values are km and go straight into the
+ * distance_km filter; "Anywhere" is the widest the backend treats as no limit.
+ * Nothing selected means country-wide, which is what a new account gets.
+ */
+const DISTANCE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: '10 km', value: '10' },
+  { label: '25 km', value: '25' },
+  { label: '50 km', value: '50' },
+  { label: '100 km', value: '100' },
+  { label: 'Anywhere', value: '20000' },
+];
+
 const RELIGION_OPTIONS: Option[] = [
   { value: 'hindu', label: 'Hindu' },
   { value: 'muslim', label: 'Muslim' },
@@ -375,8 +388,24 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
             </View>
           </View>
 
-          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>Max distance (km)</Typography>
-          <Input placeholder="e.g. 25" keyboardType="numeric" leftIcon="navigation" value={filters.distance_km} onChangeText={(text) => update('distance_km', text)} />
+          {/* Onboarding used to ask this. It belongs here instead: until a
+              distance is picked, results are country-wide. */}
+          <Typography variant="small" style={{ color: theme.colors.muted, marginTop: 14 }}>How far are you willing to travel?</Typography>
+          <View style={styles.chipGrid}>
+            {DISTANCE_OPTIONS.map(({ label, value }) => (
+              <ChipToggle
+                key={label}
+                label={label}
+                active={filters.distance_km === value}
+                onPress={() => update('distance_km', filters.distance_km === value ? '' : value)}
+              />
+            ))}
+          </View>
+          <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 6 }}>
+            {filters.distance_km
+              ? 'Only people within this distance.'
+              : 'No distance set, so you will see people from across your country.'}
+          </Typography>
 
           {renderMulti('Religion', 'religion', RELIGION_OPTIONS)}
           {renderMulti('Children', 'have_kids', CHILDREN_OPTIONS)}

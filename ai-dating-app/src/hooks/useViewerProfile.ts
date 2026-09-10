@@ -15,6 +15,8 @@ export type ViewerProfile = {
   traits: string[];
   /** Single-value lifestyle answers, lowercased for comparison. */
   attributes: Record<string, string>;
+  /** The onboarding answer, so the filter sheet can open already showing it. */
+  interested_in: 'male' | 'female' | 'both' | '';
 };
 
 const normalize = (value: unknown): string =>
@@ -66,6 +68,9 @@ export const useViewerProfile = (
             fitness_level: normalize(profile.fitness_level),
             city: normalize(data?.user?.city),
           },
+          interested_in: (['male', 'female', 'both'] as const).includes(normalize(data?.user?.interested_in) as any)
+            ? (normalize(data?.user?.interested_in) as 'male' | 'female' | 'both')
+            : '',
         });
       } catch {
         // A failed fetch just means nothing gets highlighted. The profile still renders.

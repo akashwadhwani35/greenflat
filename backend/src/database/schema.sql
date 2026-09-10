@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS users (
     pronouns TEXT[],
     date_of_birth DATE NOT NULL,
     city VARCHAR(100) NOT NULL,
+    -- ISO 3166-1 alpha-2. Scopes results for anyone who has not chosen a
+    -- distance in filters (migration 031). NULL means "do not restrict".
+    country VARCHAR(2),
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     distance_radius INTEGER DEFAULT 50,
@@ -168,8 +171,30 @@ CREATE TABLE IF NOT EXISTS user_activity_limits (
     off_grid_likes_count INTEGER DEFAULT 0,
     messages_started_count INTEGER DEFAULT 0,
     last_reset_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    -- The six-hour Explore window that bounds "unlimited likes" (migration 031).
+    explore_window_started_at TIMESTAMP,
+    explore_window_likes INTEGER NOT NULL DEFAULT 0,
+    explore_window_cap INTEGER,
+    explore_window_notified_at TIMESTAMP,
+    likes_reset_notified_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Settings → My Boundaries (migration 031): how many incoming actions a person
+-- is willing to receive per day. Private; nobody else can see these numbers.
+CREATE TABLE IF NOT EXISTS user_incoming_limits (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    limit_likes INTEGER NOT NULL DEFAULT 10,
+    limit_greenflags INTEGER NOT NULL DEFAULT 10,
+    limit_compliments INTEGER NOT NULL DEFAULT 10,
+    likes_count INTEGER NOT NULL DEFAULT 0,
+    greenflags_count INTEGER NOT NULL DEFAULT 0,
+    compliments_count INTEGER NOT NULL DEFAULT 0,
+    last_reset_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- AI Persona Table

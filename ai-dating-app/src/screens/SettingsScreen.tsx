@@ -12,6 +12,7 @@ type Props = {
   onOpenPhotos?: () => void;
   onOpenVerification?: () => void;
   onOpenPrivacy?: () => void;
+  onOpenBoundaries?: () => void;
   onOpenHelp?: () => void;
   onOpenTerms?: () => void;
   onOpenCheckout?: () => void;
@@ -38,6 +39,7 @@ export const SettingsScreen: React.FC<Props> = ({
   onOpenPhotos,
   onOpenVerification,
   onOpenPrivacy,
+  onOpenBoundaries,
   onOpenHelp,
   onOpenTerms,
   onOpenCheckout,
@@ -107,6 +109,7 @@ export const SettingsScreen: React.FC<Props> = ({
     { title: 'Photos', subtitle: 'Add, reorder, set primary', icon: 'image', action: onOpenPhotos },
     { title: 'Verification', subtitle: 'Photo / selfie verification', icon: 'shield', action: onOpenVerification },
     { title: 'Privacy & safety', subtitle: 'Visibility, block/report, incognito', icon: 'eye', action: onOpenPrivacy },
+    { title: 'My Boundaries', subtitle: 'How much reaches you each day', icon: 'sliders', action: onOpenBoundaries },
     { title: 'Notifications', subtitle: 'Manage pushes and device settings', icon: 'bell', action: onOpenNotifications },
     { title: 'Support', subtitle: 'Send us your issue or feedback', icon: 'help-circle', action: onOpenHelp },
     { title: 'Saved', subtitle: 'Profiles you saved to like later', icon: 'bookmark', action: onOpenBookmarks },

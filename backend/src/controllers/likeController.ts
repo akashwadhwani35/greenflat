@@ -5,6 +5,14 @@ import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
 import { notifyLikeReceived, notifyMatch, notifyFirstMove, notifyAccepted } from '../services/push.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
+import {
+  checkIncomingCapacity,
+  consumeIncomingCapacity,
+  checkExploreWindow,
+  consumeExploreWindow,
+  type IncomingKind,
+  type ExploreWindow,
+} from '../services/boundaries.service';
 import { getIO } from '../socket';
 
 // Badge counts on the tabs: tell the phone something changed so it refetches.
@@ -185,6 +193,35 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // My Boundaries: the receiver decides how much lands on them each day.
+    // Checked before anything is charged — a Green Flag that cannot be
+    // delivered must never cost the sender tokens.
+    const incomingKind: IncomingKind = is_superlike ? 'greenflag' : 'like';
+    const capacity = await checkIncomingCapacity(target_user_id, incomingKind, client);
+    if (!capacity.allowed) {
+      await client.query('ROLLBACK');
+      return res.status(429).json({
+        error: 'They have reached their limit for today',
+        incoming_limit: true,
+        can_bookmark: true,
+        available_at: capacity.availableAt.toISOString(),
+      });
+    }
+
+    // "Unlimited likes" still runs out of profiles every six hours.
+    let exploreWindow: ExploreWindow | null = null;
+    if (!is_on_grid && user.is_premium) {
+      exploreWindow = await checkExploreWindow(userId, client);
+      if (exploreWindow.exhausted) {
+        await client.query('ROLLBACK');
+        return res.status(429).json({
+          error: 'No new profiles right now',
+          explore_window: true,
+          available_at: exploreWindow.opensAt.toISOString(),
+        });
+      }
+    }
+
     // Check if user has exceeded limits (only for new likes, not upgrades).
     if (is_on_grid) {
       if (limits.on_grid_likes_count >= dailyLimits.on_grid_likes && !user.is_premium) {
@@ -243,6 +280,10 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
         [userId]
       );
     }
+
+    // Delivered, so it counts against the receiver's day and this window.
+    await consumeIncomingCapacity(target_user_id, incomingKind, client);
+    if (exploreWindow) await consumeExploreWindow(userId, client);
 
     // Get user names for notifications
     const likerNameResult = await client.query('SELECT name FROM users WHERE id = $1', [userId]);
@@ -497,6 +538,18 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Their boundaries, checked before the six tokens are taken.
+    const complimentCapacity = await checkIncomingCapacity(target_user_id, 'compliment', client);
+    if (!complimentCapacity.allowed) {
+      await client.query('ROLLBACK');
+      return res.status(429).json({
+        error: 'They have reached their limit for today',
+        incoming_limit: true,
+        can_bookmark: true,
+        available_at: complimentCapacity.availableAt.toISOString(),
+      });
+    }
+
     let remainingCredits = 0;
     try {
       remainingCredits = await consumeCredits(
@@ -583,6 +636,9 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     );
     inserted.push(textRow.rows[0]);
     await client.query('UPDATE matches SET last_message_at = NOW() WHERE id = $1', [matchId]);
+
+    // Delivered, so it counts against their day.
+    await consumeIncomingCapacity(target_user_id, 'compliment', client);
 
     await client.query('COMMIT');
 

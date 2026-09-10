@@ -24,6 +24,8 @@ import {
   blockUser,
   unblockUser,
 } from '../controllers/privacyController';
+import { getBoundaries, updateBoundaries } from '../controllers/boundariesController';
+import { runLimitResetSweep } from '../services/limitResets.service';
 import { getNotificationPreferences, updateNotificationPreferences } from '../controllers/notificationsController';
 import { getMediaCapabilities, getUploadSignature, uploadLocalMedia, serveMedia } from '../controllers/mediaController';
 import { submitSupportMessage } from '../controllers/supportController';
@@ -124,6 +126,30 @@ router.post('/report', authenticate, createReport);
 router.get('/bookmarks', authenticate, getBookmarks);
 router.post('/bookmarks', authenticate, createBookmark);
 router.delete('/bookmarks/:targetUserId', authenticate, deleteBookmark);
+
+/**
+ * Cloud Scheduler calls this to push "your likes are back" and "new profiles"
+ * to people who are not in the app. Guarded by a shared secret rather than a
+ * user token, since there is no user. Without INTERNAL_SWEEP_SECRET set, it is
+ * closed rather than open.
+ */
+router.post('/internal/limit-sweep', async (req, res) => {
+  const secret = process.env.INTERNAL_SWEEP_SECRET;
+  if (!secret || req.get('x-sweep-secret') !== secret) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  try {
+    const counts = await runLimitResetSweep();
+    return res.json({ notified: counts });
+  } catch (error) {
+    console.error('Limit sweep failed', error);
+    return res.status(500).json({ error: 'Sweep failed' });
+  }
+});
+
+// Settings → My Boundaries: how much lands on you each day.
+router.get('/boundaries', authenticate, getBoundaries);
+router.post('/boundaries', authenticate, updateBoundaries);
 
 // Privacy and safety routes
 router.get('/privacy/settings', authenticate, getPrivacySettings);

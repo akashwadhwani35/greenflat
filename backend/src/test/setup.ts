@@ -22,6 +22,7 @@ const tables = [
   'personality_responses',
   'user_profiles',
   'user_activity_limits',
+  'user_incoming_limits',
   'user_ai_profiles',
   'pending_registrations',
   'otp_request_audit',

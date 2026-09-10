@@ -103,7 +103,8 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
       try {
         const response = await fetch(`${apiBaseUrl}/auth/google`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          // The install id is what enforces one account per phone.
+          headers: { 'Content-Type': 'application/json', 'x-device-id': (await getDeviceId()) || '' },
           body: JSON.stringify({
             id_token: idToken,
             // Carries across any phone number already verified in this funnel.

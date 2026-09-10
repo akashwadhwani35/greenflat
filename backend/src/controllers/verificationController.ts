@@ -198,7 +198,14 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
       const errorMessage = !result.isMatch
         ? 'Selfie does not match your profile photo'
         : 'Age verification failed';
-      return res.status(400).json({ error: errorMessage, reasoning: result.reasoning });
+      // The app offers "try again" or "skip"; a near miss is worth another go,
+      // a clearly different face is not.
+      return res.status(400).json({
+        error: errorMessage,
+        reasoning: result.reasoning,
+        confidence: result.confidence,
+        near_miss: result.isAdult && result.confidence >= 0.4,
+      });
     }
 
     await pool.query(
@@ -232,7 +239,10 @@ export const verifyLocation = async (req: AuthRequest, res: Response) => {
     }
 
     let resolvedCity = city || null;
-    if (!resolvedCity && GOOGLE_MAPS_API_KEY) {
+    // Always worth a lookup even when the city came in with the request: the
+    // country is what scopes a new account's results until they pick a distance.
+    let resolvedCountry: string | null = null;
+    if (GOOGLE_MAPS_API_KEY) {
       try {
         const geoResponse = await fetch(
           `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${GOOGLE_MAPS_API_KEY}`
@@ -243,7 +253,11 @@ export const verifyLocation = async (req: AuthRequest, res: Response) => {
           const cityComponent = loc?.address_components?.find((c: any) =>
             c.types?.includes('locality')
           );
-          resolvedCity = cityComponent?.long_name || loc?.formatted_address || null;
+          const countryComponent = loc?.address_components?.find((c: any) =>
+            c.types?.includes('country')
+          );
+          resolvedCity = resolvedCity || cityComponent?.long_name || loc?.formatted_address || null;
+          resolvedCountry = countryComponent?.short_name || null;
         }
       } catch (geoError) {
         console.error('Geocode lookup failed', geoError);
@@ -260,12 +274,13 @@ export const verifyLocation = async (req: AuthRequest, res: Response) => {
     // Store coordinates on user record to support distance-based matching
     await pool.query(
       `UPDATE users
-       SET latitude = $1, longitude = $2, city = COALESCE($3, city), updated_at = NOW()
-       WHERE id = $4`,
-      [lat, lng, resolvedCity, userId]
+       SET latitude = $1, longitude = $2, city = COALESCE($3, city),
+           country = COALESCE($4, country), updated_at = NOW()
+       WHERE id = $5`,
+      [lat, lng, resolvedCity, resolvedCountry, userId]
     );
 
-    res.json({ message: 'Location verified', city: resolvedCity });
+    res.json({ message: 'Location verified', city: resolvedCity, country: resolvedCountry });
   } catch (error) {
     console.error('Verify location error', error);
     res.status(500).json({ error: 'Failed to verify location' });

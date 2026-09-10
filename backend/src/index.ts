@@ -12,6 +12,7 @@ import { initSocketServer } from './socket';
 import { runMigrations } from './database/migrate';
 import { isPaymentsEnabled } from './services/payments.service';
 import { initRevenueCat } from './services/revenuecat.service';
+import { startLimitResetTimer } from './services/limitResets.service';
 
 dotenv.config();
 
@@ -100,6 +101,9 @@ const startServer = () => {
     console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`💳 Payments: ${isPaymentsEnabled() ? 'ENABLED' : 'disabled (purchase endpoints return 501)'}`);
   });
+  // Best-effort while an instance is warm; POST /api/internal/limit-sweep is
+  // what Cloud Scheduler should call for the dependable version.
+  startLimitResetTimer();
 };
 
 if (process.env.NODE_ENV !== 'test') {

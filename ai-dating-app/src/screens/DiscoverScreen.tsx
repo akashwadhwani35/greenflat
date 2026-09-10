@@ -101,6 +101,40 @@ const SkeletonCard: React.FC<{ index: number }> = ({ index }) => {
   );
 };
 
+/**
+ * Counts down to the next Explore window. Minute resolution, so it ticks once a
+ * minute rather than once a second.
+ */
+const ExploreWindowCountdown: React.FC<{ opensAt: string }> = ({ opensAt }) => {
+  const theme = useTheme();
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, [opensAt]);
+
+  const msLeft = new Date(opensAt).getTime() - now;
+  if (!Number.isFinite(msLeft)) return null;
+  const totalMinutes = Math.max(0, Math.ceil(msLeft / 60000));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const label = totalMinutes === 0
+    ? 'Any moment now'
+    : hours > 0
+      ? `${hours}h ${String(minutes).padStart(2, '0')}m`
+      : `${minutes}m`;
+
+  return (
+    <View style={[styles.windowCountdown, { borderColor: theme.colors.border }]}>
+      <Feather name="clock" size={14} color={theme.colors.neonGreen} />
+      <Typography variant="small" style={{ color: theme.colors.text, marginLeft: 8 }}>
+        New profiles in <Typography variant="bodyStrong" style={{ color: theme.colors.neonGreen }}>{label}</Typography>
+      </Typography>
+    </View>
+  );
+};
+
 export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
   token,
   apiBaseUrl,
@@ -217,6 +251,18 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
       if (response.ok) {
         const data = await response.json();
+
+        // An unlimited plan has spent this six-hour window. Do not retry or
+        // recycle the pool — the point is that there is nothing more until it
+        // reopens.
+        if (data.explore_window?.exhausted) {
+          setExploreWindowOpensAt(data.explore_window.opens_at || null);
+          setMatches([]);
+          offGridCacheRef.current = [];
+          return;
+        }
+        setExploreWindowOpensAt(null);
+
         let newProfiles = (data.matches || []).map((item: MatchCandidate) => ({ ...item, is_on_grid: false }));
         if (newProfiles.length === 0 && onGridIdsRef.current.length > 0) {
           // Small community: nobody left outside AI Match. Overlap beats an empty grid.
@@ -254,7 +300,16 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
 
   // Nothing typed yet: AI Match stays empty. Explore is the browsing tab;
   // AI Match only ever shows what a search asked for.
+  // Set while an unlimited plan is between Explore windows (see #12 on the board).
+  const [exploreWindowOpensAt, setExploreWindowOpensAt] = useState<string | null>(null);
+
   const hasSearchQuery = Boolean(filters?.keywords?.trim());
+
+  // Explore can come back empty simply because the gender filter is narrow and
+  // matching is reciprocal: the other person has to be looking for you too.
+  // Saying so beats a blank screen the rewind button cannot fix.
+  const genderFilterLabel =
+    filters?.interested_in === 'male' ? 'men' : filters?.interested_in === 'female' ? 'women' : '';
 
   const fetchOnGridMatches = useCallback(async (options: { force?: boolean } = {}) => {
     const query = filters?.keywords?.trim() || '';
@@ -632,8 +687,13 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      {/* Grid */}
-      {loading ? (
+      {/* Grid.
+          Skeletons only when there is genuinely nothing to show. Every refetch
+          used to swap the cards out for shimmer and back — switching tabs, a
+          pull-to-refresh, or a slow cold start on Cloud Run all read as a
+          flicker. With cards already on screen the refresh is silent, and
+          pull-to-refresh has its own spinner. */}
+      {loading && visibleMatches.length === 0 ? (
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
@@ -667,6 +727,21 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
             </Typography>
           </TouchableOpacity>
         </View>
+      ) : visibleMatches.length === 0 && exploreWindowOpensAt && activeTab === 'offGrid' ? (
+        // Between windows. Framed as the system still working on it, with the
+        // timer doing the explaining, rather than as a cap being enforced.
+        <View style={styles.emptyContainer}>
+          <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(188, 246, 65, 0.1)' }]}>
+            <Feather name="loader" size={40} color={theme.colors.neonGreen} />
+          </View>
+          <Typography variant="h2" style={{ color: theme.colors.text, marginTop: 24, marginBottom: 12, textAlign: 'center' }}>
+            No new profiles right now
+          </Typography>
+          <Typography variant="body" style={{ color: theme.colors.muted, textAlign: 'center', paddingHorizontal: 40 }}>
+            Our system is putting together a fresh set of people for you. Come back in a little while.
+          </Typography>
+          <ExploreWindowCountdown opensAt={exploreWindowOpensAt} />
+        </View>
       ) : visibleMatches.length === 0 ? (
         <View style={styles.emptyContainer}>
           <View style={[styles.emptyIconCircle, { backgroundColor: 'rgba(188, 246, 65, 0.1)' }]}>
@@ -680,7 +755,9 @@ export const DiscoverScreen: React.FC<DiscoverScreenProps> = ({
               ? hasSearchQuery
                 ? 'Nobody fits that yet. Try broader words, or browse Explore.'
                 : 'Your AI matches show up here after a search. Explore is open in the meantime.'
-              : 'Try adjusting your filters to find more profiles'}
+              : genderFilterLabel
+                ? `No ${genderFilterLabel} who are also looking for you, right now. Matching goes both ways, so a narrow gender filter can empty this out. Try widening it.`
+                : 'Try adjusting your filters to find more profiles'}
           </Typography>
           {activeTab === 'onGrid' && onOpenAISearch ? (
             <TouchableOpacity
@@ -1012,6 +1089,15 @@ const styles = StyleSheet.create({
     // the screen. Lifting it by roughly the header + tabs height puts the
     // content at the middle of the phone.
     paddingBottom: 140,
+  },
+  windowCountdown: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    marginTop: 20,
   },
   emptyIconCircle: {
     width: 100,

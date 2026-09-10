@@ -29,10 +29,15 @@ export const geocodeCity = async (req: Request, res: Response) => {
 
     const cityComponent = first.address_components?.find((c: any) => c.types?.includes('locality'));
     const city = cityComponent?.long_name || first.formatted_address || query;
+    // ISO alpha-2. A new account is shown its whole country by default, so this
+    // is what scopes the results until a distance is chosen in filters.
+    const countryComponent = first.address_components?.find((c: any) => c.types?.includes('country'));
+    const country = countryComponent?.short_name || null;
     const { lat, lng } = first.geometry?.location || {};
 
     res.json({
       city,
+      country,
       lat,
       lng,
       raw: first,

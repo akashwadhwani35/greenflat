@@ -7,6 +7,7 @@ import { generateMatchBriefing } from '../services/openai.service';
 import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
 import { consumeCredits, getCreditBalance, ensureDailyAllowance, refundCredits } from '../services/credits.service';
+import { checkExploreWindow } from '../services/boundaries.service';
 
 // AI Match is the curated set. Anything the scorer puts under this is not a
 // recommendation worth making; it stays available to search and off-grid.
@@ -315,6 +316,38 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // The gate above only sees filters the person set explicitly. Prose goes
+    // through the parser first, so "someone over 6ft" arrived as an inferred
+    // minHeight and searched like a paid filter without one. Asking in words is
+    // still asking, so a free plan gets those inferences dropped rather than a
+    // 402 — the search itself is legitimate, it just searches on free criteria.
+    if (!hasPaidPlan) {
+      for (const key of paidFilterKeys) {
+        if (aiInferredFilterKeys.includes(key) && hasFilterValue((enhancedFilters as any)[key])) {
+          delete (enhancedFilters as any)[key];
+        }
+      }
+    }
+
+    // An unlimited plan still runs out of Explore every six hours. Phrased as
+    // the supply of profiles running dry rather than as a cap, and checked
+    // before any scoring work so an exhausted window costs nothing.
+    if (is_on_grid === false && hasPaidPlan) {
+      const window = await checkExploreWindow(userId);
+      if (window.exhausted) {
+        return res.json({
+          matches: [],
+          credit_balance: await getCreditBalance(userId),
+          relaxed_filters: [],
+          explore_window: {
+            exhausted: true,
+            opens_at: window.opensAt.toISOString(),
+          },
+          message: 'No new profiles right now. We are putting together a fresh set for you.',
+        });
+      }
+    }
+
     const userAge = calculateAge(currentUser.date_of_birth);
     const currentUserPersonaEmbedding = parseEmbedding((currentUser as any).persona_embedding);
     const currentUserLat = Number((currentUser as any).latitude);
@@ -323,6 +356,16 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
     const maxDistanceKm = typeof enhancedFilters.distance_km === 'number'
       ? enhancedFilters.distance_km
       : (Number.isFinite((currentUser as any).distance_radius) ? Number((currentUser as any).distance_radius) : null);
+
+    // Distance is opt-in now: it left onboarding and lives in the filter sheet.
+    // Until someone picks a radius, their reach is their country — wider than a
+    // city or a state, narrower than the whole world. Unknown country on either
+    // side means no restriction, so existing accounts are untouched.
+    const seekerCountry = ((currentUser as any).country as string | null) || null;
+    const scopeToCountry =
+      Boolean(seekerCountry) &&
+      typeof enhancedFilters.distance_km !== 'number' &&
+      (maxDistanceKm === null || maxDistanceKm >= 20000);
 
     const seekerPersonaSummary = buildPersonaSummary(
       {
@@ -415,6 +458,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       baseQuery += ` AND (u.interested_in = 'both' OR u.interested_in = $${paramIndex})`;
       queryParams.push(currentUser.gender);
       paramIndex++;
+
+      // Country is the default reach when no distance has been chosen.
+      if (scopeToCountry) {
+        baseQuery += ` AND (u.country IS NULL OR u.country = $${paramIndex})`;
+        queryParams.push(seekerCountry);
+        paramIndex++;
+      }
 
       // Respect candidate privacy and blocking.
       baseQuery += ` AND COALESCE(privacy.incognito_mode, FALSE) = FALSE`;
