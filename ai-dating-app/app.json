@@ -18,7 +18,7 @@
       "backgroundColor": "#101D13"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "app.gflag.greenflag",
       "buildNumber": "6",
       "infoPlist": {
