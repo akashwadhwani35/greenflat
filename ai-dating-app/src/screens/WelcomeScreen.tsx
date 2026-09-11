@@ -5,6 +5,8 @@ import { useTheme } from '../theme/ThemeProvider';
 import { Typography } from '../components/Typography';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
+import { signInWithApple, isAppleSignInSupported } from '../services/appleSignIn';
+import { AppleSignInButton } from '../components/AppleSignInButton';
 import { getDeviceId } from '../utils/deviceId';
 import { handleAuthErrorBody } from '../utils/authErrors';
 
@@ -33,6 +35,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
   const contentAnim = useRef(new Animated.Value(0)).current;
   const [legalModal, setLegalModal] = useState<null | 'terms' | 'privacy'>(null);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  // Resolved asynchronously: the device has to be asked whether Apple auth works.
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
+  useEffect(() => {
+    void isAppleSignInSupported().then(setAppleAvailable);
+  }, []);
 
   const googleWebClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
   const googleAndroidClientId = process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
@@ -76,6 +85,39 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
     }
   };
 
+
+  /** Apple returns the name only on the very first authorisation, so it is sent then. */
+  const startAppleAuth = async () => {
+    if (appleLoading || !apiBaseUrl || !onGoogleAuth) return;
+    setAppleLoading(true);
+    try {
+      const credential = await signInWithApple();
+      if (!credential) return; // backed out of the sheet
+      const response = await fetch(`${apiBaseUrl}/auth/apple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-device-id': (await getDeviceId()) || '' },
+        body: JSON.stringify({ identity_token: credential.identityToken, full_name: credential.fullName }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok && handleAuthErrorBody(data)) return;
+      if (!response.ok) throw new Error(data.error || 'Apple sign-in failed');
+      if (!data.token || !data.user?.id) throw new Error('Apple sign-in response missing token');
+      onGoogleAuth({
+        token: data.token,
+        user: {
+          id: data.user.id,
+          name: data.user.name || 'friend',
+          is_admin: data.user.is_admin,
+          onboarding_completed: data.user.onboarding_completed,
+        },
+        isNewUser: data.is_new_user === true,
+      });
+    } catch (error: any) {
+      Alert.alert('Apple sign-in failed', error?.message || 'Please try again.');
+    } finally {
+      setAppleLoading(false);
+    }
+  };
 
   const startGoogleAuth = async () => {
     if (googleLoading) return;
@@ -192,6 +234,20 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
               loading={googleLoading}
               disabled={googleLoading}
             />
+          ) : null}
+
+          {/* Sign in with Apple. iOS only, and required there because Google is
+              offered alongside it (App Store guideline 4.8). */}
+          {appleAvailable && onGoogleAuth ? (
+            <View style={{ marginTop: 12, width: '100%' }}>
+              <AppleSignInButton
+                label="Sign up with Apple"
+                onPress={startAppleAuth}
+                fullWidth
+                loading={appleLoading}
+                disabled={appleLoading}
+              />
+            </View>
           ) : null}
 
           {/* Login Link */}

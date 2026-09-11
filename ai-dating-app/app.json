@@ -19,6 +19,7 @@
     },
     "ios": {
       "supportsTablet": false,
+      "usesAppleSignIn": true,
       "bundleIdentifier": "app.gflag.greenflag",
       "buildNumber": "6",
       "infoPlist": {
@@ -50,6 +51,7 @@
       ]
     },
     "plugins": [
+      "expo-apple-authentication",
       [
         "expo-notifications",
         {

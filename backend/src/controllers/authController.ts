@@ -8,6 +8,7 @@ import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms
 import { normalizeEmail, isDisposableEmail } from '../services/email.service';
 import { deviceIdFromRequest, deviceHasAccount } from '../services/accounts.service';
 import { emailAccountCreated } from '../services/notifyEmail.service';
+import { verifyAppleIdentityToken } from '../services/appleAuth.service';
 import {
   checkOtp,
   issueOtp,
@@ -534,5 +535,151 @@ export const resetPassword = async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Reset password error:', error);
     res.status(500).json({ error: 'Failed to reset password' });
+  }
+};
+
+/**
+ * Sign in with Apple.
+ *
+ * Shaped like googleAuth, with two differences that matter:
+ *
+ *  - Apple gives the name exactly once, in the *client's* first authorisation
+ *    response, never in the token. The app forwards it on that one call and we
+ *    keep it; there is no second chance to ask.
+ *  - The email may be a private relay address, and for a returning user Apple
+ *    may omit it entirely. `apple_sub` is therefore the identity we match on,
+ *    and email is only used to link an existing password account on first use.
+ */
+export const appleAuth = async (req: Request, res: Response) => {
+  const client = await pool.connect();
+
+  try {
+    const { identity_token, full_name } = req.body as {
+      identity_token?: string;
+      full_name?: string;
+    };
+
+    if (!identity_token) {
+      return res.status(400).json({ error: 'identity_token is required' });
+    }
+
+    let identity: Awaited<ReturnType<typeof verifyAppleIdentityToken>>;
+    try {
+      identity = await verifyAppleIdentityToken(identity_token);
+    } catch (verificationError: any) {
+      const code = verificationError?.message || 'INVALID_APPLE_TOKEN';
+      if (code === 'EXPIRED_APPLE_TOKEN') {
+        return res.status(401).json({ error: 'That Apple sign-in has expired. Please try again.' });
+      }
+      if (code === 'APPLE_AUDIENCE_MISMATCH') {
+        console.error('Apple audience mismatch — check APPLE_CLIENT_IDS');
+        return res.status(500).json({ error: 'Apple sign-in is misconfigured on the server.' });
+      }
+      return res.status(401).json({ error: 'Could not verify that Apple sign-in.' });
+    }
+
+    await client.query('BEGIN');
+
+    // Identity is the sub, not the email.
+    let lookup = await client.query(
+      `SELECT id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium, credit_balance,
+              cooldown_enabled, is_admin, is_banned, apple_sub, onboarding_completed_at
+       FROM users WHERE apple_sub = $1 FOR UPDATE`,
+      [identity.sub]
+    );
+
+    // First time through, an existing account with the same real email is the
+    // same person adding Apple as a way in. A relay address never matches, which
+    // is the correct outcome: it is not evidence of who they are.
+    if (lookup.rows.length === 0 && identity.email && !identity.isPrivateRelay) {
+      lookup = await client.query(
+        `SELECT id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium, credit_balance,
+                cooldown_enabled, is_admin, is_banned, apple_sub, onboarding_completed_at
+         FROM users WHERE email = $1 FOR UPDATE`,
+        [identity.email]
+      );
+    }
+
+    let user: AuthUserRow;
+    let isNewUser = false;
+
+    if (lookup.rows.length > 0) {
+      user = lookup.rows[0];
+
+      if (user.is_banned) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Your account has been suspended. Contact support@gflag.app for assistance.' });
+      }
+
+      if (!(user as any).apple_sub) {
+        const linked = await client.query(
+          `UPDATE users SET apple_sub = $2, updated_at = NOW()
+           WHERE id = $1
+           RETURNING id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium,
+                     credit_balance, cooldown_enabled, is_admin, is_banned, apple_sub, onboarding_completed_at`,
+          [user.id, identity.sub]
+        );
+        user = linked.rows[0];
+      }
+    } else {
+      // Creating an account, so the one-per-phone rule applies exactly as it
+      // does everywhere else.
+      if (await deviceHasAccount(deviceIdFromRequest(req), client)) {
+        await client.query('ROLLBACK');
+        return res.status(409).json({
+          error: 'This device already has a GreenFlag account.',
+          device_limit: true,
+        });
+      }
+
+      isNewUser = true;
+      const randomPassword = crypto.randomBytes(32).toString('hex');
+      const passwordHash = await bcrypt.hash(randomPassword, 10);
+      // Relay addresses are real and deliverable, so they are fine to store.
+      // Only when Apple sends nothing at all do we synthesise a placeholder.
+      const email = identity.email || `apple_${identity.sub.replace(/[^A-Za-z0-9]/g, '').slice(0, 32)}@privaterelay.appleid.com`;
+      const displayName = (full_name || '').trim().slice(0, 100) || 'GreenFlag User';
+
+      const created = await client.query(
+        `INSERT INTO users (
+           email, password_hash, name, gender, interested_in, date_of_birth, city,
+           cooldown_enabled, auth_provider, apple_sub
+         )
+         VALUES ($1, $2, $3, 'other', 'both', $4, $5, $6, 'apple', $7)
+         RETURNING id, email, name, gender, interested_in, pronouns, city, is_verified, is_premium,
+                   credit_balance, cooldown_enabled, is_admin, onboarding_completed_at`,
+        [
+          email,
+          passwordHash,
+          displayName,
+          DEFAULT_GOOGLE_DOB,
+          DEFAULT_GOOGLE_CITY,
+          DAILY_LIMITS.male.cooldown_enabled_default,
+          identity.sub,
+        ]
+      );
+
+      user = created.rows[0];
+      await initializeUserDefaults(client, user.id);
+      const deviceId = deviceIdFromRequest(req);
+      if (deviceId) await client.query('UPDATE users SET device_id = $1 WHERE id = $2', [deviceId, user.id]);
+    }
+
+    await client.query('COMMIT');
+
+    if (isNewUser) void emailAccountCreated(user.id);
+
+    return res.json({
+      message: 'Apple authentication successful',
+      user: buildUserPayload(user),
+      token: signAuthToken(user.id),
+      is_new_user: isNewUser,
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Apple auth error:', error);
+    return res.status(500).json({ error: 'Apple sign-in failed' });
+  } finally {
+    client.release();
   }
 };

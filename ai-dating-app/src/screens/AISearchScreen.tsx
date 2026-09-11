@@ -590,10 +590,11 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
                       align="center"
                       style={{ marginBottom: 20 }}
                     >
-                      {personalizedText.intro}{'\n'}
-                      {/* Typography defaults align to left and always writes
-                          textAlign, so a nested one stamps left over the
-                          parent's centering and strands this word. */}
+                      {/* One sentence, wrapping where it needs to. A forced
+                          break after "your" left it orphaned on its own line
+                          with "match" alone under it, which read as three
+                          different alignments. */}
+                      {personalizedText.intro}{' '}
                       <Typography
                         variant="display"
                         align="center"

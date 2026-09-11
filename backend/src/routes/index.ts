@@ -1,5 +1,5 @@
 import express from 'express';
-import { signup, login, googleAuth, forgotPassword, resetPassword } from '../controllers/authController';
+import { signup, login, googleAuth, appleAuth, forgotPassword, resetPassword } from '../controllers/authController';
 import { completeProfile, getProfile, uploadPhoto, updateUserBasics, deletePhoto, setPrimaryPhoto, reorderPhoto, activateBoost, deleteAccount, getBioSuggestions } from '../controllers/profileController';
 import { searchMatches, refreshOffGrid, rewindOffGrid, getUserDetails, unmatch, getMatchBriefing } from '../controllers/matchController';
 import { likeProfile, getLikesRemaining, getMatches, getIncomingLikes, sendCompliment, acceptMatchRequest, declineMatchRequest, getBadgeCounts, dismissIncomingLike, getAcceptedLikes } from '../controllers/likeController';
@@ -82,6 +82,7 @@ router.post('/auth/register/complete', registrationCompleteLimiter, completeRegi
 router.post('/auth/signup', signupLimiter, signup);
 router.post('/auth/login', loginLimiter, login);
 router.post('/auth/google', loginLimiter, googleAuth);
+router.post('/auth/apple', loginLimiter, appleAuth);
 router.post('/auth/forgot-password', forgotPasswordLimiter, forgotPassword);
 router.post('/auth/reset-password', resetPasswordLimiter, resetPassword);
 

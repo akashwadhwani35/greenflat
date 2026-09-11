@@ -16,6 +16,8 @@ import { UnderlineInput } from '../components/UnderlineInput';
 import { Button } from '../components/Button';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
+import { signInWithApple, isAppleSignInSupported } from '../services/appleSignIn';
+import { AppleSignInButton } from '../components/AppleSignInButton';
 import { getDeviceId } from '../utils/deviceId';
 import { handleAuthErrorBody } from '../utils/authErrors';
 import { useTheme } from '../theme/ThemeProvider';
@@ -77,6 +79,45 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
   const [destinationHint, setDestinationHint] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(false);
+
+  useEffect(() => {
+    void isAppleSignInSupported().then(setAppleAvailable);
+  }, []);
+
+  /** Apple returns the name only on the very first authorisation, so it is sent then. */
+  const startAppleAuth = async () => {
+    if (appleLoading) return;
+    setAppleLoading(true);
+    try {
+      const credential = await signInWithApple();
+      if (!credential) return; // backed out of the sheet
+      const response = await fetch(`${apiBaseUrl}/auth/apple`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-device-id': (await getDeviceId()) || '' },
+        body: JSON.stringify({ identity_token: credential.identityToken, full_name: credential.fullName }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok && handleAuthErrorBody(data)) return;
+      if (!response.ok) throw new Error(data.error || 'Apple sign-in failed');
+      if (!data.token || !data.user?.id) throw new Error('Apple sign-in response missing token');
+      onComplete({
+        token: data.token,
+        user: {
+          id: data.user.id,
+          name: data.user.name || 'friend',
+          is_admin: data.user.is_admin,
+          onboarding_completed: data.user.onboarding_completed,
+        },
+        isNewUser: data.is_new_user === true,
+      });
+    } catch (error: any) {
+      Alert.alert('Apple sign-in failed', error?.message || 'Please try again.');
+    } finally {
+      setAppleLoading(false);
+    }
+  };
 
   const caps = capabilities || DEFAULT_CAPABILITIES;
   const minPasswordLength = caps.min_password_length || 8;
@@ -472,6 +513,17 @@ export const SignUpFlowScreen: React.FC<Props> = ({ apiBaseUrl, onBack, onComple
                     disabled={loading}
                     fullWidth
                   />
+                  {/* Equivalent option to Google on iOS, per guideline 4.8. */}
+                  {appleAvailable ? (
+                    <View style={{ marginTop: 12 }}>
+                      <AppleSignInButton
+                        onPress={startAppleAuth}
+                        loading={appleLoading}
+                        disabled={loading}
+                        fullWidth
+                      />
+                    </View>
+                  ) : null}
                 </View>
               )}
             </>

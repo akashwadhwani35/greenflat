@@ -30,6 +30,7 @@ const ensureConfigured = () => {
 
 export const isGoogleSignInConfigured = () => Boolean(WEB_CLIENT_ID);
 
+
 /**
  * Opens the account chooser and returns the Google ID token, or null when the
  * person backed out. Throws with a readable message for real failures.

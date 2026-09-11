@@ -5,8 +5,10 @@ CREATE TABLE IF NOT EXISTS users (
     id SERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
-    auth_provider VARCHAR(20) NOT NULL DEFAULT 'password' CHECK (auth_provider IN ('password', 'google')),
+    auth_provider VARCHAR(20) NOT NULL DEFAULT 'password' CHECK (auth_provider IN ('password', 'google', 'apple')),
     google_sub VARCHAR(255) UNIQUE,
+    -- Apple's stable per-team user id (migration 034).
+    apple_sub VARCHAR(255) UNIQUE,
     name VARCHAR(100) NOT NULL,
     gender VARCHAR(20) NOT NULL CHECK (gender IN ('male', 'female', 'other')),
     interested_in VARCHAR(20) NOT NULL CHECK (interested_in IN ('male', 'female', 'both')),
