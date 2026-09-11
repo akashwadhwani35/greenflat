@@ -66,6 +66,26 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 app.use('/public', express.static(path.join(process.cwd(), 'public'), { maxAge: '1d', immutable: false }));
 
 // Routes
+/**
+ * API responses are per-user and change constantly, so they must never be
+ * revalidation-cached.
+ *
+ * Express adds an ETag to every JSON response by default and sends no
+ * Cache-Control. iOS caches the response, revalidates on the next launch and
+ * gets a 304 — and React Native's fetch hands that 304 straight to JS instead of
+ * serving the cached body the way a browser would. Every caller written as
+ * `if (!response.ok) return;` then treats a perfectly good response as a
+ * failure: the wallet balance renders 0, feeds look empty, screens go stale
+ * until something forces a change in the payload.
+ *
+ * Static assets under /public keep their own caching; this is only the API.
+ */
+app.set('etag', false);
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 app.use('/api', routes);
 
 // Health check
