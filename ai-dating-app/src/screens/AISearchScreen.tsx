@@ -846,7 +846,10 @@ const styles = StyleSheet.create({
   inputContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    paddingBottom: 12,
+    // The bottom nav is absolutely positioned over this screen, so 12pt left the
+    // composer underneath it and clipped the second line of a wrapped query.
+    // Clears the nav's icon row plus the home indicator inset on iOS.
+    paddingBottom: Platform.OS === 'ios' ? 96 : 80,
     borderTopWidth: 1,
   },
   inputWrapper: {
