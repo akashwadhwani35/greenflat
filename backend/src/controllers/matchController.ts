@@ -293,10 +293,14 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       if (Array.isArray(value)) return value.length > 0;
       return value !== undefined && value !== null;
     };
-    // Free per the board: gender, age, distance, relationship intention,
-    // religion, children, smoking, drinking, marijuana, drugs. Everything else
-    // needs a plan. Dating intentions moved to free at the board's request.
+    // Free: gender, age, distance, religion, children, smoking, drinking,
+    // marijuana, drugs. Everything else needs a plan.
+    //
+    // Dating intention (relationship_goal) is paid, round-15. It had been moved
+    // to free in an earlier round but the app never followed, so the two sides
+    // disagreed and the app showed a lock the server did not enforce.
     const paidFilterKeys: Array<keyof SearchFilters> = [
+      'relationship_goal',
       'ethnicity',
       'minHeight',
       'maxHeight',

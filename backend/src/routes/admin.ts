@@ -2,7 +2,7 @@ import express from 'express';
 import { authenticate } from '../middleware/auth';
 import { requireAdmin } from '../middleware/adminAuth';
 import {
-  getStats, getReports, updateReport, getUsers, toggleBan,
+  getStats, getReports, updateReport, getUsers, getUserDetail, toggleBan,
   getRevenueAnalytics, getTokenAnalytics, getEngagementAnalytics, getGrowthAnalytics,
   grantRemoveTokens, grantSubscription, toggleShadowBan,
   getSupportMessages,
@@ -20,6 +20,8 @@ router.patch('/reports/:reportId', updateReport);
 router.get('/support', getSupportMessages);
 router.patch('/support/:messageId', updateSupportMessage);
 router.get('/users', getUsers);
+// Everything about one account, for moderating a report.
+router.get('/users/:userId/detail', getUserDetail);
 router.post('/users/:userId/ban', toggleBan);
 
 // Analytics

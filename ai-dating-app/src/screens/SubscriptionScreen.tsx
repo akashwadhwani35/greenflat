@@ -409,11 +409,14 @@ const styles = StyleSheet.create({
   pricingGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    // 48% + 48% + a 10px column gap overflows the row on narrower phones, which
+    // dropped a tile onto its own line where flexGrow stretched it full width.
+    // space-between supplies the column gutter without costing width.
+    justifyContent: 'space-between',
+    rowGap: 12,
   },
   priceCard: {
     width: '48%',
-    flexGrow: 1,
     borderRadius: 14,
     paddingVertical: 16,
     paddingHorizontal: 14,

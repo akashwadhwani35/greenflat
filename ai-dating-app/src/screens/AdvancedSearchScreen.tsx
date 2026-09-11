@@ -53,7 +53,8 @@ type Props = {
   onApply: (filters: AdvancedFilters) => void;
   token: string;
   apiBaseUrl: string;
-  onOpenCheckout?: () => void;
+  /** Opens the plans sheet. Paid filters need a subscription, not tokens. */
+  onOpenSubscription?: () => void;
 };
 
 type Option = {
@@ -199,7 +200,7 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
   onApply,
   token,
   apiBaseUrl,
-  onOpenCheckout,
+  onOpenSubscription,
 }) => {
   const theme = useTheme();
   // Age defaults to the full range rather than blank, per the board.
@@ -331,8 +332,8 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
 
   const onPressPaidLocked = () => {
     if (hasPaidPlan) return;
-    if (onOpenCheckout) {
-      onOpenCheckout();
+    if (onOpenSubscription) {
+      onOpenSubscription();
       return;
     }
     Alert.alert('Paid filters', 'Upgrade to a paid plan to unlock these filters.');

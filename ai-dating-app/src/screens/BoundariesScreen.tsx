@@ -13,13 +13,14 @@ type Props = {
 
 type Kind = 'likes' | 'greenflags' | 'compliments';
 
-const ROWS: Array<{ key: Kind; label: string; hint: string; icon: React.ComponentProps<typeof Feather>['name'] }> = [
-  { key: 'likes', label: 'Likes', hint: 'People liking your profile', icon: 'heart' },
-  { key: 'greenflags', label: 'Green Flags', hint: 'The paid, louder version of a like', icon: 'flag' },
-  { key: 'compliments', label: 'First Moves', hint: 'Opening messages sent to you', icon: 'message-circle' },
+const ROWS: Array<{ key: Kind; label: string; icon: React.ComponentProps<typeof Feather>['name'] }> = [
+  { key: 'likes', label: 'Likes', icon: 'heart' },
+  { key: 'greenflags', label: 'Green Flags', icon: 'flag' },
+  { key: 'compliments', label: 'First Moves', icon: 'message-circle' },
 ];
 
-const MIN = 0;
+/** One, not zero: switching a kind off entirely is what the master toggle is for. */
+const MIN = 1;
 const MAX = 100;
 
 /**
@@ -159,7 +160,7 @@ export const BoundariesScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl })
               Daily limits ({MIN}–{MAX} each)
             </Typography>
 
-            {ROWS.map(({ key, label, hint, icon }) => (
+            {ROWS.map(({ key, label, icon }) => (
               <View
                 key={key}
                 style={[styles.card, { backgroundColor: theme.colors.charcoal, borderColor: theme.colors.border, marginTop: 10 }]}
@@ -167,14 +168,9 @@ export const BoundariesScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl })
                 <View style={styles.rowBetween}>
                   <View style={styles.labelBlock}>
                     <Feather name={icon} size={16} color={theme.colors.neonGreen} />
-                    <View style={{ marginLeft: 10, flex: 1 }}>
-                      <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>
-                        {label}
-                      </Typography>
-                      <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 2 }}>
-                        {hint}
-                      </Typography>
-                    </View>
+                    <Typography variant="bodyStrong" style={{ color: theme.colors.text, marginLeft: 10, flex: 1 }}>
+                      {label}
+                    </Typography>
                   </View>
 
                   <View style={styles.stepper}>
@@ -216,9 +212,8 @@ export const BoundariesScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl })
             ))}
 
             <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 16, lineHeight: 18 }}>
-              Set a limit to 0 to stop receiving that kind entirely. Anyone who
-              tries is simply told you are not available right now, and is never
-              charged for it.
+              Once a limit is reached, anyone who tries is simply told you are not
+              available right now, and is never charged for it.
             </Typography>
           </>
         ) : null}
@@ -241,7 +236,9 @@ export const BoundariesScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl })
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centre: { alignItems: 'center', justifyContent: 'center' },
-  content: { padding: 20, paddingBottom: 60 },
+  // The bottom nav floats over the last 60px and phones add a gesture inset on
+  // top of that, which was clipping the closing paragraph.
+  content: { padding: 20, paddingBottom: 160 },
   card: {
     borderRadius: 16,
     borderWidth: 1,

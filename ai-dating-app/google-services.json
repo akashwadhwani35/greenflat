@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "480247350372-u3riejl8e451g0c20usmhgkrfpbd5uu9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "app.gflag.greenflag",
+            "certificate_hash": "b21a02a1129ed65dc2109a4311134a3d0b6d0e77"
+          }
+        },
+        {
           "client_id": "480247350372-1850qbgefs61uhhgubg3pbkscorornm4.apps.googleusercontent.com",
           "client_type": 3
         }

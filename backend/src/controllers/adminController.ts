@@ -691,3 +691,107 @@ export const updateSupportMessage = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to update support message' });
   }
 };
+
+/**
+ * Everything the platform knows about one person, in one call.
+ *
+ * Moderation needs the whole picture to judge a report: who they are, what they
+ * look like, what they were verified on, who they have talked to and what they
+ * said. Gathering it client-side would be a dozen round trips and would still
+ * miss the private tables, so it is assembled here.
+ *
+ * This deliberately exposes private content — chat messages, the verification
+ * selfie, location. It sits behind requireAdmin, and nothing here is reachable
+ * by an ordinary account.
+ */
+export const getUserDetail = async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isInteger(targetUserId)) {
+      return res.status(400).json({ error: 'A numeric user id is required' });
+    }
+
+    const user = await pool.query(
+      `SELECT id, email, name, gender, interested_in, orientation, pronouns, date_of_birth, city, country,
+              latitude, longitude, distance_radius, is_verified, is_premium, premium_expires_at,
+              boost_expires_at, credit_balance, cooldown_enabled, cooldown_until, is_banned,
+              is_shadow_banned, is_admin, auth_provider, device_id, push_token IS NOT NULL AS has_push_token,
+              last_active, onboarding_completed_at, created_at, updated_at
+         FROM users WHERE id = $1`,
+      [targetUserId]
+    );
+    if (user.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // One round trip per table, run together rather than in sequence.
+    const [
+      profile, personality, aiPersona, photos, verification, privacy, notifications,
+      boundaries, activity, likesOut, likesIn, matches, messages, ledger,
+      subscriptions, purchases, reportsBy, reportsAgainst, blocks, bookmarks, support,
+    ] = await Promise.all([
+      pool.query('SELECT * FROM user_profiles WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT * FROM personality_responses WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT user_id, self_summary, ideal_partner_prompt, connection_preferences, dealbreakers, growth_journey, updated_at FROM user_ai_profiles WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT id, photo_url, is_primary, order_index FROM photos WHERE user_id = $1 ORDER BY order_index', [targetUserId]),
+      pool.query('SELECT * FROM verification_status WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT * FROM user_privacy_settings WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT * FROM user_notification_preferences WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT * FROM user_incoming_limits WHERE user_id = $1', [targetUserId]),
+      pool.query('SELECT * FROM user_activity_limits WHERE user_id = $1', [targetUserId]),
+      pool.query(`SELECT l.*, u.name AS target_name FROM likes l JOIN users u ON u.id = l.liked_id
+                   WHERE l.liker_id = $1 ORDER BY l.created_at DESC LIMIT 100`, [targetUserId]),
+      pool.query(`SELECT l.*, u.name AS liker_name FROM likes l JOIN users u ON u.id = l.liker_id
+                   WHERE l.liked_id = $1 ORDER BY l.created_at DESC LIMIT 100`, [targetUserId]),
+      pool.query(`SELECT m.*, a.name AS user1_name, b.name AS user2_name
+                    FROM matches m JOIN users a ON a.id = m.user1_id JOIN users b ON b.id = m.user2_id
+                   WHERE m.user1_id = $1 OR m.user2_id = $1 ORDER BY m.matched_at DESC LIMIT 100`, [targetUserId]),
+      pool.query(`SELECT ms.id, ms.match_id, ms.sender_id, ms.recipient_id, ms.content, ms.message_type,
+                         ms.kind, ms.is_read, ms.created_at, s.name AS sender_name, r.name AS recipient_name
+                    FROM messages ms JOIN users s ON s.id = ms.sender_id
+                    LEFT JOIN users r ON r.id = ms.recipient_id
+                   WHERE ms.sender_id = $1 OR ms.recipient_id = $1
+                   ORDER BY ms.created_at DESC LIMIT 300`, [targetUserId]),
+      pool.query('SELECT * FROM credit_transactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100', [targetUserId]).catch(() => ({ rows: [] })),
+      pool.query('SELECT * FROM subscriptions WHERE user_id = $1 ORDER BY created_at DESC', [targetUserId]).catch(() => ({ rows: [] })),
+      pool.query('SELECT * FROM token_purchases WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50', [targetUserId]).catch(() => ({ rows: [] })),
+      pool.query(`SELECT r.*, u.name AS reported_name FROM reports r LEFT JOIN users u ON u.id = r.reported_id
+                   WHERE r.reporter_id = $1 ORDER BY r.created_at DESC`, [targetUserId]),
+      pool.query(`SELECT r.*, u.name AS reporter_name FROM reports r LEFT JOIN users u ON u.id = r.reporter_id
+                   WHERE r.reported_id = $1 ORDER BY r.created_at DESC`, [targetUserId]),
+      pool.query(`SELECT b.*, u.name AS blocked_name FROM blocks b LEFT JOIN users u ON u.id = b.blocked_id
+                   WHERE b.blocker_id = $1 ORDER BY b.created_at DESC`, [targetUserId]),
+      pool.query(`SELECT bk.*, u.name AS target_name FROM bookmarks bk JOIN users u ON u.id = bk.target_user_id
+                   WHERE bk.user_id = $1 ORDER BY bk.created_at DESC`, [targetUserId]).catch(() => ({ rows: [] })),
+      pool.query('SELECT * FROM support_messages WHERE user_id = $1 ORDER BY created_at DESC', [targetUserId]).catch(() => ({ rows: [] })),
+    ]);
+
+    res.json({
+      user: user.rows[0],
+      profile: profile.rows[0] || null,
+      personality: personality.rows[0] || null,
+      ai_persona: aiPersona.rows[0] || null,
+      photos: photos.rows,
+      verification: verification.rows[0] || null,
+      privacy: privacy.rows[0] || null,
+      notifications: notifications.rows[0] || null,
+      boundaries: boundaries.rows[0] || null,
+      activity_limits: activity.rows[0] || null,
+      likes_sent: likesOut.rows,
+      likes_received: likesIn.rows,
+      matches: matches.rows,
+      messages: messages.rows,
+      credit_ledger: ledger.rows,
+      subscriptions: subscriptions.rows,
+      token_purchases: purchases.rows,
+      reports_made: reportsBy.rows,
+      reports_against: reportsAgainst.rows,
+      blocks: blocks.rows,
+      bookmarks: bookmarks.rows,
+      support_messages: support.rows,
+    });
+  } catch (error) {
+    console.error('Admin getUserDetail error:', error);
+    res.status(500).json({ error: 'Failed to fetch user detail' });
+  }
+};

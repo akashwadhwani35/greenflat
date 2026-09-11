@@ -175,6 +175,12 @@ const AppShell: React.FC = () => {
     setComplimentedProfileIds(new Set());
     setPassedProfileIds(new Set(id ? await loadPassedIds(id) : []));
     setAnsweredLikeIds(new Set());
+    // Filters are per account and live only in memory, so signing into a second
+    // account on the same phone inherited the first one's search. A brand new
+    // account then opened straight onto AI Match results for a query it never
+    // ran. Clearing the keywords also re-arms the gender seeding below.
+    setAdvancedFilters({});
+    seededGenderRef.current = false;
   };
 
   // The welcome popup is shown once, after the intro slides that follow
@@ -687,6 +693,23 @@ const AppShell: React.FC = () => {
           setTimeout(() => setSelectedMatch(null), 300);
           return;
         }
+        // The other person is full for today. Saving them is the way through,
+        // so offer it here rather than reporting a flat failure. Your own limit
+        // is handled above and deliberately does not mention saving.
+        if (errorBody.can_bookmark) {
+          const targetId = selectedMatch.id;
+          const targetName = selectedMatch.name;
+          Alert.alert(
+            'Not available right now',
+            `${targetName} has reached their limit for today. Save them and you can like them as soon as they are back.`,
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Save', onPress: () => { void saveBookmark(targetId, targetName); } },
+            ]
+          );
+          setTimeout(() => setSelectedMatch(null), 300);
+          return;
+        }
         throw new Error(errorBody.error || 'Unable to like profile right now.');
       }
 
@@ -1058,7 +1081,7 @@ const AppShell: React.FC = () => {
             initialFilters={advancedFilters}
             token={authToken!}
             apiBaseUrl={API_BASE_URL}
-            onOpenCheckout={() => setOverlay('checkout')}
+            onOpenSubscription={() => { setSubscriptionTab('pro'); setOverlay('subscription'); }}
             onApply={(filters) => {
               setAdvancedFilters(filters);
               setOverlay(null);

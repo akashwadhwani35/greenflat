@@ -162,26 +162,19 @@ export const VerificationScreen: React.FC<Props> = ({ onBack, token, apiBaseUrl 
               </View>
             ) : null}
 
-            <View style={styles.buttonRow}>
-              <TouchableOpacity
-                onPress={onBack}
-                style={[styles.halfButton, { backgroundColor: theme.colors.surfaceLight, borderColor: theme.colors.border }]}
-                disabled={checking}
-                activeOpacity={0.85}
-              >
-                <Typography variant="bodyStrong" style={{ color: theme.colors.text }}>Skip for now</Typography>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={beginFaceCheck}
-                style={[styles.halfButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
-                disabled={checking}
-                activeOpacity={0.85}
-              >
-                <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
-                  {failure ? 'Try again' : "Let's begin"}
-                </Typography>
-              </TouchableOpacity>
-            </View>
+            {/* One full-width action. Skipping is what the back arrow already
+                does on this screen, so a second button for it only split the
+                call to action in half. */}
+            <TouchableOpacity
+              onPress={beginFaceCheck}
+              style={[styles.primaryButton, { backgroundColor: theme.colors.neonGreen, borderColor: theme.colors.neonGreen }]}
+              disabled={checking}
+              activeOpacity={0.85}
+            >
+              <Typography variant="bodyStrong" style={{ color: theme.colors.deepBlack }}>
+                {failure ? 'Try again' : "Let's begin"}
+              </Typography>
+            </TouchableOpacity>
 
             <Typography variant="tiny" style={{ color: theme.colors.muted, marginTop: 14 }}>
               Use a clear, front-facing selfie in good light. Your profile needs at least one real photo of you.
@@ -207,12 +200,12 @@ const styles = StyleSheet.create({
     padding: 14,
     marginTop: 16,
   },
-  buttonRow: { flexDirection: 'row', gap: 12, marginTop: 22 },
-  halfButton: {
-    flex: 1,
+  primaryButton: {
+    width: '100%',
+    marginTop: 22,
     borderWidth: 1,
     borderRadius: 999,
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },

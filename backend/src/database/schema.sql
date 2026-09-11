@@ -408,6 +408,8 @@ CREATE TABLE IF NOT EXISTS verification_status (
     location_lng DECIMAL(11, 8),
     location_city TEXT,
     selfie_hash VARCHAR(64),
+    -- The selfie itself, so moderation can review a verification (migration 033).
+    selfie_url TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );

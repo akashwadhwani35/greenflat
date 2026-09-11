@@ -4,6 +4,7 @@ import { Request, Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
 import { analyzeSelfieAgainstProfile } from '../services/openai.service';
+import { isGcsConfigured, storeDataUrl } from '../services/storage.service';
 import { normalizeEmail } from '../services/email.service';
 import {
   checkOtp,
@@ -208,11 +209,28 @@ export const verifySelfieAge = async (req: AuthRequest, res: Response) => {
       });
     }
 
+    // Keep the selfie so moderation can review the decision later. The app
+    // sends it as a data URL, which is discarded once the vision call is done
+    // unless it is stored here. Best-effort: a storage failure must not undo a
+    // verification the person has already passed.
+    let storedSelfieUrl: string | null = null;
+    if (isGcsConfigured() && typeof photo_url === 'string' && photo_url.startsWith('data:')) {
+      try {
+        const stored = await storeDataUrl(photo_url);
+        storedSelfieUrl = stored.objectName;
+      } catch (storeError) {
+        console.error('Could not store verification selfie', storeError);
+      }
+    } else if (typeof photo_url === 'string' && /^https?:\/\//.test(photo_url)) {
+      storedSelfieUrl = photo_url;
+    }
+
     await pool.query(
-      `INSERT INTO verification_status (user_id, face_status, age_verified, selfie_hash, updated_at)
-       VALUES ($1, 'verified', TRUE, $2, NOW())
-       ON CONFLICT (user_id) DO UPDATE SET face_status = 'verified', age_verified = TRUE, selfie_hash = $2, updated_at = NOW()`,
-      [userId, selfieHash]
+      `INSERT INTO verification_status (user_id, face_status, age_verified, selfie_hash, selfie_url, updated_at)
+       VALUES ($1, 'verified', TRUE, $2, $3, NOW())
+       ON CONFLICT (user_id) DO UPDATE SET face_status = 'verified', age_verified = TRUE,
+         selfie_hash = $2, selfie_url = COALESCE($3, verification_status.selfie_url), updated_at = NOW()`,
+      [userId, selfieHash, storedSelfieUrl]
     );
     // The green flag next to the name.
     await pool.query(

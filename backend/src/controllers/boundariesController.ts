@@ -10,7 +10,11 @@ import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { getIncomingLimits } from '../services/boundaries.service';
 
-const MIN_LIMIT = 0;
+/**
+ * One, not zero. Turning a kind off entirely is the master toggle's job; a
+ * limit of zero was a second, confusing way to say the same thing.
+ */
+const MIN_LIMIT = 1;
 const MAX_LIMIT = 100;
 
 /** Anything outside 0-100, or not a whole number, is rejected rather than clamped. */

@@ -5,6 +5,7 @@ import { Typography } from '../components/Typography';
 import { Button } from '../components/Button';
 import { useTheme } from '../theme/ThemeProvider';
 import { PageHeader } from '../components/PageHeader';
+import { AdminUserDetailScreen } from './AdminUserDetailScreen';
 
 type Props = {
   onBack: () => void;
@@ -157,6 +158,8 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
 
   // User action modal
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  // Set while the full record for one account is open, over the dashboard.
+  const [detailUserId, setDetailUserId] = useState<number | null>(null);
   const [tokenAmount, setTokenAmount] = useState('');
   const [subPlan, setSubPlan] = useState<'pro' | 'premium'>('pro');
   const [subDays, setSubDays] = useState('30');
@@ -519,10 +522,15 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
       {users.map((u) => (
         <View key={u.id} style={[styles.card, { borderColor: theme.colors.border }]}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View style={{ flex: 1 }}>
-              <Typography variant="bodyStrong">{u.name}</Typography>
+            {/* The name opens the full record: photos, verification selfie,
+                chats, money, reports. */}
+            <TouchableOpacity style={{ flex: 1 }} onPress={() => setDetailUserId(u.id)} activeOpacity={0.7}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Typography variant="bodyStrong">{u.name}</Typography>
+                <Feather name="chevron-right" size={16} color={theme.colors.muted} style={{ marginLeft: 4 }} />
+              </View>
               <Typography variant="tiny" muted>{u.email} - {u.city}</Typography>
-            </View>
+            </TouchableOpacity>
             <View style={{ flexDirection: 'row', gap: 4 }}>
               {u.is_banned && (
                 <View style={[styles.badge, { backgroundColor: '#EF4444' }]}>
@@ -708,6 +716,18 @@ export const AdminDashboardScreen: React.FC<Props> = ({ onBack, token, apiBaseUr
       case 'safety': return renderSafetyTab();
     }
   };
+
+  // The full record takes over the screen, with Back returning to the list.
+  if (detailUserId !== null) {
+    return (
+      <AdminUserDetailScreen
+        userId={detailUserId}
+        token={token}
+        apiBaseUrl={apiBaseUrl}
+        onBack={() => setDetailUserId(null)}
+      />
+    );
+  }
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
