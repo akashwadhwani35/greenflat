@@ -88,6 +88,7 @@ jobs:
             GOOGLE_OAUTH_CLIENT_IDS=google-oauth-client-ids:latest
             RESEND_API_KEY=resend-api-key:latest
             REVENUECAT_SECRET_KEY=revenuecat-secret-key:latest
+            INTERNAL_SWEEP_SECRET=internal-sweep-secret:latest
 
       - name: Show deployed URL
         run: echo "Deployed to ${{ steps.deploy.outputs.url }}"
