@@ -19,8 +19,13 @@ const recipient = async (userId: number): Promise<{ email: string; name: string 
     const result = await pool.query('SELECT email, name FROM users WHERE id = $1', [userId]);
     const row = result.rows[0];
     if (!row?.email) return null;
+    const email = String(row.email).toLowerCase();
     // Phone-first signups get a placeholder address that cannot receive mail.
-    if (String(row.email).endsWith('@phone.greenflag.app')) return null;
+    if (email.endsWith('@phone.greenflag.app')) return null;
+    // Reserved and seed domains. These hard-bounce, and a run of bounces is
+    // charged against the sending domain's reputation, so seeding a demo set
+    // must not cost us deliverability for real users.
+    if (/@(example\.(com|org|net)|test|invalid|localhost)$/.test(email)) return null;
     return { email: row.email, name: row.name || '' };
   } catch (error) {
     console.error('Email recipient lookup failed', userId, error);
