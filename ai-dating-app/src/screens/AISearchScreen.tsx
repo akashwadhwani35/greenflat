@@ -591,8 +591,12 @@ export const AISearchScreen: React.FC<AISearchScreenProps> = ({
                       style={{ marginBottom: 20 }}
                     >
                       {personalizedText.intro}{'\n'}
+                      {/* Typography defaults align to left and always writes
+                          textAlign, so a nested one stamps left over the
+                          parent's centering and strands this word. */}
                       <Typography
                         variant="display"
+                        align="center"
                         style={{ color: theme.colors.neonGreen }}
                       >
                         {personalizedText.highlight}

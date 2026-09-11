@@ -16,7 +16,7 @@ export const Typography: React.FC<Props> = ({
   variant = 'body',
   muted,
   tone = 'default',
-  align = 'left',
+  align,
   style,
   children,
   ...props
@@ -41,7 +41,11 @@ export const Typography: React.FC<Props> = ({
           fontSize: font.size,
           lineHeight: font.lineHeight,
           color,
-          textAlign: align,
+          // Only set when asked for. Defaulting to 'left' meant a Typography
+          // nested inside a centered one stamped left over its parent and
+          // stranded that run of text; Text's own default already resolves to
+          // left in a left-to-right layout.
+          ...(align ? { textAlign: align } : null),
         },
         style,
       ]}
