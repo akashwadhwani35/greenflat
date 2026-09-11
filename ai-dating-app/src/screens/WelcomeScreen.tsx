@@ -6,6 +6,7 @@ import { Typography } from '../components/Typography';
 import { GoogleSignInButton } from '../components/GoogleSignInButton';
 import { signInWithGoogleNative, isGoogleSignInConfigured } from '../services/googleSignIn';
 import { getDeviceId } from '../utils/deviceId';
+import { handleAuthErrorBody } from '../utils/authErrors';
 
 
 const glassLogo = require('../../assets/glass-logo.png');
@@ -53,6 +54,9 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onLogin, 
         body: JSON.stringify({ id_token: idToken }),
       });
       const data = await response.json().catch(() => ({}));
+      // One account per phone is a refusal, not a sign-in failure. Google
+      // already succeeded by this point, so it gets its own dialog.
+      if (!response.ok && handleAuthErrorBody(data)) return;
       if (!response.ok) throw new Error(data.error || 'Google sign-in failed');
       if (!data.token || !data.user?.id) throw new Error('Google sign-in response missing token');
       onGoogleAuth({

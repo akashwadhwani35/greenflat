@@ -7,6 +7,7 @@ import { JWT_CONFIG, DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured, sendOtpSms } from '../services/sms.service';
 import { normalizeEmail, isDisposableEmail } from '../services/email.service';
 import { deviceIdFromRequest, deviceHasAccount } from '../services/accounts.service';
+import { emailAccountCreated } from '../services/notifyEmail.service';
 import {
   checkOtp,
   issueOtp,
@@ -186,6 +187,9 @@ export const signup = async (req: Request, res: Response) => {
     if (signupDeviceId) await client.query('UPDATE users SET device_id = $1 WHERE id = $2', [signupDeviceId, user.id]);
 
     await client.query('COMMIT');
+
+    // Courtesy only; never block the response on an email provider.
+    void emailAccountCreated(user.id);
 
     const token = signAuthToken(user.id);
 
@@ -392,6 +396,9 @@ export const googleAuth = async (req: Request, res: Response) => {
     }
 
     await client.query('COMMIT');
+
+    // Only for an account that was just created, not every Google sign-in.
+    if (isNewUser) void emailAccountCreated(user.id);
 
     const token = signAuthToken(user.id);
     return res.json({

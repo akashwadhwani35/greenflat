@@ -24,6 +24,7 @@ import { DAILY_LIMITS } from '../utils/constants';
 import { canUseDevOtpBypass, isSmsConfigured } from '../services/sms.service';
 import { isEmailConfigured, normalizeEmail, isDisposableEmail } from '../services/email.service';
 import { deviceIdFromRequest, deviceHasAccount } from '../services/accounts.service';
+import { emailAccountCreated } from '../services/notifyEmail.service';
 import {
   checkOtp,
   issueOtp,
@@ -376,6 +377,9 @@ export const completeRegistration = async (req: Request, res: Response) => {
     await client.query('DELETE FROM pending_registrations WHERE id = $1', [pending.id]);
 
     await client.query('COMMIT');
+
+    // Courtesy only; never block the response on an email provider.
+    void emailAccountCreated(user.id);
 
     return res.status(201).json({
       message: 'Account created',

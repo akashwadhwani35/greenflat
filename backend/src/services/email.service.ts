@@ -202,3 +202,208 @@ export const isDisposableEmail = (email: string): boolean => {
   if (at === -1) return false;
   return DISPOSABLE_EMAIL_DOMAINS.has(email.slice(at + 1).toLowerCase());
 };
+
+// ---------------------------------------------------------------------------
+// Transactional emails: account created, purchase, new match.
+//
+// Same shell as the verification email above — dark card, neon kicker, tables
+// and inline styles because Gmail and Outlook strip most else. Rendered through
+// one layout so a change to the frame reaches every email at once.
+// ---------------------------------------------------------------------------
+
+type ShellOptions = {
+  /** Small uppercase line above the heading. */
+  kicker: string;
+  heading: string;
+  intro: string;
+  /** Optional highlighted panel (the OTP email uses this for the code). */
+  panelHtml?: string;
+  /** Optional closing paragraph under a divider. */
+  footnote?: string;
+  /** Preheader text shown in the inbox list. */
+  preview: string;
+  title: string;
+};
+
+const renderShell = (o: ShellOptions): string => {
+  const logoUrl = `${assetBaseUrl()}/public/email/logo.png`;
+  const year = new Date().getFullYear();
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="supported-color-schemes" content="dark">
+<title>${o.title}</title>
+<link href="https://fonts.googleapis.com/css2?family=Red+Hat+Display:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; padding:0; background:#0B140D; -webkit-text-size-adjust:100%; }
+  table { border-collapse:separate; border-spacing:0; }
+  .font { font-family:'Red Hat Display', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif; }
+  @media only screen and (max-width: 480px) { .card { padding:32px 22px !important; } }
+</style>
+</head>
+<body style="margin:0;padding:0;background:#0B140D;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${o.preview}&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="background:#0B140D;">
+  <tr>
+    <td align="center" bgcolor="#0B140D" style="padding:40px 16px 48px;background:#0B140D;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="max-width:480px;background:#0B140D;">
+        <tr>
+          <td align="left" class="font" bgcolor="#0B140D" style="padding:0 4px 20px;background:#0B140D;">
+            <table role="presentation" cellpadding="0" cellspacing="0" bgcolor="#0B140D" style="background:#0B140D;">
+              <tr>
+                <td bgcolor="#0B140D" style="vertical-align:middle;padding-right:12px;background:#0B140D;">
+                  <img src="${logoUrl}" width="40" height="40" alt="GreenFlag" style="display:block;width:40px;height:40px;border:0;">
+                </td>
+                <td class="font" style="vertical-align:middle;font-size:20px;font-weight:800;color:#F6F6F6;letter-spacing:-0.3px;">GreenFlag</td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="card" style="background:#101D13;border:1px solid #243830;border-radius:20px;padding:40px 36px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              <tr><td class="font" style="font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:#ADFF1A;padding-bottom:12px;">${o.kicker}</td></tr>
+              <tr><td class="font" style="font-size:26px;line-height:32px;font-weight:800;color:#F6F6F6;padding-bottom:10px;letter-spacing:-0.4px;">${o.heading}</td></tr>
+              <tr><td class="font" style="font-size:15px;line-height:23px;color:#A8B3AB;padding-bottom:${o.panelHtml ? '28px' : '4px'};">${o.intro}</td></tr>
+              ${o.panelHtml || ''}
+              ${o.footnote ? `<tr><td style="padding:28px 0 24px;"><div style="height:1px;background:#243830;line-height:1px;font-size:1px;">&nbsp;</div></td></tr>
+              <tr><td class="font" style="font-size:13px;line-height:21px;color:#7F8C84;">${o.footnote}</td></tr>` : ''}
+            </table>
+          </td>
+        </tr>
+        <tr>
+          <td class="font" align="center" style="padding:26px 12px 0;font-size:12px;line-height:19px;color:#5C6862;">
+            &copy; ${year} GreenFlag &middot; <a href="https://gflag.app" style="color:#7F8C84;text-decoration:none;">gflag.app</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+};
+
+/** A row of label/value lines inside a highlighted panel. */
+const renderPanel = (rows: Array<[string, string]>): string => `
+<tr>
+  <td style="background:#1B2920;border:1px solid #2E4437;border-radius:14px;padding:20px 22px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+      ${rows
+        .map(
+          ([label, value], i) => `<tr>
+        <td class="font" style="font-size:13px;color:#7F8C84;padding:${i === 0 ? '0' : '8px'} 0 0;">${escapeHtml(label)}</td>
+        <td class="font" align="right" style="font-size:15px;font-weight:700;color:#F6F6F6;padding:${i === 0 ? '0' : '8px'} 0 0;">${escapeHtml(value)}</td>
+      </tr>`
+        )
+        .join('')}
+    </table>
+  </td>
+</tr>`;
+
+export const renderWelcomeEmail = (name: string): RenderedEmail => {
+  const safeName = escapeHtml(name || 'there');
+  return {
+    subject: 'Welcome to GreenFlag',
+    text:
+      `Hi ${name || 'there'},\n\n` +
+      `Your GreenFlag account is ready.\n\n` +
+      `Finish your profile, answer the quiz, and let the AI do the searching. ` +
+      `The more it knows about you, the better the matches.\n\n` +
+      `GreenFlag · gflag.app`,
+    html: renderShell({
+      title: 'Welcome to GreenFlag',
+      preview: 'Your GreenFlag account is ready.',
+      kicker: 'Account created',
+      heading: `Welcome, ${safeName}`,
+      intro:
+        'Your account is ready. Finish your profile and answer the quiz — the more GreenFlag knows about you, the better it searches on your behalf.',
+      footnote:
+        'You are receiving this because an account was created with this email address. If that was not you, reply to this email and we will take care of it.',
+    }),
+  };
+};
+
+export const renderPurchaseEmail = (
+  name: string,
+  item: string,
+  amount: string,
+  tokens?: number
+): RenderedEmail => {
+  const rows: Array<[string, string]> = [['Item', item], ['Amount', amount]];
+  if (typeof tokens === 'number' && tokens > 0) rows.push(['Tokens added', String(tokens)]);
+  return {
+    subject: `Your GreenFlag purchase — ${item}`,
+    text:
+      `Hi ${name || 'there'},\n\n` +
+      `Thanks for your purchase.\n\n` +
+      rows.map(([l, v]) => `${l}: ${v}`).join('\n') +
+      `\n\nGreenFlag · gflag.app`,
+    html: renderShell({
+      title: 'Your GreenFlag purchase',
+      preview: `${item} — ${amount}`,
+      kicker: 'Payment received',
+      heading: 'Thanks for your purchase',
+      intro: 'Here is what you bought. It is already active on your account.',
+      panelHtml: renderPanel(rows),
+      footnote: 'Questions about this charge? Reply to this email and we will look into it.',
+    }),
+  };
+};
+
+export const renderMatchEmail = (name: string, matchName: string): RenderedEmail => {
+  const safeMatch = escapeHtml(matchName || 'someone');
+  return {
+    subject: `You matched with ${matchName || 'someone'}`,
+    text:
+      `Hi ${name || 'there'},\n\n` +
+      `You and ${matchName || 'someone'} liked each other. Open GreenFlag to say something.\n\n` +
+      `GreenFlag · gflag.app`,
+    html: renderShell({
+      title: 'New match on GreenFlag',
+      preview: `You and ${safeMatch} liked each other.`,
+      kicker: 'New match',
+      heading: `You matched with ${safeMatch}`,
+      intro:
+        'You both liked each other, so the chat is open. Openers land better in the first few hours — say something now.',
+      footnote:
+        'You can turn match emails off any time in the app under Settings, Notifications.',
+    }),
+  };
+};
+
+/**
+ * Sends a rendered email. Never throws: a transactional email is a courtesy and
+ * must not fail the signup, purchase or match that triggered it. Returns whether
+ * it went out, for logging.
+ */
+export const sendTransactionalEmail = async (to: string, email: RenderedEmail): Promise<boolean> => {
+  if (!isEmailConfigured()) return false;
+  const recipient = normalizeEmail(to);
+  if (!recipient) return false;
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: fromHeader(),
+        to: [recipient],
+        subject: email.subject,
+        text: email.text,
+        html: email.html,
+      }),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      console.error('Transactional email failed:', response.status, detail.slice(0, 200));
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.error('Transactional email error:', error);
+    return false;
+  }
+};

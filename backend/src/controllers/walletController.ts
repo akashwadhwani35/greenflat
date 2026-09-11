@@ -2,6 +2,7 @@ import { Response } from 'express';
 import pool from '../config/database';
 import { AuthRequest } from '../middleware/auth';
 import { ensureDailyAllowance } from '../services/credits.service';
+import { emailPurchase } from '../services/notifyEmail.service';
 import { WEEKLY_FREE_TOKENS } from '../utils/constants';
 import {
   isPaymentsEnabled,
@@ -183,6 +184,16 @@ export const purchasePlan = async (req: AuthRequest, res: Response) => {
     );
 
     await client.query('COMMIT');
+
+    // Receipt. Courtesy only; never block the response on an email provider.
+    void emailPurchase(
+      userId,
+      `${tokenAmount} GreenFlag tokens`,
+      validated.amountCents,
+      validated.currency,
+      tokenAmount
+    );
+
     return res.json({
       message: 'Tokens added to your wallet.',
       wallet: result.rows[0],

@@ -5,6 +5,7 @@ import { AuthRequest } from '../middleware/auth';
 import { DAILY_LIMITS, LIKE_RESET_HOURS, COOLDOWN_DURATION_HOURS, TOKEN_COSTS } from '../utils/constants';
 import { notifyLikeReceived, notifyMatch, notifyFirstMove, notifyAccepted } from '../services/push.service';
 import { consumeCredits, ensureDailyAllowance } from '../services/credits.service';
+import { emailMatch } from '../services/notifyEmail.service';
 import {
   checkIncomingCapacity,
   consumeIncomingCapacity,
@@ -328,6 +329,9 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
           ? notifyAccepted(target_user_id, likerName, 'green_flag', { matchId, senderId: userId })
           : notifyMatch(target_user_id, likerName)
         ).catch(err => console.error('Failed to send match notification:', err));
+        // Both sides also get an email, subject to their match preference.
+        void emailMatch(userId, targetName);
+        void emailMatch(target_user_id, likerName);
       }
     } else {
       // Not a match yet - notify the target user they received a like
