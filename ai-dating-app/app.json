@@ -24,7 +24,7 @@
         "aps-environment": "production"
       },
       "bundleIdentifier": "app.gflag.greenflag",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "GreenFlag needs your location to suggest nearby matches and verify your city.",
         "NSCameraUsageDescription": "GreenFlag needs camera access to take profile photos.",
