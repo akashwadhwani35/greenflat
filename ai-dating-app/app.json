@@ -20,7 +20,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "app.gflag.greenflag",
-      "buildNumber": "5",
+      "buildNumber": "6",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "GreenFlag needs your location to suggest nearby matches and verify your city.",
         "NSCameraUsageDescription": "GreenFlag needs camera access to take profile photos.",
@@ -32,7 +32,7 @@
     "android": {
       "package": "app.gflag.greenflag",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ADFF1A"

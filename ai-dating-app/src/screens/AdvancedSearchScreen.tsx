@@ -160,6 +160,12 @@ const EDUCATION_OPTIONS: Option[] = [
 // Per the board. Free: gender, age, distance, religion, children, smoking,
 // drinking, marijuana, drugs. Dating intention (what someone is looking for)
 // is an advanced filter, round-4 feedback.
+/**
+ * "Personality snapshot" — the top traits shown on a profile — is free, round-15.
+ * The other four quiz facets are still a paid filter.
+ */
+const FREE_FACETS = new Set<MultiKey>(['personality_traits']);
+
 const PAID_FILTER_KEYS: Array<keyof AdvancedFilters> = [
   'relationship_goal',
   'ethnicity',
@@ -167,7 +173,6 @@ const PAID_FILTER_KEYS: Array<keyof AdvancedFilters> = [
   'maxHeight',
   'politics',
   'education_level',
-  'personality_traits',
   'communication_style',
   'relationship_needs',
   'conflict_style',
@@ -470,7 +475,7 @@ export const AdvancedSearchScreen: React.FC<Props> = ({
 
           {FACETS.map((facet) =>
             vocab?.[facet.key]?.length
-              ? <React.Fragment key={facet.key}>{renderMulti(facet.title, facet.key, vocab[facet.key].map((label) => ({ value: label, label })), true)}</React.Fragment>
+              ? <React.Fragment key={facet.key}>{renderMulti(facet.title, facet.key, vocab[facet.key].map((label) => ({ value: label, label })), !FREE_FACETS.has(facet.key))}</React.Fragment>
               : null
           )}
         </Section>

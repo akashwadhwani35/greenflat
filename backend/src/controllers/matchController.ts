@@ -306,7 +306,8 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
       'maxHeight',
       'politics',
       'education_level',
-      'personality_traits',
+      // personality_traits is the "personality snapshot" shown on a profile.
+      // Free from round-15; the other four quiz facets stay paid.
       'communication_style',
       'relationship_needs',
       'conflict_style',
