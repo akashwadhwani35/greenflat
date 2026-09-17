@@ -6,6 +6,8 @@ import {
   getRevenueAnalytics, getTokenAnalytics, getEngagementAnalytics, getGrowthAnalytics,
   grantRemoveTokens, grantSubscription, toggleShadowBan,
   getSupportMessages,
+  getDemographics,
+  getActivityAnalytics,
   updateSupportMessage,
 } from '../controllers/adminController';
 
@@ -29,6 +31,8 @@ router.get('/analytics/revenue', getRevenueAnalytics);
 router.get('/analytics/tokens', getTokenAnalytics);
 router.get('/analytics/engagement', getEngagementAnalytics);
 router.get('/analytics/growth', getGrowthAnalytics);
+router.get('/analytics/demographics', getDemographics);
+router.get('/analytics/activity', getActivityAnalytics);
 
 // User management
 router.post('/users/:userId/tokens', grantRemoveTokens);

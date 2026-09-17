@@ -795,3 +795,177 @@ export const getUserDetail = async (req: AuthRequest, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch user detail' });
   }
 };
+
+// ─── DASHBOARD: DEMOGRAPHICS AND ACTIVITY ───────────────────────────────────
+//
+// The four analytics endpoints above answer "is the business working". These
+// two answer "who is here and what are they doing", which is what the web
+// dashboard leads with. Each query is guarded on its own so one failing
+// aggregate degrades a single card rather than blanking the whole page.
+
+export const getDemographics = async (req: AuthRequest, res: Response) => {
+  const data: any = {
+    by_gender: [],
+    by_interested_in: [],
+    by_age_band: [],
+    top_cities: [],
+    top_countries: [],
+    verified: 0,
+    premium: 0,
+    banned: 0,
+    with_photos: 0,
+    completed_onboarding: 0,
+    total: 0,
+  };
+
+  try {
+    const r = await pool.query(
+      `SELECT gender, COUNT(*)::int AS count FROM users GROUP BY gender ORDER BY count DESC`
+    );
+    data.by_gender = r.rows;
+  } catch (e) {
+    console.warn('Demographics gender query failed:', (e as Error).message);
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT interested_in, COUNT(*)::int AS count FROM users GROUP BY interested_in ORDER BY count DESC`
+    );
+    data.by_interested_in = r.rows;
+  } catch (e) {
+    console.warn('Demographics interested_in query failed:', (e as Error).message);
+  }
+
+  try {
+    // Bands match how the product talks about its audience, not even decades.
+    const r = await pool.query(
+      `SELECT band, COUNT(*)::int AS count FROM (
+         SELECT CASE
+           WHEN age < 25 THEN '18-24'
+           WHEN age < 35 THEN '25-34'
+           WHEN age < 45 THEN '35-44'
+           ELSE '45+'
+         END AS band
+         FROM (
+           SELECT date_part('year', age(date_of_birth))::int AS age FROM users
+         ) a
+       ) b
+       GROUP BY band ORDER BY band`
+    );
+    data.by_age_band = r.rows;
+  } catch (e) {
+    console.warn('Demographics age query failed:', (e as Error).message);
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT city, COUNT(*)::int AS count FROM users
+       WHERE city IS NOT NULL AND city <> ''
+       GROUP BY city ORDER BY count DESC, city ASC LIMIT 12`
+    );
+    data.top_cities = r.rows;
+  } catch (e) {
+    console.warn('Demographics city query failed:', (e as Error).message);
+  }
+
+  try {
+    // country is NULL for accounts created before migration 031.
+    const r = await pool.query(
+      `SELECT COALESCE(country, 'Unknown') AS country, COUNT(*)::int AS count
+       FROM users GROUP BY COALESCE(country, 'Unknown') ORDER BY count DESC LIMIT 12`
+    );
+    data.top_countries = r.rows;
+  } catch (e) {
+    console.warn('Demographics country query failed:', (e as Error).message);
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT
+         COUNT(*)::int AS total,
+         COUNT(*) FILTER (WHERE is_verified)::int AS verified,
+         COUNT(*) FILTER (WHERE is_premium)::int AS premium,
+         COUNT(*) FILTER (WHERE is_banned)::int AS banned,
+         COUNT(*) FILTER (WHERE onboarding_completed_at IS NOT NULL)::int AS completed_onboarding,
+         (SELECT COUNT(DISTINCT user_id)::int FROM photos) AS with_photos
+       FROM users`
+    );
+    Object.assign(data, r.rows[0]);
+  } catch (e) {
+    console.warn('Demographics totals query failed:', (e as Error).message);
+  }
+
+  res.json(data);
+};
+
+export const getActivityAnalytics = async (req: AuthRequest, res: Response) => {
+  const days = Math.min(90, Math.max(7, Number(req.query.days) || 30));
+  const data: any = {
+    days,
+    swipes_total: 0,
+    green_flags: 0,
+    first_moves: 0,
+    on_grid: 0,
+    off_grid: 0,
+    matches_total: 0,
+    messages_total: 0,
+    purchases_total: 0,
+    by_day: [],
+  };
+
+  try {
+    // A "swipe" here is a recorded like. Passes are not persisted, so this is
+    // outbound interest, not every card the user saw.
+    const r = await pool.query(
+      `SELECT
+         COUNT(*)::int AS swipes_total,
+         COUNT(*) FILTER (WHERE is_superlike)::int AS green_flags,
+         COUNT(*) FILTER (WHERE is_compliment)::int AS first_moves,
+         COUNT(*) FILTER (WHERE is_on_grid)::int AS on_grid,
+         COUNT(*) FILTER (WHERE NOT is_on_grid)::int AS off_grid
+       FROM likes`
+    );
+    Object.assign(data, r.rows[0]);
+  } catch (e) {
+    console.warn('Activity likes query failed:', (e as Error).message);
+  }
+
+  try {
+    const r = await pool.query(
+      `SELECT
+         (SELECT COUNT(*)::int FROM matches)          AS matches_total,
+         (SELECT COUNT(*)::int FROM messages)         AS messages_total,
+         (SELECT COUNT(*)::int FROM token_purchases)  AS purchases_total`
+    );
+    Object.assign(data, r.rows[0]);
+  } catch (e) {
+    console.warn('Activity totals query failed:', (e as Error).message);
+  }
+
+  try {
+    // One row per day across the window, zero-filled, so the chart has no gaps
+    // on quiet days.
+    const r = await pool.query(
+      `WITH span AS (
+         SELECT generate_series(CURRENT_DATE - ($1::int - 1), CURRENT_DATE, '1 day')::date AS day
+       )
+       SELECT
+         s.day,
+         (SELECT COUNT(*)::int FROM users u           WHERE u.created_at::date = s.day) AS signups,
+         (SELECT COUNT(*)::int FROM likes l           WHERE l.created_at::date = s.day) AS swipes,
+         (SELECT COUNT(*)::int FROM matches m         WHERE m.created_at::date = s.day) AS matches,
+         (SELECT COUNT(*)::int FROM messages g        WHERE g.created_at::date = s.day) AS messages,
+         (SELECT COUNT(*)::int FROM token_purchases p WHERE p.created_at::date = s.day) AS purchases,
+         (SELECT COALESCE(SUM(p.amount_cents), 0)::int FROM token_purchases p
+            WHERE p.created_at::date = s.day) AS revenue_cents
+       FROM span s
+       ORDER BY s.day ASC`,
+      [days]
+    );
+    data.by_day = r.rows;
+  } catch (e) {
+    console.warn('Activity by-day query failed:', (e as Error).message);
+  }
+
+  res.json(data);
+};
