@@ -953,7 +953,7 @@ export const getActivityAnalytics = async (req: AuthRequest, res: Response) => {
          s.day,
          (SELECT COUNT(*)::int FROM users u           WHERE u.created_at::date = s.day) AS signups,
          (SELECT COUNT(*)::int FROM likes l           WHERE l.created_at::date = s.day) AS swipes,
-         (SELECT COUNT(*)::int FROM matches m         WHERE m.created_at::date = s.day) AS matches,
+         (SELECT COUNT(*)::int FROM matches m         WHERE m.matched_at::date = s.day) AS matches,
          (SELECT COUNT(*)::int FROM messages g        WHERE g.created_at::date = s.day) AS messages,
          (SELECT COUNT(*)::int FROM token_purchases p WHERE p.created_at::date = s.day) AS purchases,
          (SELECT COALESCE(SUM(p.amount_cents), 0)::int FROM token_purchases p
