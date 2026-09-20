@@ -164,6 +164,15 @@
   .photos img{width:104px;height:138px;object-fit:cover;border-radius:9px;border:1px solid var(--line);
     background:var(--panel);display:block}
   .photos figcaption{font-size:10.5px;color:var(--ink-3);margin-top:5px;text-align:center}
+  /* conversation tiles: one per person, rather than one merged stream */
+  .convos{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+  .convo{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 13px;
+    cursor:pointer;font-family:var(--sans);color:var(--ink);text-align:left}
+  .convo:hover{border-color:var(--neon-dim)}
+  .convo.on{border-color:var(--neon);background:var(--neon-ghost)}
+  .convo b{display:block;font-size:13.5px;font-weight:700}
+  .convo .cmeta{display:block;font-size:10.5px;color:var(--ink-3);font-family:var(--mono);margin-top:2px}
+  .msg audio{display:block;margin-top:5px;height:32px;max-width:230px}
   .chat{display:flex;flex-direction:column;gap:7px;max-height:360px;overflow-y:auto;
     border:1px solid var(--line);border-radius:11px;padding:14px;background:var(--panel)}
   .msg{max-width:74%;padding:8px 12px;border-radius:12px;font-size:13.5px;line-height:1.45}
@@ -567,13 +576,32 @@
         '<figcaption>'+esc(v.face_status||"unverified")+"</figcaption></figure></div></div>"
       : '<p class="empty">No verification selfie submitted.</p>';
 
-    var msgs = (d.messages||[]).slice().reverse().map(function (m) {
-      var out = m.sender_id === u.id;
-      var body = m.message_type === "image"
-        ? '<img src="'+esc(m.content)+'" alt="" loading="lazy">'
-        : esc(m.content);
-      return '<div class="msg '+(out?"out":"in")+'"><span class="who">'+esc(m.sender_name)+" · "+when(m.created_at)+"</span>"+body+"</div>";
-    }).join("") || '<p class="empty">No messages.</p>';
+    // Group into conversations. A flat stream of everyone's messages mixed
+    // together is unreadable once someone has talked to more than one person.
+    var convos = {};
+    (d.messages || []).forEach(function (m) {
+      var k = m.match_id;
+      if (!convos[k]) {
+        convos[k] = { id: k, other: "", otherId: null, msgs: [], last: m.created_at };
+      }
+      if (!convos[k].other) {
+        convos[k].other = m.sender_id === u.id ? (m.recipient_name || "—") : (m.sender_name || "—");
+        convos[k].otherId = m.sender_id === u.id ? m.recipient_id : m.sender_id;
+      }
+      convos[k].msgs.push(m);
+      if (m.created_at > convos[k].last) convos[k].last = m.created_at;
+    });
+    var convoList = Object.keys(convos).map(function (k) { return convos[k]; })
+      .sort(function (a, b) { return a.last < b.last ? 1 : -1; });
+
+    var convoTiles = convoList.length
+      ? '<div class="convos">' + convoList.map(function (c) {
+          return '<button class="convo" data-convo="' + c.id + '" type="button">' +
+                 '<b>' + esc(c.other) + "</b>" +
+                 '<span class="cmeta">' + c.msgs.length + " msg" + (c.msgs.length > 1 ? "s" : "") +
+                 " · " + date(c.last) + "</span></button>";
+        }).join("") + "</div><div id=\"convoChat\"></div>"
+      : '<p class="empty">No messages.</p>';
 
     var ledger = (d.credit_ledger||[]).slice(0,25).map(function (t) {
       return "<tr><td>"+esc(tc(t.reason))+'</td><td><span class="pill '+(t.direction==="credit"?"ok":"mut")+'">'+
@@ -597,6 +625,7 @@
           '<button class="ghost sm" data-act="shadow" type="button">'+(u.is_shadow_banned?"Un-shadow-ban":"Shadow-ban")+"</button>"+
           '<button class="ghost sm" data-act="tokens" type="button">Grant tokens</button>'+
           '<button class="ghost sm" data-act="plan" type="button">Grant plan</button>'+
+          '<button class="ghost sm danger" data-act="delete" type="button">Delete</button>'+
         "</div></div>"+
 
         '<div class="dbody">'+
@@ -642,7 +671,7 @@
             "<div><span>Blocks made</span>"+num((d.blocks||[]).length)+"</div>"+
           "</div></div>"+
 
-          '<div class="dsec"><h4>Messages</h4><div class="chat">'+msgs+"</div></div>"+
+          '<div class="dsec"><h4>Conversations</h4>'+convoTiles+"</div>"+
 
           '<div class="dsec"><h4>Token ledger</h4><div class="tw"><table>'+
             (ledger ? "<thead><tr><th>Reason</th><th>Direction</th><th>Amount</th><th>When</th></tr></thead><tbody>"+ledger+"</tbody>"
@@ -663,6 +692,30 @@
     $("drawer").querySelectorAll("[data-act]").forEach(function (btn) {
       btn.addEventListener("click", function () { userAction(btn.getAttribute("data-act"), u); });
     });
+
+    function showConvo(c, btn) {
+      $("drawer").querySelectorAll(".convo").forEach(function (x) { x.classList.toggle("on", x === btn); });
+      var body = c.msgs.slice().reverse().map(function (m) {
+        var out = m.sender_id === u.id;
+        var content = m.message_type === "image"
+          ? '<img src="' + esc(m.content) + '" alt="" loading="lazy">'
+          : /^https?:\/\/\S+\.(mp3|m4a|wav|aac)$/i.test(m.content)
+            ? '<audio controls preload="none" src="' + esc(m.content) + '"></audio>'
+            : esc(m.content);
+        return '<div class="msg ' + (out ? "out" : "in") + '"><span class="who">' +
+               esc(m.sender_name) + " \u00b7 " + when(m.created_at) + "</span>" + content + "</div>";
+      }).join("");
+      $("convoChat").innerHTML = '<div class="chat">' + body + "</div>";
+    }
+
+    var tiles = $("drawer").querySelectorAll(".convo");
+    tiles.forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var c = convoList.filter(function (x) { return String(x.id) === btn.getAttribute("data-convo"); })[0];
+        if (c) showConvo(c, btn);
+      });
+    });
+    if (tiles.length) tiles[0].click();
   }
 
   function userAction(act, u) {
@@ -684,6 +737,19 @@
           { method:"POST", body:{ amount: Math.abs(n), action: n > 0 ? "grant" : "remove" } })
         .then(function(){ openUser(u.id); })
         .catch(function(e){ alert(e.message); });
+    } else if (act === "delete") {
+      var typed = prompt(
+        "This permanently deletes " + u.name + " and everything attached to that account \u2014 " +
+        "photos, matches, messages, purchases. It cannot be undone.\n\n" +
+        "Type the member's name to confirm:");
+      if (typed === null) return;
+      if (typed.trim().toLowerCase() !== String(u.name).trim().toLowerCase()) {
+        alert("That didn't match the name. Nothing was deleted.");
+        return;
+      }
+      req("/admin/users/" + u.id, { method: "DELETE" })
+        .then(function () { closeDrawer(); loadUsers(); loadOverview(); })
+        .catch(function (e) { alert(e.message); });
     } else if (act === "plan") {
       var plan = prompt("Which plan — pro or premium?", "pro");
       if (!plan) return;

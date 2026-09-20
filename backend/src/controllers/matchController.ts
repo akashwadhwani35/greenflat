@@ -443,6 +443,13 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
           -- signup funnel both create the user first), and an un-onboarded one
           -- still carries placeholder name/city/date-of-birth. Never show those.
           AND u.onboarding_completed_at IS NOT NULL
+          -- A banned account cannot sign in, but nothing here used to stop its
+          -- profile being recommended to everyone else, so moderation looked
+          -- like it had done nothing. Shadow ban is the quieter version: the
+          -- account keeps working and can still talk to existing matches, but
+          -- it stops being shown to anyone new.
+          AND u.is_banned = FALSE
+          AND u.is_shadow_banned = FALSE
       `;
 
       const requestedInterestedIn =

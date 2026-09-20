@@ -969,3 +969,42 @@ export const getActivityAnalytics = async (req: AuthRequest, res: Response) => {
 
   res.json(data);
 };
+
+/**
+ * Permanently delete a member.
+ *
+ * Every table that references users does so ON DELETE CASCADE, so one statement
+ * removes the profile, photos, likes, matches, messages, ledger and reports
+ * with it. There is no undo and no soft-delete column to fall back on, which is
+ * why banning is the reversible option and this is not.
+ *
+ * Admins cannot be deleted through here, and an admin cannot delete themselves:
+ * both are far more likely to be a misclick than an intention.
+ */
+export const deleteUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const targetUserId = Number(req.params.userId);
+    if (!Number.isInteger(targetUserId)) {
+      return res.status(400).json({ error: 'A numeric user id is required' });
+    }
+    if (targetUserId === req.userId) {
+      return res.status(400).json({ error: 'You cannot delete your own account from here' });
+    }
+
+    const target = await pool.query('SELECT id, name, email, is_admin FROM users WHERE id = $1', [targetUserId]);
+    if (target.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (target.rows[0].is_admin) {
+      return res.status(400).json({ error: 'Remove admin access before deleting this account' });
+    }
+
+    await pool.query('DELETE FROM users WHERE id = $1', [targetUserId]);
+    console.log(`Admin ${req.userId} deleted user ${targetUserId} (${target.rows[0].email})`);
+
+    res.json({ message: 'Account deleted', user: { id: targetUserId, name: target.rows[0].name } });
+  } catch (error) {
+    console.error('Admin deleteUser error:', error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+};

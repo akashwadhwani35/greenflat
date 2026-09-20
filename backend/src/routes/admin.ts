@@ -8,6 +8,7 @@ import {
   getSupportMessages,
   getDemographics,
   getActivityAnalytics,
+  deleteUser,
   updateSupportMessage,
 } from '../controllers/adminController';
 
@@ -25,6 +26,7 @@ router.get('/users', getUsers);
 // Everything about one account, for moderating a report.
 router.get('/users/:userId/detail', getUserDetail);
 router.post('/users/:userId/ban', toggleBan);
+router.delete('/users/:userId', deleteUser);
 
 // Analytics
 router.get('/analytics/revenue', getRevenueAnalytics);
