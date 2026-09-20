@@ -1114,7 +1114,8 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
         pr.personality_traits,
         pr.personality_summary,
         pr.compatibility_tips,
-        pr.top_traits
+        pr.top_traits,
+        u.is_banned
       FROM users u
       LEFT JOIN user_profiles p ON u.id = p.user_id
       LEFT JOIN personality_responses pr ON u.id = pr.user_id
@@ -1124,6 +1125,13 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
     );
 
     if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // A banned account is gone as far as everyone else is concerned, so an old
+    // link or a cached card must not still open its profile. 404 rather than
+    // 403: whether the account was banned is nobody else's business.
+    if (result.rows[0].is_banned) {
       return res.status(404).json({ error: 'User not found' });
     }
 

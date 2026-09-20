@@ -77,7 +77,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
 
     // Get current user
     const userResult = await client.query(
-      'SELECT gender, is_premium, cooldown_enabled FROM users WHERE id = $1',
+      'SELECT gender, is_premium, cooldown_enabled, is_shadow_banned FROM users WHERE id = $1',
       [userId]
     );
 
@@ -87,6 +87,26 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
     }
 
     const user = userResult.rows[0];
+
+    /**
+     * Shadow ban. The point is that it is quiet: the tap is accepted and the
+     * UI behaves normally, but no like row is written, no match can form and
+     * nobody is notified.
+     *
+     * This returns before checkAndResetLimits and before any token is spent,
+     * so a shadow-banned account is never charged for a Green Flag that was
+     * dropped on the floor. It reports a match as impossible rather than
+     * merely absent, because one genuinely cannot happen.
+     */
+    if (user.is_shadow_banned) {
+      await client.query('ROLLBACK');
+      return res.json({
+        message: is_superlike ? 'Green Flag sent!' : 'Profile liked successfully',
+        is_match: false,
+        match_id: null,
+        is_superlike: Boolean(is_superlike),
+      });
+    }
 
     // Check and reset limits if needed
     const limits = await checkAndResetLimits(userId, client);
@@ -521,6 +541,19 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     }
 
     await client.query('BEGIN');
+
+    // Same quiet treatment as a like: accepted, unwritten, unpaid for. Checked
+    // before the six tokens are taken.
+    const actor = await client.query('SELECT is_shadow_banned, credit_balance FROM users WHERE id = $1', [userId]);
+    if (actor.rows[0]?.is_shadow_banned) {
+      await client.query('ROLLBACK');
+      return res.json({
+        message: 'First Move sent',
+        credit_balance: actor.rows[0].credit_balance,
+        match_id: null,
+        match_status: 'pending',
+      });
+    }
 
     const targetUserResult = await client.query('SELECT id, name FROM users WHERE id = $1', [target_user_id]);
     if (targetUserResult.rows.length === 0) {

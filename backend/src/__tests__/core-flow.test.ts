@@ -1624,6 +1624,80 @@ describe('GreenFlag backend core flow', () => {
     expect(returnedIds).not.toContain(complete.body.user.id);
   });
 
+  it('keeps banned and shadow-banned accounts out of discovery', async () => {
+    const seeker = await signupAndCompleteProfile({
+      email: `modseeker_${Date.now()}@example.com`,
+      name: 'Mod Seeker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const banned = await signupAndCompleteProfile({
+      email: `banned_${Date.now()}@example.com`,
+      name: 'Banned',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const shadowed = await signupAndCompleteProfile({
+      email: `shadowed_${Date.now()}@example.com`,
+      name: 'Shadowed',
+      gender: 'female',
+      interested_in: 'male',
+    });
+
+    await pool.query('UPDATE users SET is_banned = TRUE WHERE id = $1', [banned.userId]);
+    await pool.query('UPDATE users SET is_shadow_banned = TRUE WHERE id = $1', [shadowed.userId]);
+
+    const search = await agent
+      .post('/api/matches/search')
+      .set('Authorization', `Bearer ${seeker.token}`)
+      .send({ search_query: '', is_on_grid: true });
+    expect(search.status).toBe(200);
+
+    const returnedIds = [
+      ...(search.body.on_grid || []),
+      ...(search.body.off_grid || []),
+    ].map((candidate: any) => candidate.id);
+    expect(returnedIds).not.toContain(banned.userId);
+    expect(returnedIds).not.toContain(shadowed.userId);
+  });
+
+  it('accepts a shadow-banned like but writes nothing and charges nothing', async () => {
+    const shadowed = await signupAndCompleteProfile({
+      email: `shadowliker_${Date.now()}@example.com`,
+      name: 'Shadow Liker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const target = await signupAndCompleteProfile({
+      email: `shadowtarget_${Date.now()}@example.com`,
+      name: 'Shadow Target',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    await pool.query('UPDATE users SET is_shadow_banned = TRUE WHERE id = $1', [shadowed.userId]);
+
+    const before = await pool.query('SELECT credit_balance FROM users WHERE id = $1', [shadowed.userId]);
+
+    // A Green Flag costs tokens, so this proves the no-op happens before the charge.
+    const res = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${shadowed.token}`)
+      .send({ target_user_id: target.userId, is_on_grid: true, is_superlike: true });
+
+    // The caller is told it worked - that is the whole point of a shadow ban.
+    expect(res.status).toBe(200);
+    expect(res.body.is_match).toBe(false);
+
+    const likes = await pool.query(
+      'SELECT id FROM likes WHERE liker_id = $1 AND liked_id = $2',
+      [shadowed.userId, target.userId]
+    );
+    expect(likes.rows).toHaveLength(0);
+
+    const after = await pool.query('SELECT credit_balance FROM users WHERE id = $1', [shadowed.userId]);
+    expect(after.rows[0].credit_balance).toBe(before.rows[0].credit_balance);
+  });
+
   it('rejects local media payloads and accepts secure hosted media URLs', async () => {
     const userA = await signupAndCompleteProfile({
       email: `media_a_${Date.now()}@example.com`,
