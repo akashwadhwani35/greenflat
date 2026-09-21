@@ -648,11 +648,14 @@
 
           '<div class="dsec"><h4>Verification</h4><div class="kv" style="margin-bottom:14px">'+
             "<div><span>Face</span>"+esc(v.face_status||"unverified")+"</div>"+
-            "<div><span>OTP</span>"+(v.otp_verified?"yes":"no")+"</div>"+
-            "<div><span>Email</span>"+(v.email_verified?"yes":"no")+"</div>"+
-            "<div><span>Age</span>"+(v.age_verified?"yes":"no")+"</div>"+
-            "<div><span>Location</span>"+(v.location_verified?esc(v.location_city||"yes"):"no")+"</div>"+
-            "<div><span>Phone</span>"+esc(v.phone||"—")+"</div>"+
+            // These are yes/no checks, not the values themselves - the address
+            // and number are shown alongside so the row is not ambiguous.
+            "<div><span>Email address</span>"+esc(v.email||u.email||"—")+"</div>"+
+            "<div><span>Email verified</span>"+(v.email_verified?"yes":"no")+"</div>"+
+            "<div><span>Phone number</span>"+esc(v.phone||"—")+"</div>"+
+            "<div><span>Phone verified (OTP)</span>"+(v.otp_verified?"yes":"no")+"</div>"+
+            "<div><span>Age verified</span>"+(v.age_verified?"yes":"no")+"</div>"+
+            "<div><span>Location</span>"+(v.location_verified?esc(v.location_city||"yes"):esc(v.location_city||"no"))+"</div>"+
           "</div>"+selfie+"</div>"+
 
           '<div class="dsec"><h4>About</h4><div class="kv">'+
