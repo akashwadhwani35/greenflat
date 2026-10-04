@@ -1617,10 +1617,9 @@ describe('GreenFlag backend core flow', () => {
       .send({ search_query: '', is_on_grid: true });
     expect(search.status).toBe(200);
 
-    const returnedIds = [
-      ...(search.body.on_grid || []),
-      ...(search.body.off_grid || []),
-    ].map((candidate: any) => candidate.id);
+    // `matches` is the response key. This read on_grid/off_grid before, which
+    // do not exist, so the assertions below could never fail.
+    const returnedIds = (search.body.matches || []).map((candidate: any) => candidate.id);
     expect(returnedIds).not.toContain(complete.body.user.id);
   });
 
@@ -1696,6 +1695,82 @@ describe('GreenFlag backend core flow', () => {
 
     const after = await pool.query('SELECT credit_balance FROM users WHERE id = $1', [shadowed.userId]);
     expect(after.rows[0].credit_balance).toBe(before.rows[0].credit_balance);
+  });
+
+  it('keeps demo accounts and real accounts invisible to each other', async () => {
+    const real = await signupAndCompleteProfile({
+      email: `realseeker_${Date.now()}@example.com`,
+      name: 'Real Seeker',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const realWoman = await signupAndCompleteProfile({
+      email: `realwoman_${Date.now()}@example.com`,
+      name: 'Real Woman',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    const demoMan = await signupAndCompleteProfile({
+      email: `demoman_${Date.now()}@example.com`,
+      name: 'Demo Man',
+      gender: 'male',
+      interested_in: 'female',
+    });
+    const demoWoman = await signupAndCompleteProfile({
+      email: `demowoman_${Date.now()}@example.com`,
+      name: 'Demo Woman',
+      gender: 'female',
+      interested_in: 'male',
+    });
+    await pool.query('UPDATE users SET is_demo = TRUE WHERE id IN ($1, $2)', [demoMan.userId, demoWoman.userId]);
+
+    const idsFor = async (token: string) => {
+      const search = await agent
+        .post('/api/matches/search')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ search_query: '', is_on_grid: false });
+      expect(search.status).toBe(200);
+      return (search.body.matches || []).map((c: any) => c.id);
+    };
+
+    const realSees = await idsFor(real.token);
+    expect(realSees).toContain(realWoman.userId);
+    expect(realSees).not.toContain(demoWoman.userId);
+
+    const demoSees = await idsFor(demoMan.token);
+    expect(demoSees).toContain(demoWoman.userId);
+    expect(demoSees).not.toContain(realWoman.userId);
+
+    // Neither side can open, like or First-Move across the wall, even by id.
+    const open = await agent
+      .get(`/api/matches/user/${demoWoman.userId}`)
+      .set('Authorization', `Bearer ${real.token}`);
+    expect(open.status).toBe(404);
+
+    const like = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${demoMan.token}`)
+      .send({ target_user_id: realWoman.userId, is_on_grid: true });
+    expect(like.status).toBe(404);
+
+    const firstMove = await agent
+      .post('/api/likes/compliment')
+      .set('Authorization', `Bearer ${real.token}`)
+      .send({ target_user_id: demoWoman.userId, content: 'Hi there, loved your profile' });
+    expect(firstMove.status).toBe(404);
+
+    const crossLikes = await pool.query(
+      'SELECT id FROM likes WHERE (liker_id = $1 AND liked_id = $2) OR (liker_id = $3 AND liked_id = $4)',
+      [demoMan.userId, realWoman.userId, real.userId, demoWoman.userId]
+    );
+    expect(crossLikes.rows).toHaveLength(0);
+
+    // Inside the demo world everything still works.
+    const demoLike = await agent
+      .post('/api/likes')
+      .set('Authorization', `Bearer ${demoMan.token}`)
+      .send({ target_user_id: demoWoman.userId, is_on_grid: true });
+    expect(demoLike.status).toBe(200);
   });
 
   it('rejects local media payloads and accepts secure hosted media URLs', async () => {

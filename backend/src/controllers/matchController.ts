@@ -8,6 +8,7 @@ import { SearchFilters } from '../types';
 import { parseSearchQuery, generateMatchReason, generateMatchNarrative, cosineSimilarity } from '../services/openai.service';
 import { consumeCredits, getCreditBalance, ensureDailyAllowance, refundCredits } from '../services/credits.service';
 import { checkExploreWindow } from '../services/boundaries.service';
+import { sameWorld } from '../services/demoWorld.service';
 
 // AI Match is the curated set. Anything the scorer puts under this is not a
 // recommendation worth making; it stays available to search and off-grid.
@@ -450,6 +451,8 @@ export const searchMatches = async (req: AuthRequest, res: Response) => {
           -- it stops being shown to anyone new.
           AND u.is_banned = FALSE
           AND u.is_shadow_banned = FALSE
+          -- Demo accounts and real ones never see each other (demoWorld.service).
+          AND u.is_demo = ${currentUser.is_demo === true ? 'TRUE' : 'FALSE'}
       `;
 
       const requestedInterestedIn =
@@ -997,7 +1000,7 @@ export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
     const userId = req.userId!;
 
     const userResult = await pool.query(
-      'SELECT is_premium, premium_expires_at FROM users WHERE id = $1',
+      'SELECT is_premium, premium_expires_at, is_demo FROM users WHERE id = $1',
       [userId]
     );
     const user = userResult.rows[0];
@@ -1063,6 +1066,7 @@ export const rewindOffGrid = async (req: AuthRequest, res: Response) => {
          AND blocked_rel.unblocked_at IS NULL
        WHERE u.id IN (${idPlaceholders})
          AND u.is_banned = FALSE
+         AND u.is_demo = ${user.is_demo === true ? 'TRUE' : 'FALSE'}
          AND u.onboarding_completed_at IS NOT NULL
          AND blocked_rel.id IS NULL`,
       [userId, ...ids]
@@ -1132,6 +1136,10 @@ export const getUserDetails = async (req: AuthRequest, res: Response) => {
     // link or a cached card must not still open its profile. 404 rather than
     // 403: whether the account was banned is nobody else's business.
     if (result.rows[0].is_banned) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (!(await sameWorld(userId, targetUserId))) {
       return res.status(404).json({ error: 'User not found' });
     }
 

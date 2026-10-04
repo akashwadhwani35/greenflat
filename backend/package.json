@@ -14,7 +14,8 @@
     "cleanup:demo-profiles": "ts-node src/scripts/purgeDemoProfiles.ts",
     "seed:demo": "ts-node src/scripts/seedDemoProfiles.ts",
     "test:email": "ts-node src/scripts/testEmail.ts",
-    "seed:bulk": "ts-node src/scripts/seedBulkDemo.ts"
+    "seed:bulk": "ts-node src/scripts/seedBulkDemo.ts",
+    "seed:marketing": "ts-node src/scripts/seedMarketingDemo.ts"
   },
   "keywords": [],
   "author": "",

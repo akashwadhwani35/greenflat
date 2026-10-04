@@ -61,7 +61,7 @@ export const sidekick = async (req: AuthRequest, res: Response) => {
       .slice(-16);
 
     const userResult = await pool.query(
-      `SELECT u.name, u.city, u.gender, u.interested_in, u.is_premium,
+      `SELECT u.name, u.city, u.gender, u.interested_in, u.is_premium, u.is_demo,
               p.interests, p.relationship_goal,
               pr.personality_summary, pr.top_traits
        FROM users u
@@ -88,6 +88,7 @@ export const sidekick = async (req: AuthRequest, res: Response) => {
          AND u.gender = $2
          AND u.city = $3
          AND u.onboarding_completed_at IS NOT NULL
+         AND u.is_demo = ${user.is_demo === true ? 'TRUE' : 'FALSE'}
          AND u.id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = $1 AND unblocked_at IS NULL)
          AND u.id NOT IN (SELECT blocker_id FROM blocks WHERE blocked_id = $1 AND unblocked_at IS NULL)
        ORDER BY u.created_at DESC

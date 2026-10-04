@@ -14,6 +14,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import pool from '../config/database';
+import { sameWorld } from '../services/demoWorld.service';
 
 const isPremiumNow = (user: { is_premium?: boolean; premium_expires_at?: Date | string | null }) => {
   if (!user?.is_premium) return false;
@@ -52,7 +53,11 @@ export const createBookmark = async (req: AuthRequest, res: Response) => {
       'SELECT id, onboarding_completed_at FROM users WHERE id = $1 AND is_banned = FALSE',
       [targetUserId]
     );
-    if (target.rows.length === 0 || !target.rows[0].onboarding_completed_at) {
+    if (
+      target.rows.length === 0 ||
+      !target.rows[0].onboarding_completed_at ||
+      !(await sameWorld(userId, targetUserId))
+    ) {
       return res.status(404).json({ error: 'Profile not found' });
     }
 

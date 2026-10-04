@@ -14,6 +14,7 @@ import {
   type IncomingKind,
   type ExploreWindow,
 } from '../services/boundaries.service';
+import { sameWorld } from '../services/demoWorld.service';
 import { getIO } from '../socket';
 
 // Badge counts on the tabs: tell the phone something changed so it refetches.
@@ -120,7 +121,7 @@ export const likeProfile = async (req: AuthRequest, res: Response) => {
       [target_user_id]
     );
 
-    if (targetUserResult.rows.length === 0) {
+    if (targetUserResult.rows.length === 0 || !(await sameWorld(userId, target_user_id, client))) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Target user not found' });
     }
@@ -556,7 +557,7 @@ export const sendCompliment = async (req: AuthRequest, res: Response) => {
     }
 
     const targetUserResult = await client.query('SELECT id, name FROM users WHERE id = $1', [target_user_id]);
-    if (targetUserResult.rows.length === 0) {
+    if (targetUserResult.rows.length === 0 || !(await sameWorld(userId, target_user_id, client))) {
       await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Target user not found' });
     }
