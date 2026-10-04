@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Copy package files and tsconfig
-COPY package*.json tsconfig.json ./
+COPY package*.json tsconfig.json tsconfig.scripts.json ./
 
 # Install dependencies
 RUN npm ci
@@ -14,6 +14,10 @@ COPY src ./src
 
 # Build TypeScript
 RUN npm run build
+
+# The marketing demo seeder runs as a one-off Cloud Run job from this image,
+# because that is the only place with a working path to the database.
+RUN npx tsc -p tsconfig.scripts.json
 
 # Production stage
 FROM node:20-alpine AS production
